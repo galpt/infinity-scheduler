@@ -61,7 +61,7 @@ DISTRO="CachyOS"
 check_root() { [[ $EUID -eq 0 ]] || die "Must be run as root (sudo)."; }
 
 cmd_status() {
-    echo "[Ii]nfinity-scheduler status"
+    echo "Infinity-scheduler status"
     echo "  Running kernel: $(uname -r)"
     echo "  Distro: $DISTRO"
     echo ""
@@ -72,12 +72,12 @@ cmd_status() {
     fi
     local INFINITY_kernels; INFINITY_kernels=$(ls /boot/vmlinuz-infinity-* 2>/dev/null | head -3)
     if [ -n "$INFINITY_kernels" ]; then
-        ok "[Ii]nfinity kernel(s) installed:"
+        ok "Infinity kernel(s) installed:"
         for f in $INFINITY_kernels; do
             echo "    $(basename "$f")"
         done
     else
-        warn "[Ii]nfinity kernel not installed"
+        warn "Infinity kernel not installed"
     fi
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
         if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
@@ -157,8 +157,8 @@ apply_patches() {
 
     # Commit patches to kernel git to keep the tree clean.
     git add -A 2>/dev/null
-    git commit -m "[Ii]nfinity-scheduler: apply INFINITY patches" \
-        --author "[Ii]nfinity Scheduler <INFINITY@localhost>" 2>/dev/null || true
+    git commit -m "Infinity-scheduler: apply Infinity patches" \
+        --author "Infinity Scheduler <infinity@localhost>" 2>/dev/null || true
 
     # Remove .git — prevents scripts/setlocalversion from detecting dirty
     # state and appending '-dirty'.  Without a git repo, setlocalversion
@@ -431,11 +431,11 @@ install_INFINITY_kernel() {
     fi
 
     if setup_limine_entry "$ver" "$cmdline"; then
-        ok "[Ii]nfinity kernel installed — Limine entry added."
+        ok "Infinity kernel installed — Limine entry added."
         echo ""
         echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the Limine menu."
     elif setup_grub_entry "$ver" "$cmdline"; then
-        ok "[Ii]nfinity kernel installed — GRUB entry added."
+        ok "Infinity kernel installed — GRUB entry added."
         echo ""
         echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the GRUB menu."
     else
@@ -457,7 +457,7 @@ setup_limine_entry() {
     done
     [ -z "$limine_conf" ] && return 1
 
-    local entry_title="[Ii]nfinity scheduler kernel ($ver)"
+    local entry_title="Infinity scheduler kernel ($ver)"
     local kernel_path="/vmlinuz-infinity-$ver"
     local initrd_path="/initramfs-infinity-$ver.img"
 
@@ -518,7 +518,7 @@ setup_grub_entry() {
     mkdir -p /boot/grub/custom
     local entry_file="/boot/grub/custom/infinity-scheduler.cfg"
     cat > "$entry_file" <<GRUB
-menuentry "[Ii]nfinity scheduler kernel ($ver)" {
+menuentry "Infinity scheduler kernel ($ver)" {
     linux /vmlinuz-infinity-$ver ${cmdline}
     initrd /initramfs-infinity-$ver.img
 }
@@ -586,7 +586,7 @@ cmd_remove() {
         update-grub 2>&1 | tail -5
     fi
 
-    ok "[Ii]nfinity kernel removed. Default $DISTRO kernel is still in place."
+    ok "Infinity kernel removed. Default $DISTRO kernel is still in place."
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
