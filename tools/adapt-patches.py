@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-adapt-patches.py — Adapt FLOW patches for different kernel versions.
+adapt-patches.py — Adapt Infinity patches for different kernel versions.
 
 Strategy: for each hunk, extract the first significant context line and
 search for it DIRECTLY in the target file.  This anchors the hunk at the
@@ -9,9 +9,9 @@ If the context line is not found, fall back to shifting by function position.
 
 Usage:
   python3 adapt-patches.py \
-    --source patches/stable/linux-7.0-flow/ \
-    --target /usr/src/linux-7.1 \
-    --output patches/stable/linux-7.1-flow/
+    --source patches/stable/linux-7.0.12-infinity/ \
+    --target /path/to/kernel-source \
+    --output patches/stable/linux-7.X-infinity/
 """
 
 import argparse

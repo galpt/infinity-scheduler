@@ -1,10 +1,6 @@
 # infinity-scheduler
 
-A CPU scheduler built on the Limitless concept: "No matter how many times someone divides a number it will never be reduced to zero."
-
-The more a task runs without sleeping, the faster its remaining budget is consumed — approaching zero asymptotically but never reaching it. Interactive tasks that sleep frequently reset this effect and naturally preempt CPU-bound tasks.
-
-Built into the kernel scheduler (CFS/EEVDF). Runs natively, no BPF or sched-ext dependency.
+A fair-share CPU scheduler with accelerating budget consumption — the more a task runs, the faster its budget depletes. Interactive tasks reset this effect on wakeup. Built into CFS/EEVDF, no BPF or sched-ext dependency.
 
 ## Project structure
 
@@ -26,7 +22,7 @@ Built into the kernel scheduler (CFS/EEVDF). Runs natively, no BPF or sched-ext 
 │   │   └── ...                     Future kernel versions
 │
 ├── tools/
-│   ├── install-flow-scheduler.sh   ★ One-command install (adopted from flow-scheduler)
+│   ├── install-infinity-scheduler.sh   ★ One-command install
 │   ├── build-kernel.sh             Standalone kernel build helper
 │   ├── adapt-patches.py            Auto-adapt patches for other kernel versions
 │   ├── fix-patch-format.py         Patch sanitization
@@ -46,7 +42,7 @@ Built into the kernel scheduler (CFS/EEVDF). Runs natively, no BPF or sched-ext 
 ```bash
 git clone https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
-sudo bash tools/install-flow-scheduler.sh
+sudo bash tools/install-infinity-scheduler.sh
 reboot
 ```
 
@@ -81,17 +77,17 @@ A task that has run for 20ms without sleeping: rate = 11x, budget depletes 11x f
 
 ## Feature comparison
 
-| Feature | scx_flow 3.1.0 | flow-scheduler | infinity-scheduler |
-|---|---|---|---|
-| Fair-share slice | Yes | Yes | Yes |
-| Budget model | Linear consumption | Linear consumption | **Accelerating (Limitless)** |
-| Explicit preemption | Budget-gated | Budget-gated | **None (physics)** |
-| Interactive floor | Yes | Yes | Yes |
-| Sleep cap (250ms) | Yes | Yes | Yes |
-| SMT halving | No | Yes | Yes |
-| NULL guard | N/A (BPF) | Yes | Yes |
-| Work stealing | Yes (BPF) | No | No |
-| RT-stall immunity | No | Yes | Yes |
+| Feature | scx_flow 3.1.0 | infinity-scheduler |
+|---|---|---|
+| Fair-share slice | Yes | Yes |
+| Budget model | Linear consumption | **Accelerating (Limitless)** |
+| Explicit preemption | Budget-gated | **None (physics)** |
+| Interactive floor | Yes | Yes |
+| Sleep cap (250ms) | Yes | Yes |
+| SMT halving | No | Yes |
+| NULL guard | N/A (BPF) | Yes |
+| Work stealing | Yes (BPF) | No |
+| RT-stall immunity | No | Yes |
 
 ## License
 

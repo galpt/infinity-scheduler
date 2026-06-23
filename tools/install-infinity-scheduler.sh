@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# install-flow-scheduler.sh — Build and install FLOW scheduler kernel as a
+# install-infinity-scheduler.sh — Build and install Infinity scheduler kernel as a
 # separate GRUB entry.  NEVER replaces the running kernel.  The CachyOS
 # kernel stays as the default boot option.
 #
 # Usage:
-#   sudo bash install-flow-scheduler.sh                         # build + install (auto-detect kernel)
-#   sudo bash install-flow-scheduler.sh 7.1                     # build for kernel 7.1
-#   sudo bash install-flow-scheduler.sh --remove                 # remove FLOW GRUB entry
-#   sudo bash install-flow-scheduler.sh --status                 # show current state
+#   sudo bash install-INFINITY-scheduler.sh                         # build + install (auto-detect kernel)
+#   sudo bash install-INFINITY-scheduler.sh 7.1                     # build for kernel 7.1
+#   sudo bash install-INFINITY-scheduler.sh --remove                 # remove INFINITY GRUB entry
+#   sudo bash install-INFINITY-scheduler.sh --status                 # show current state
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -21,25 +21,25 @@ err()   { echo -e "  ${RED}✗${NC} $*"; }
 die()   { err "$*"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FLOW_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+INFINITY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KERNEL_VER="${KERNEL_VER:-$(uname -r | grep -oP '^\d+\.\d+(\.\d+)?')}"
 
 # Use KERNEL_VER from env (user override) or detect from running kernel.
-# Example:  sudo KERNEL_VER=7.1 bash install-flow-scheduler.sh
+# Example:  sudo KERNEL_VER=7.1 bash install-INFINITY-scheduler.sh
 if [ -n "${1:-}" ] && [[ "$1" != "--"* ]]; then
     KERNEL_VER="$1"
 fi
 
-PATCH_DIR="$FLOW_DIR/patches/stable/linux-$KERNEL_VER-flow"
+PATCH_DIR="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
 if [ ! -d "$PATCH_DIR" ]; then
     # No patches for this exact version — find the closest available
     # by comparing major.minor version numbers.
     local_base="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
     BEST_DIST=999
     BEST_PATCH=""
-    for d in "$FLOW_DIR/patches/stable/"*; do
+    for d in "$INFINITY_DIR/patches/stable/"*; do
         [ -d "$d" ] || continue
-        v="$(basename "$d" | sed 's/linux-//;s/-flow//')"
+        v="$(basename "$d" | sed 's/linux-//;s/-INFINITY//')"
         d_major="$(echo "$v" | grep -oP '^\d+\.\d+')"
         # Squared Euclidean distance: (major_diff)^2 + (minor_diff)^2
         dist=$(( (${local_base%%.*} - ${d_major%%.*}) * (${local_base%%.*} - ${d_major%%.*}) \
@@ -47,21 +47,21 @@ if [ ! -d "$PATCH_DIR" ]; then
         [ "$dist" -lt "$BEST_DIST" ] && BEST_DIST=$dist && BEST_PATCH="$d"
     done
     if [ -z "$BEST_PATCH" ]; then
-        echo "No patches found in $FLOW_DIR/patches/stable/"
+        echo "No patches found in $INFINITY_DIR/patches/stable/"
         exit 1
     fi
     PATCH_DIR="$BEST_PATCH"
-    PATCH_VER="$(basename "$BEST_PATCH" | sed 's/linux-//;s/-flow//')"
+    PATCH_VER="$(basename "$BEST_PATCH" | sed 's/linux-//;s/-INFINITY//')"
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
-KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-flow}"
+KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
 DISTRO="CachyOS"
 
 
 check_root() { [[ $EUID -eq 0 ]] || die "Must be run as root (sudo)."; }
 
 cmd_status() {
-    echo "flow-scheduler status"
+    echo "[Ii]nfinity-scheduler status"
     echo "  Running kernel: $(uname -r)"
     echo "  Distro: $DISTRO"
     echo ""
@@ -70,23 +70,23 @@ cmd_status() {
     else
         warn "No patches for kernel $KERNEL_VER"
     fi
-    local flow_kernels; flow_kernels=$(ls /boot/vmlinuz-flow-* 2>/dev/null | head -3)
-    if [ -n "$flow_kernels" ]; then
-        ok "FLOW kernel(s) installed:"
-        for f in $flow_kernels; do
+    local INFINITY_kernels; INFINITY_kernels=$(ls /boot/vmlinuz-infinity-* 2>/dev/null | head -3)
+    if [ -n "$INFINITY_kernels" ]; then
+        ok "[Ii]nfinity kernel(s) installed:"
+        for f in $INFINITY_kernels; do
             echo "    $(basename "$f")"
         done
     else
-        warn "FLOW kernel not installed"
+        warn "[Ii]nfinity kernel not installed"
     fi
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
-        if grep -qF "FLOW scheduler kernel" "$limine_conf" 2>/dev/null; then
-            ok "Limine entry: FLOW scheduler kernel"
+        if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
+            ok "Limine entry: INFINITY scheduler kernel"
             break
         fi
     done
-    if grep -q "flow-scheduler" /boot/grub/custom/flow-scheduler.cfg 2>/dev/null; then
-        ok "GRUB entry: flow-scheduler"
+    if grep -q "[Ii]nfinity-scheduler" /boot/grub/custom/INFINITY-scheduler.cfg 2>/dev/null; then
+        ok "GRUB entry: INFINITY-scheduler"
     fi
     echo ""
     echo "  To install: sudo bash $0"
@@ -115,13 +115,13 @@ prepare_source() {
     zcat /proc/config.gz > .config 2>/dev/null || cp "/boot/config-$(uname -r)" .config
     make olddefconfig >/dev/null 2>&1 || true
 
-    # Set LOCALVERSION so make kernelrelease returns something like 7.0.0-flow.
+    # Set LOCALVERSION so make kernelrelease returns something like 7.0.12-infinity.
     # After apply_patches removes .git, setlocalversion can't detect dirty
     # state, making the release string consistent with our boot file naming.
     if [ -f "scripts/config" ]; then
-        if ! ./scripts/config --set-str CONFIG_LOCALVERSION "-flow" 2>/dev/null; then
+        if ! ./scripts/config --set-str CONFIG_LOCALVERSION "-infinity" 2>/dev/null; then
             sed -i '/^CONFIG_LOCALVERSION=/d' .config
-            echo 'CONFIG_LOCALVERSION="-flow"' >> .config
+            echo 'CONFIG_LOCALVERSION="-infinity"' >> .config
         fi
         ./scripts/config --disable CONFIG_LOCALVERSION_AUTO 2>/dev/null || true
         make olddefconfig >/dev/null 2>&1 || true
@@ -134,11 +134,11 @@ apply_patches() {
 
     # Sanitize patch files: ensure empty context lines have leading space and
     # hunk header counts match body length.  Idempotent — safe to run each time.
-    if [ -f "$FLOW_DIR/tools/fix-patch-format.py" ]; then
-        python3 "$FLOW_DIR/tools/fix-patch-format.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
+    if [ -f "$INFINITY_DIR/tools/fix-patch-format.py" ]; then
+        python3 "$INFINITY_DIR/tools/fix-patch-format.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
     fi
-    if [ -f "$FLOW_DIR/tools/fix-patch-counts.py" ]; then
-        python3 "$FLOW_DIR/tools/fix-patch-counts.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
+    if [ -f "$INFINITY_DIR/tools/fix-patch-counts.py" ]; then
+        python3 "$INFINITY_DIR/tools/fix-patch-counts.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
     fi
 
     for p in "$PATCH_DIR"/*.patch; do
@@ -157,20 +157,20 @@ apply_patches() {
 
     # Commit patches to kernel git to keep the tree clean.
     git add -A 2>/dev/null
-    git commit -m "flow-scheduler: apply FLOW patches" \
-        --author "FLOW Scheduler <flow@localhost>" 2>/dev/null || true
+    git commit -m "[Ii]nfinity-scheduler: apply INFINITY patches" \
+        --author "[Ii]nfinity Scheduler <INFINITY@localhost>" 2>/dev/null || true
 
     # Remove .git — prevents scripts/setlocalversion from detecting dirty
     # state and appending '-dirty'.  Without a git repo, setlocalversion
     # falls back to just CONFIG_LOCALVERSION, giving a clean release like
-    # 7.0.0-flow.  This keeps module paths, mkinitcpio -k, and boot files
-    # all consistent.  Same principle as flow-iosched's tarball extraction.
+    # 7.0.0-INFINITY.  This keeps module paths, mkinitcpio -k, and boot files
+    # all consistent.  Same principle as INFINITY-iosched's tarball extraction.
     rm -rf ".git"
 }
 
 check_deps() {
     local auto_install=false
-    [[ "${FLOW_AUTO_DEPS:-1}" == "1" ]] && auto_install=true
+    [[ "${INFINITY_AUTO_DEPS:-1}" == "1" ]] && auto_install=true
 
     local missing_bin=() missing_dev=()
     for cmd in bc flex bison python3; do
@@ -206,7 +206,7 @@ check_deps() {
     fi
 
     if [[ "$auto_install" == false ]]; then
-        info "Missing build dependencies. Set FLOW_AUTO_DEPS=1 to auto-install."
+        info "Missing build dependencies. Set INFINITY_AUTO_DEPS=1 to auto-install."
         for b in "${missing_bin[@]}"; do echo "  - $b"; done
         for d in "${missing_dev[@]}"; do echo "  - $d development headers"; done
         die "Install missing packages and re-run."
@@ -317,20 +317,20 @@ check_nvidia() {
     # The CachyOS-specific nvidia package (linux-cachyos-nvidia-open) provides
     # pre-built modules only for the CachyOS kernel and conflicts with the DKMS
     # version.  We need to replace it with nvidia-open-dkms so modules can be
-    # built for any kernel, including our FLOW kernel.
+    # built for any kernel, including our INFINITY kernel.
     info "NVIDIA driver active — replacing CachyOS nvidia package with nvidia-open-dkms..."
     if command -v pacman &>/dev/null; then
         pacman -Rdd --noconfirm linux-cachyos-nvidia-open 2>/dev/null || true
         pacman -S --needed --noconfirm nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on FLOW kernel)"
+            warn "nvidia-open-dkms install failed (NVIDIA won't be available on INFINITY kernel)"
     elif command -v apt-get &>/dev/null; then
         apt-get install -y nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on FLOW kernel)"
+            warn "nvidia-open-dkms install failed (NVIDIA won't be available on INFINITY kernel)"
     elif command -v dnf &>/dev/null; then
         dnf install -y nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on FLOW kernel)"
+            warn "nvidia-open-dkms install failed (NVIDIA won't be available on INFINITY kernel)"
     else
-        warn "Unsupported package manager — NVIDIA won't be available on the FLOW kernel."
+        warn "Unsupported package manager — NVIDIA won't be available on the INFINITY kernel."
         warn "  To enable: install nvidia-open-dkms for your distro, then re-run."
     fi
 }
@@ -360,7 +360,7 @@ build_kernel() {
     ok "Built successfully"
 }
 
-install_flow_kernel() {
+install_INFINITY_kernel() {
     cd "$KERNEL_SRC"
 
     # Install modules — does NOT affect other kernels
@@ -370,7 +370,7 @@ install_flow_kernel() {
     # Install kernel image with distinct name — does NOT touch /boot/vmlinuz-linux.
     # Use make kernelrelease for the version string.  Since .git was removed in
     # apply_patches(), scripts/setlocalversion can't detect dirty state and the
-    # release is clean (e.g. 7.0.0-flow).  This matches the module path that
+    # release is clean (e.g. 7.0.0-infinity).  This matches the module path that
     # make modules_install uses, keeping everything in sync.
     local ver
     ver=$(make kernelrelease 2>/dev/null || echo "unknown")
@@ -388,15 +388,15 @@ install_flow_kernel() {
             dkms install -m "nvidia" -v "$(dkms status 2>/dev/null | grep "^nvidia/" | head -1 | cut -d, -f1 | cut -d/ -f2)" -k "$ver" 2>&1 || true
         fi
     fi
-    local img="/boot/vmlinuz-flow-$ver"
-    local initrd="/boot/initramfs-flow-$ver.img"
+    local img="/boot/vmlinuz-infinity-$ver"
+    local initrd="/boot/initramfs-INFINITY-$ver.img"
 
     info "Installing kernel image to $img ..."
     cp "arch/x86/boot/bzImage" "$img"
     chmod 644 "$img"
 
     # Install System.map
-    cp System.map "/boot/System.map-flow-$ver"
+    cp System.map "/boot/System.map-INFINITY-$ver"
 
     # Generate initramfs
     info "Generating initramfs..."
@@ -427,21 +427,21 @@ install_flow_kernel() {
     # enabled even if the cmdline parameter is lost.
     if lsmod 2>/dev/null | grep -q "^nvidia_drm "; then
         mkdir -p /etc/modprobe.d
-        echo "options nvidia_drm modeset=1" > /etc/modprobe.d/nvidia-flow.conf
+        echo "options nvidia_drm modeset=1" > /etc/modprobe.d/nvidia-INFINITY.conf
     fi
 
     if setup_limine_entry "$ver" "$cmdline"; then
-        ok "FLOW kernel installed — Limine entry added."
+        ok "[Ii]nfinity kernel installed — Limine entry added."
         echo ""
-        echo "  Reboot and select 'FLOW scheduler kernel ($ver)' at the Limine menu."
+        echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the Limine menu."
     elif setup_grub_entry "$ver" "$cmdline"; then
-        ok "FLOW kernel installed — GRUB entry added."
+        ok "[Ii]nfinity kernel installed — GRUB entry added."
         echo ""
-        echo "  Reboot and select 'FLOW scheduler kernel ($ver)' at the GRUB menu."
+        echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the GRUB menu."
     else
         warn "Could not find Limine or GRUB. Boot entry not created."
-        warn "  Kernel installed: /boot/vmlinuz-flow-$ver"
-        warn "  Initramfs:        /boot/initramfs-flow-$ver.img"
+        warn "  Kernel installed: /boot/vmlinuz-infinity-$ver"
+        warn "  Initramfs:        /boot/initramfs-INFINITY-$ver.img"
         warn "  Add a boot entry manually."
     fi
     echo "  The default $DISTRO kernel is unchanged."
@@ -457,14 +457,14 @@ setup_limine_entry() {
     done
     [ -z "$limine_conf" ] && return 1
 
-    local entry_title="FLOW scheduler kernel ($ver)"
-    local kernel_path="/vmlinuz-flow-$ver"
-    local initrd_path="/initramfs-flow-$ver.img"
+    local entry_title="[Ii]nfinity scheduler kernel ($ver)"
+    local kernel_path="/vmlinuz-infinity-$ver"
+    local initrd_path="/initramfs-INFINITY-$ver.img"
 
-    # Remove old FLOW entries
-    if grep -qF "FLOW scheduler kernel" "$limine_conf" 2>/dev/null; then
-        info "Removing old FLOW entries from Limine config..."
-        awk '/^\/FLOW scheduler kernel/ { skip = 1; next }
+    # Remove old INFINITY entries
+    if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
+        info "Removing old INFINITY entries from Limine config..."
+        awk '/^\/INFINITY scheduler kernel/ { skip = 1; next }
              skip && /^\//              { skip = 0 }
              !skip' "$limine_conf" > "${limine_conf}.tmp" && \
             mv "${limine_conf}.tmp" "$limine_conf"
@@ -516,11 +516,11 @@ setup_grub_entry() {
         return 1
     fi
     mkdir -p /boot/grub/custom
-    local entry_file="/boot/grub/custom/flow-scheduler.cfg"
+    local entry_file="/boot/grub/custom/INFINITY-scheduler.cfg"
     cat > "$entry_file" <<GRUB
-menuentry "FLOW scheduler kernel ($ver)" {
-    linux /vmlinuz-flow-$ver ${cmdline}
-    initrd /initramfs-flow-$ver.img
+menuentry "[Ii]nfinity scheduler kernel ($ver)" {
+    linux /vmlinuz-infinity-$ver ${cmdline}
+    initrd /initramfs-INFINITY-$ver.img
 }
 GRUB
     if command -v grub-mkconfig &>/dev/null; then
@@ -536,17 +536,17 @@ cmd_remove() {
     local running
     running=$(uname -r)
 
-    # Safety: never remove if currently booted into a FLOW kernel
-    # (same check as flow-iosched's remove-kernel.sh)
-    if [[ "$running" == *-flow* ]]; then
+    # Safety: never remove if currently booted into a INFINITY kernel
+    # (same check as INFINITY-iosched's remove-kernel.sh)
+    if [[ "$running" == *-INFINITY* ]]; then
         die "Refusing to remove: running '$running'. Reboot into the default $DISTRO kernel first, then re-run --remove."
     fi
 
-    # Confirmation prompt (same as flow-iosched)
+    # Confirmation prompt (same as INFINITY-iosched)
     local confirm
     echo ""
-    info "This will remove all FLOW scheduler kernel files:"
-    for f in /boot/vmlinuz-flow-* /boot/initramfs-flow-* /boot/System.map-flow-*; do
+    info "This will remove all INFINITY scheduler kernel files:"
+    for f in /boot/vmlinuz-infinity-* /boot/initramfs-INFINITY-* /boot/System.map-INFINITY-*; do
         [ -f "$f" ] && echo "  $(basename "$f")"
     done
     echo ""
@@ -556,14 +556,14 @@ cmd_remove() {
         exit 0
     fi
 
-    info "Removing FLOW scheduler kernel..."
+    info "Removing INFINITY scheduler kernel..."
 
     # Remove Limine entries
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
         [ -f "$limine_conf" ] || continue
-        if grep -qF "FLOW scheduler kernel" "$limine_conf" 2>/dev/null; then
-            info "Removing FLOW entries from $limine_conf ..."
-            awk '/^\/FLOW scheduler kernel/ { skip = 1; next }
+        if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
+            info "Removing INFINITY entries from $limine_conf ..."
+            awk '/^\/INFINITY scheduler kernel/ { skip = 1; next }
                  skip && /^\//              { skip = 0 }
                  !skip' "$limine_conf" > "${limine_conf}.tmp" && \
                 mv "${limine_conf}.tmp" "$limine_conf" && \
@@ -572,10 +572,10 @@ cmd_remove() {
     done
 
     # Remove GRUB entry
-    rm -f /boot/grub/custom/flow-scheduler.cfg
+    rm -f /boot/grub/custom/INFINITY-scheduler.cfg
 
     # Remove kernel and initramfs images
-    for f in /boot/vmlinuz-flow-* /boot/initramfs-flow-* /boot/System.map-flow-*; do
+    for f in /boot/vmlinuz-infinity-* /boot/initramfs-INFINITY-* /boot/System.map-INFINITY-*; do
         [ -f "$f" ] && rm -f "$f" && ok "Removed: $(basename "$f")"
     done
 
@@ -586,14 +586,14 @@ cmd_remove() {
         update-grub 2>&1 | tail -5
     fi
 
-    ok "FLOW kernel removed. Default $DISTRO kernel is still in place."
+    ok "[Ii]nfinity kernel removed. Default $DISTRO kernel is still in place."
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 case "${1:-}" in
     -h|--help)
-        echo "Usage: sudo bash install-flow-scheduler.sh [--remove|--status]"
-        echo "       sudo bash install-flow-scheduler.sh [kernel-version]"
+        echo "Usage: sudo bash install-INFINITY-scheduler.sh [--remove|--status]"
+        echo "       sudo bash install-INFINITY-scheduler.sh [kernel-version]"
         exit 0 ;;
     --status) cmd_status; exit 0 ;;
     --remove) cmd_remove; exit 0 ;;
@@ -604,20 +604,20 @@ case "${1:-}" in
         prepare_source
         apply_patches
         build_kernel
-        install_flow_kernel
+        install_INFINITY_kernel
         ;;
     *)
         # If it doesn't start with --, treat as kernel version override
         if [[ "$1" != --* ]]; then
             KERNEL_VER="$1"
-            PATCH_DIR="$FLOW_DIR/patches/stable/linux-$KERNEL_VER-flow"
+            PATCH_DIR="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
             check_root
             check_deps
             check_nvidia
             prepare_source
             apply_patches
             build_kernel
-            install_flow_kernel
+            install_INFINITY_kernel
         else
             die "Unknown option: $1"
         fi

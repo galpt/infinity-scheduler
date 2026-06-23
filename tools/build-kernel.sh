@@ -1,38 +1,30 @@
 #!/usr/bin/env bash
-# Build Linux kernel with FLOW scheduler patches applied.
-# Usage:  sudo bash tools/build-kernel.sh /path/to/linux-source
+# Build Linux kernel with Infinity scheduler patches applied.
 
-set -euo pipefail
+set -e
+
+KERNEL_VER="${KERNEL_VER:-$(uname -r | grep -oP '^\d+\.\d+')}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FLOW_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-KERNEL_DIR="${1:-}"
-
-if [ -z "$KERNEL_DIR" ]; then
-    echo "Usage: sudo bash tools/build-kernel.sh /path/to/linux-source"
-    exit 1
-fi
-
-# Detect kernel version and pick the right patch directory
-KERNEL_VER=$(uname -r | grep -oP '^\d+\.\d+')
-PATCH_DIR="$FLOW_DIR/patches/stable/linux-$KERNEL_VER-flow"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PATCH_DIR="$PROJECT_DIR/patches/stable/linux-$KERNEL_VER-infinity"
+KERNEL_SRC="${1:-/usr/src/linux}"
 
 if [ ! -d "$PATCH_DIR" ]; then
-    echo "No patches found for kernel $KERNEL_VER at $PATCH_DIR"
+    echo "No Infinity patches for kernel $KERNEL_VER."
     echo "Available:"
-    ls "$FLOW_DIR/patches/stable/"
+    ls "$PROJECT_DIR/patches/stable/"
     exit 1
 fi
 
-cd "$KERNEL_DIR"
-
-# Apply all FLOW patches
+# Apply patches
+cd "$KERNEL_SRC"
 for p in "$PATCH_DIR"/*.patch; do
     echo "Applying: $(basename "$p")"
-    patch -p1 < "$p" || { echo "Patch failed: $p"; exit 1; }
+    patch -p1 -N -F 3 < "$p"
 done
 
 # Build
+make olddefconfig
 make -j"$(nproc)"
-make modules_install -j"$(nproc)"
-make install
-echo "Done. Reboot and select the FLOW kernel at the GRUB menu."
+
+echo "Done. Reboot and select the Infinity kernel at the GRUB menu."
