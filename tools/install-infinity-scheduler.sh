@@ -5,10 +5,10 @@
 # kernel stays as the default boot option.
 #
 # Usage:
-#   sudo bash install-INFINITY-scheduler.sh                         # build + install (auto-detect kernel)
-#   sudo bash install-INFINITY-scheduler.sh 7.1                     # build for kernel 7.1
-#   sudo bash install-INFINITY-scheduler.sh --remove                 # remove INFINITY GRUB entry
-#   sudo bash install-INFINITY-scheduler.sh --status                 # show current state
+#   sudo bash install-infinity-scheduler.sh                         # build + install (auto-detect kernel)
+#   sudo bash install-infinity-scheduler.sh 7.1                     # build for kernel 7.1
+#   sudo bash install-infinity-scheduler.sh --remove                 # remove Infinity GRUB entry
+#   sudo bash install-infinity-scheduler.sh --status                 # show current state
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -39,7 +39,7 @@ if [ ! -d "$PATCH_DIR" ]; then
     BEST_PATCH=""
     for d in "$INFINITY_DIR/patches/stable/"*; do
         [ -d "$d" ] || continue
-        v="$(basename "$d" | sed 's/linux-//;s/-INFINITY//')"
+        v="$(basename "$d" | sed 's/linux-//;s/-infinity//')"
         d_major="$(echo "$v" | grep -oP '^\d+\.\d+')"
         # Squared Euclidean distance: (major_diff)^2 + (minor_diff)^2
         dist=$(( (${local_base%%.*} - ${d_major%%.*}) * (${local_base%%.*} - ${d_major%%.*}) \
@@ -51,7 +51,7 @@ if [ ! -d "$PATCH_DIR" ]; then
         exit 1
     fi
     PATCH_DIR="$BEST_PATCH"
-    PATCH_VER="$(basename "$BEST_PATCH" | sed 's/linux-//;s/-INFINITY//')"
+    PATCH_VER="$(basename "$BEST_PATCH" | sed 's/linux-//;s/-infinity//')"
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
 KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
@@ -81,12 +81,12 @@ cmd_status() {
     fi
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
         if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
-            ok "Limine entry: INFINITY scheduler kernel"
+            ok "Limine entry: Infinity scheduler kernel"
             break
         fi
     done
-    if grep -q "[Ii]nfinity-scheduler" /boot/grub/custom/INFINITY-scheduler.cfg 2>/dev/null; then
-        ok "GRUB entry: INFINITY-scheduler"
+    if grep -q "[Ii]nfinity-scheduler" /boot/grub/custom/infinity-scheduler.cfg 2>/dev/null; then
+        ok "GRUB entry: infinity-scheduler"
     fi
     echo ""
     echo "  To install: sudo bash $0"
@@ -389,14 +389,14 @@ install_INFINITY_kernel() {
         fi
     fi
     local img="/boot/vmlinuz-infinity-$ver"
-    local initrd="/boot/initramfs-INFINITY-$ver.img"
+    local initrd="/boot/initramfs-infinity-$ver.img"
 
     info "Installing kernel image to $img ..."
     cp "arch/x86/boot/bzImage" "$img"
     chmod 644 "$img"
 
     # Install System.map
-    cp System.map "/boot/System.map-INFINITY-$ver"
+    cp System.map "/boot/System.map-infinity-$ver"
 
     # Generate initramfs
     info "Generating initramfs..."
@@ -427,7 +427,7 @@ install_INFINITY_kernel() {
     # enabled even if the cmdline parameter is lost.
     if lsmod 2>/dev/null | grep -q "^nvidia_drm "; then
         mkdir -p /etc/modprobe.d
-        echo "options nvidia_drm modeset=1" > /etc/modprobe.d/nvidia-INFINITY.conf
+        echo "options nvidia_drm modeset=1" > /etc/modprobe.d/nvidia-infinity.conf
     fi
 
     if setup_limine_entry "$ver" "$cmdline"; then
@@ -441,7 +441,7 @@ install_INFINITY_kernel() {
     else
         warn "Could not find Limine or GRUB. Boot entry not created."
         warn "  Kernel installed: /boot/vmlinuz-infinity-$ver"
-        warn "  Initramfs:        /boot/initramfs-INFINITY-$ver.img"
+        warn "  Initramfs:        /boot/initramfs-infinity-$ver.img"
         warn "  Add a boot entry manually."
     fi
     echo "  The default $DISTRO kernel is unchanged."
@@ -459,7 +459,7 @@ setup_limine_entry() {
 
     local entry_title="[Ii]nfinity scheduler kernel ($ver)"
     local kernel_path="/vmlinuz-infinity-$ver"
-    local initrd_path="/initramfs-INFINITY-$ver.img"
+    local initrd_path="/initramfs-infinity-$ver.img"
 
     # Remove old INFINITY entries
     if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
@@ -516,11 +516,11 @@ setup_grub_entry() {
         return 1
     fi
     mkdir -p /boot/grub/custom
-    local entry_file="/boot/grub/custom/INFINITY-scheduler.cfg"
+    local entry_file="/boot/grub/custom/infinity-scheduler.cfg"
     cat > "$entry_file" <<GRUB
 menuentry "[Ii]nfinity scheduler kernel ($ver)" {
     linux /vmlinuz-infinity-$ver ${cmdline}
-    initrd /initramfs-INFINITY-$ver.img
+    initrd /initramfs-infinity-$ver.img
 }
 GRUB
     if command -v grub-mkconfig &>/dev/null; then
@@ -546,7 +546,7 @@ cmd_remove() {
     local confirm
     echo ""
     info "This will remove all INFINITY scheduler kernel files:"
-    for f in /boot/vmlinuz-infinity-* /boot/initramfs-INFINITY-* /boot/System.map-INFINITY-*; do
+    for f in /boot/vmlinuz-infinity-* /boot/initramfs-infinity-* /boot/System.map-infinity-*; do
         [ -f "$f" ] && echo "  $(basename "$f")"
     done
     echo ""
@@ -572,10 +572,10 @@ cmd_remove() {
     done
 
     # Remove GRUB entry
-    rm -f /boot/grub/custom/INFINITY-scheduler.cfg
+    rm -f /boot/grub/custom/infinity-scheduler.cfg
 
     # Remove kernel and initramfs images
-    for f in /boot/vmlinuz-infinity-* /boot/initramfs-INFINITY-* /boot/System.map-INFINITY-*; do
+    for f in /boot/vmlinuz-infinity-* /boot/initramfs-infinity-* /boot/System.map-infinity-*; do
         [ -f "$f" ] && rm -f "$f" && ok "Removed: $(basename "$f")"
     done
 

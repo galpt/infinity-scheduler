@@ -4,14 +4,6 @@
  *
  * infinity_sched.h — Infinity scheduler API.
  *
- * Inspired by the Limitless technique: "No matter how many times someone
- * divides a number it will never be reduced to zero."
- *
- * In scheduling terms: a running task's remaining budget is multiplied by an
- * ever-increasing factor the longer it runs, causing its effective budget to
- * approach zero asymptotically.  Interactive tasks that sleep frequently
- * reset this factor and naturally preempt CPU-bound tasks.
- *
  * Architecture:
  *
  *   fair.c (EEVDF framework)           infinity_sched.c (Infinity algorithm)
@@ -23,9 +15,10 @@
  *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
  *   init/init_task.c        ──init──► infinity.{}             — static init
  *
- * No explicit preemption is needed.  The accelerating consumption rate
- * naturally prevents CPU-bound tasks from maintaining a positive budget,
- * while interactive tasks reset their debt on wakeup and retain budget.
+ * The accelerating consumption rate naturally prevents CPU-bound tasks
+ * from maintaining a positive budget, while interactive tasks reset
+ * their debt on wakeup and retain budget.  No explicit preemption check
+ * is needed — the consumption physics enforces it.
  */
 
 #ifndef __INFINITY_SCHED_H
@@ -47,9 +40,6 @@
 #define INFINITY_BUDGET_MAX_NS		2000000ULL
 #define INFINITY_BUDGET_MIN_NS		500000ULL
 
-/** Minimum runtime before preemption guard (500us). */
-#define INFINITY_PREEMPT_GUARD_NS	500000ULL
-
 /** Budget refill divisor: refill = sleep_ns / INFINITY_BUDGET_REFILL_DIV. */
 #define INFINITY_BUDGET_REFILL_DIV	100
 
@@ -67,8 +57,8 @@
 
 /**
  * Runtime debt cap — prevents unbounded growth of the acceleration factor.
- * At CARRIAGE_NS = 2ms and cap = 256, the maximum multiplier is 257x.
- * delta_exec * rate ≤ 4ms * 257 ≈ 1e9, well within u64 range.
+ * At maximum multiplier 257x, worst-case delta_exec * 257 stays well within
+ * the u64 range for any practical scheduling interval.
  */
 #define INFINITY_DEBT_CAP		(INFINITY_CARRIAGE_NS * 256)
 

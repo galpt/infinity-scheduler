@@ -52,7 +52,7 @@ After reboot, select "Infinity scheduler kernel (...)" at the boot menu.
 
 EEVDF functions modified by the Infinity scheduler:
 
-| EEVDF function | Infinity change |
+| EEVDF function | Infinity replacement |
 |---|---|
 | `update_deadline()` | Fair-share slice via `infinity_slice()` |
 | `update_curr()` | Accelerating budget consumption via `infinity_consume()` — the core Limitless technique |
@@ -63,7 +63,7 @@ EEVDF functions modified by the Infinity scheduler:
 
 No explicit wakeup preemption logic is needed. The accelerating consumption naturally prevents CPU-bound tasks from maintaining a positive budget, while interactive tasks reset their debt on wakeup.
 
-### The Limitless formula
+### Accelerating consumption formula
 
 ```c
 runtime_debt += delta_exec;

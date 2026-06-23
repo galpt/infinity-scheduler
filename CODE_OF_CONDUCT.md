@@ -70,7 +70,7 @@ Tensions can occur between community members even when they are trying their
 best to collaborate. Not every conflict represents a code of conduct violation.
 
 To report a possible violation, open an issue on the
-[issue tracker](https://github.com/galpt/flow-scheduler/issues) or contact the
+[issue tracker](https://github.com/galpt/infinity-scheduler/issues) or contact the
 project maintainer directly at **galpt@v.recipes**. Reports will be kept
 confidential to the extent possible.
 

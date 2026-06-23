@@ -1,9 +1,10 @@
 # Contributing
 
-Thank you for your interest in flow-scheduler. This project ports the
-scx_flow per-CPU fair-share scheduler into the kernel's CFS/EEVDF path.
-Because the patches modify core scheduler code and must compile across
-multiple kernel versions (6.18, 7.0, 7.1), contributions need verification.
+Thank you for your interest in infinity-scheduler. This project ports a
+fair-share scheduler with accelerating budget consumption into the kernel's
+CFS/EEVDF path. Because the patches modify core scheduler code and must
+compile across multiple kernel versions (6.18, 7.0.12, 7.1), contributions
+need verification.
 
 ## Pull Requests
 
@@ -15,18 +16,19 @@ To submit a PR:
 
 1.  Make your changes to the patch files in `patches/stable/`.
 2.  For each supported kernel version, apply the patch and compile
-    `kernel/sched/fair.o`:
+    `kernel/sched/infinity_sched.o` and `kernel/sched/fair.o`:
     ```bash
     git clone --depth 1 --branch v<version> https://github.com/torvalds/linux.git
     cd linux
-    patch -p1 -N -F 3 < patches/stable/linux-<version>-flow/0001-*.patch
+    patch -p1 -N -F 3 < patches/stable/linux-<version>-infinity/0001-*.patch
     make olddefconfig
-    make kernel/sched/fair.o
+    make kernel/sched/
     ```
 3.  Include the build output or a statement that all versions compiled
     cleanly. For example:
     ```
-    Verified on 6.18, 7.0, 7.1: all patches apply with -F 3, CC kernel/sched/fair.o succeeds.
+    Verified on 6.18, 7.0.12, 7.1: all patches apply with -F 3,
+    CC kernel/sched/infinity_sched.o and CC kernel/sched/fair.o succeed.
     ```
 4.  Open the PR against the `main` branch.
 
@@ -35,14 +37,16 @@ required — a brief description of the change is sufficient.
 
 ## Issues
 
-The [issue tracker](https://github.com/galpt/flow-scheduler/issues) is open
-for:
+The [issue tracker](https://github.com/galpt/infinity-scheduler/issues) is
+open for:
 
 - **Bug reports** — include the kernel version, the running kernel's
+  `.config`, and relevant build or runtime logs.
 - **Kernel version requests** — if you need patches for a kernel version
+  not listed in `patches/stable/`.
 - **Feature suggestions** — describe the problem you want to solve.
-  Features from scx_flow that were intentionally not ported are documented
-  in the README; if you believe one should be reconsidered, explain why.
+  Features that were intentionally not implemented are documented in the
+  README; if you believe one should be reconsidered, explain why.
 
 When reporting a bug, include:
 
