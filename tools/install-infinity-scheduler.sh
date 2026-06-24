@@ -25,7 +25,7 @@ INFINITY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KERNEL_VER="${KERNEL_VER:-$(uname -r | grep -oP '^\d+\.\d+(\.\d+)?')}"
 
 # Use KERNEL_VER from env (user override) or detect from running kernel.
-# Example:  sudo KERNEL_VER=7.1 bash install-INFINITY-scheduler.sh
+# Example:  sudo KERNEL_VER=7.1 bash install-infinity-scheduler.sh
 if [ -n "${1:-}" ] && [[ "$1" != "--"* ]]; then
     KERNEL_VER="$1"
 fi
@@ -163,8 +163,8 @@ apply_patches() {
     # Remove .git — prevents scripts/setlocalversion from detecting dirty
     # state and appending '-dirty'.  Without a git repo, setlocalversion
     # falls back to just CONFIG_LOCALVERSION, giving a clean release like
-    # 7.0.0-INFINITY.  This keeps module paths, mkinitcpio -k, and boot files
-    # all consistent.  Same principle as INFINITY-iosched's tarball extraction.
+    # 7.0.12-infinity.  This keeps module paths, mkinitcpio -k, and boot files
+    # all consistent.  Same principle as infinity-scheduler's tarball extraction.
     rm -rf ".git"
 }
 
@@ -317,20 +317,20 @@ check_nvidia() {
     # The CachyOS-specific nvidia package (linux-cachyos-nvidia-open) provides
     # pre-built modules only for the CachyOS kernel and conflicts with the DKMS
     # version.  We need to replace it with nvidia-open-dkms so modules can be
-    # built for any kernel, including our INFINITY kernel.
+    # built for any kernel, including our Infinity kernel.
     info "NVIDIA driver active — replacing CachyOS nvidia package with nvidia-open-dkms..."
     if command -v pacman &>/dev/null; then
         pacman -Rdd --noconfirm linux-cachyos-nvidia-open 2>/dev/null || true
         pacman -S --needed --noconfirm nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on INFINITY kernel)"
+            warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
     elif command -v apt-get &>/dev/null; then
         apt-get install -y nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on INFINITY kernel)"
+            warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
     elif command -v dnf &>/dev/null; then
         dnf install -y nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on INFINITY kernel)"
+            warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
     else
-        warn "Unsupported package manager — NVIDIA won't be available on the INFINITY kernel."
+        warn "Unsupported package manager — NVIDIA won't be available on the Infinity kernel."
         warn "  To enable: install nvidia-open-dkms for your distro, then re-run."
     fi
 }
@@ -360,7 +360,7 @@ build_kernel() {
     ok "Built successfully"
 }
 
-install_INFINITY_kernel() {
+install_infinity_kernel() {
     cd "$KERNEL_SRC"
 
     # Install modules — does NOT affect other kernels
@@ -461,10 +461,10 @@ setup_limine_entry() {
     local kernel_path="/vmlinuz-infinity-$ver"
     local initrd_path="/initramfs-infinity-$ver.img"
 
-    # Remove old INFINITY entries
+    # Remove old Infinity entries
     if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
-        info "Removing old INFINITY entries from Limine config..."
-        awk '/^\/INFINITY scheduler kernel/ { skip = 1; next }
+        info "Removing old Infinity entries from Limine config..."
+        awk '/^\/[Ii]nfinity scheduler kernel/ { skip = 1; next }
              skip && /^\//              { skip = 0 }
              !skip' "$limine_conf" > "${limine_conf}.tmp" && \
             mv "${limine_conf}.tmp" "$limine_conf"
@@ -536,16 +536,16 @@ cmd_remove() {
     local running
     running=$(uname -r)
 
-    # Safety: never remove if currently booted into a INFINITY kernel
-    # (same check as INFINITY-iosched's remove-kernel.sh)
-    if [[ "$running" == *-INFINITY* ]]; then
+    # Safety: never remove if currently booted into an Infinity kernel
+    # (same check as infinity-scheduler's remove-kernel.sh)
+    if [[ "$running" == *-infinity* ]]; then
         die "Refusing to remove: running '$running'. Reboot into the default $DISTRO kernel first, then re-run --remove."
     fi
 
-    # Confirmation prompt (same as INFINITY-iosched)
+    # Confirmation prompt
     local confirm
     echo ""
-    info "This will remove all INFINITY scheduler kernel files:"
+    info "This will remove all Infinity scheduler kernel files:"
     for f in /boot/vmlinuz-infinity-* /boot/initramfs-infinity-* /boot/System.map-infinity-*; do
         [ -f "$f" ] && echo "  $(basename "$f")"
     done
@@ -556,14 +556,14 @@ cmd_remove() {
         exit 0
     fi
 
-    info "Removing INFINITY scheduler kernel..."
+    info "Removing Infinity scheduler kernel..."
 
     # Remove Limine entries
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
         [ -f "$limine_conf" ] || continue
         if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
-            info "Removing INFINITY entries from $limine_conf ..."
-            awk '/^\/INFINITY scheduler kernel/ { skip = 1; next }
+            info "Removing Infinity entries from $limine_conf ..."
+            awk '/^\/[Ii]nfinity scheduler kernel/ { skip = 1; next }
                  skip && /^\//              { skip = 0 }
                  !skip' "$limine_conf" > "${limine_conf}.tmp" && \
                 mv "${limine_conf}.tmp" "$limine_conf" && \
@@ -592,8 +592,8 @@ cmd_remove() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 case "${1:-}" in
     -h|--help)
-        echo "Usage: sudo bash install-INFINITY-scheduler.sh [--remove|--status]"
-        echo "       sudo bash install-INFINITY-scheduler.sh [kernel-version]"
+        echo "Usage: sudo bash install-infinity-scheduler.sh [--remove|--status]"
+        echo "       sudo bash install-infinity-scheduler.sh [kernel-version]"
         exit 0 ;;
     --status) cmd_status; exit 0 ;;
     --remove) cmd_remove; exit 0 ;;
@@ -604,7 +604,7 @@ case "${1:-}" in
         prepare_source
         apply_patches
         build_kernel
-        install_INFINITY_kernel
+        install_infinity_kernel
         ;;
     *)
         # If it doesn't start with --, treat as kernel version override
@@ -617,7 +617,7 @@ case "${1:-}" in
             prepare_source
             apply_patches
             build_kernel
-            install_INFINITY_kernel
+            install_infinity_kernel
         else
             die "Unknown option: $1"
         fi
