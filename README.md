@@ -48,6 +48,19 @@ reboot
 
 After reboot, select "Infinity scheduler kernel (...)" at the boot menu.
 
+### Verify it's running
+
+```bash
+# The kernel version ends with -infinity
+uname -r                                          # → 7.0.12-infinity
+
+# The running flag is set
+sysctl kernel.infinity.running                     # → kernel.infinity.running = 1
+
+# The boot log confirms activation
+dmesg | grep Infinity                              # → Infinity scheduler active: carriage=...
+```
+
 ## How it works
 
 EEVDF functions modified by the Infinity scheduler:
