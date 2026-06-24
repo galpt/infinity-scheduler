@@ -137,10 +137,10 @@ index 3bce48a..02a2509 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..a81e94d
+index 0000000..e7690bb
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,402 @@
+@@ -0,0 +1,410 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -437,8 +437,16 @@ index 0000000..a81e94d
 +
 +static int __init infinity_sched_init(void)
 +{
-+	/* Register sysctl table under kernel/ (matching BORE's approach) */
-+	register_sysctl_init("kernel", infinity_sysctl_table);
++	/* Register sysctl table under kernel/ (matching BORE's approach).
++	 * Note: we call __register_sysctl_init() directly instead of the
++	 * register_sysctl_init() macro, because the macro computes ARRAY_SIZE
++	 * which counts the sentinel {} entry.  Kernel 7.0.12's sysctl_check_table
++	 * iterates all entries including the sentinel and rejects it (null procname).
++	 * We pass ARRAY_SIZE - 1 to exclude the sentinel from validation.
++	 */
++	__register_sysctl_init("kernel", infinity_sysctl_table,
++			      "infinity_sysctl_table",
++			      ARRAY_SIZE(infinity_sysctl_table) - 1);
 +
 +	/* Initialize self-stabilize workqueue */
 +	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);

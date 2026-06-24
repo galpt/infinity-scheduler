@@ -294,8 +294,16 @@ reschedule:
 
 static int __init infinity_sched_init(void)
 {
-	/* Register sysctl table under kernel/ (matching BORE's approach) */
-	register_sysctl_init("kernel", infinity_sysctl_table);
+	/* Register sysctl table under kernel/ (matching BORE's approach).
+	 * Note: we call __register_sysctl_init() directly instead of the
+	 * register_sysctl_init() macro, because the macro computes ARRAY_SIZE
+	 * which counts the sentinel {} entry.  Kernel 7.0.12's sysctl_check_table
+	 * iterates all entries including the sentinel and rejects it (null procname).
+	 * We pass ARRAY_SIZE - 1 to exclude the sentinel from validation.
+	 */
+	__register_sysctl_init("kernel", infinity_sysctl_table,
+			      "infinity_sysctl_table",
+			      ARRAY_SIZE(infinity_sysctl_table) - 1);
 
 	/* Initialize self-stabilize workqueue */
 	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);

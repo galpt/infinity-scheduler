@@ -1,8 +1,8 @@
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878..fbaa352 100644
+index d41e7a8..b02e376 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -816,6 +816,13 @@ struct kmap_ctrl {
+@@ -817,6 +817,20 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -13,10 +13,17 @@ index b469878..fbaa352 100644
 +	u64		fork_time_ns;
 +};
 +
++struct infinity_ctx {
++	s64		budget_ns;
++	u64		runtime_debt;
++	u64		last_sleep_ns;
++	u64		fork_time_ns;
++};
++
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -870,6 +877,7 @@ struct task_struct {
+@@ -871,6 +885,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -25,13 +32,18 @@ index b469878..fbaa352 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/init/init_task.c b/init/init_task.c
-index a55e218..e637fe5 100644
+index 5c83875..ac87a50 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -122,6 +122,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,16 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
++	.infinity		= {
++				.budget_ns	= 0,
++				.runtime_debt	= 0,
++				.last_sleep_ns	= 0,
++	},
 +	.infinity		= {
 +				.budget_ns	= 0,
 +				.runtime_debt	= 0,
@@ -41,27 +53,29 @@ index a55e218..e637fe5 100644
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
-index 8ae8637..601556b 100644
+index b1f1a36..6c1d668 100644
 --- a/kernel/sched/Makefile
 +++ b/kernel/sched/Makefile
-@@ -37,3 +37,4 @@ obj-y += core.o
+@@ -40,3 +40,5 @@ obj-y += core.o
  obj-y += fair.o
  obj-y += build_policy.o
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
++obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b75232..c4d8932 100644
+index 3bce48a..878e80b 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -57,6 +57,7 @@
+@@ -57,6 +57,8 @@
  #include "sched.h"
  #include "stats.h"
  #include "autogroup.h"
 +#include "infinity_sched.h"
++#include "infinity_sched.h"
  
  /*
   * The initial- and re-scaling of tunables is configurable
-@@ -1048,8 +1049,16 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1119,8 +1121,16 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
  	 */
@@ -80,7 +94,7 @@ index 5b75232..c4d8932 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1224,6 +1233,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1298,6 +1308,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -90,17 +104,36 @@ index 5b75232..c4d8932 100644
 +
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
- 	update_min_vruntime(cfs_rq);
-@@ -5523,6 +5536,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
- 	}
  
- 	se = pick_eevdf(cfs_rq);
+@@ -5162,8 +5176,16 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	u64 vslice, vruntime = avg_vruntime(cfs_rq);
+ 	s64 lag = 0;
+ 
+-	if (!se->custom_slice)
+-		se->slice = sysctl_sched_base_slice;
++	if (!se->custom_slice) {
++		unsigned long nr = cfs_rq->h_nr_runnable;
++#ifdef CONFIG_SCHED_SMT
++		bool smt_sec = cpumask_weight(cpu_smt_mask(smp_processor_id())) > 1 &&
++		      smp_processor_id() != cpumask_first(cpu_smt_mask(smp_processor_id()));
++#else
++		bool smt_sec = false;
++#endif
++		se->slice = infinity_slice(nr, smt_sec);
++	}
+ 	vslice = calc_delta_fair(se->slice, se);
+ 
+ 	/*
+@@ -5540,6 +5562,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 	struct sched_entity *se;
+ 
+ 	se = pick_eevdf(cfs_rq, protect);
 +	if (!se)
 +		return NULL;
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6934,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6937,6 +6961,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -114,19 +147,26 @@ index 5b75232..c4d8932 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7182,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7172,6 +7203,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
 +	/* Infinity: record sleep start */
 +	if (flags & DEQUEUE_SLEEP) p->infinity.last_sleep_ns = rq_clock(rq_of(task_cfs_rq(p)));
++	/* Infinity: record sleep start */
++	if (flags & DEQUEUE_SLEEP) p->infinity.last_sleep_ns = rq_clock(rq_of(task_cfs_rq(p)));
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13137,6 +13161,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13459,6 +13494,16 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
++	struct rq *rq = this_rq();
++
++	/* Infinity: init child */
++	infinity_fork_init(&p->infinity, rq_clock(rq));
++
 +	struct rq *rq = this_rq();
 +
 +	/* Infinity: init child */
@@ -137,10 +177,10 @@ index 5b75232..c4d8932 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..a81e94d
+index 0000000..e7690bb
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,402 @@
+@@ -0,0 +1,410 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -437,8 +477,16 @@ index 0000000..a81e94d
 +
 +static int __init infinity_sched_init(void)
 +{
-+	/* Register sysctl table under kernel/ (matching BORE's approach) */
-+	register_sysctl_init("kernel", infinity_sysctl_table);
++	/* Register sysctl table under kernel/ (matching BORE's approach).
++	 * Note: we call __register_sysctl_init() directly instead of the
++	 * register_sysctl_init() macro, because the macro computes ARRAY_SIZE
++	 * which counts the sentinel {} entry.  Kernel 7.0.12's sysctl_check_table
++	 * iterates all entries including the sentinel and rejects it (null procname).
++	 * We pass ARRAY_SIZE - 1 to exclude the sentinel from validation.
++	 */
++	__register_sysctl_init("kernel", infinity_sysctl_table,
++			      "infinity_sysctl_table",
++			      ARRAY_SIZE(infinity_sysctl_table) - 1);
 +
 +	/* Initialize self-stabilize workqueue */
 +	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);
