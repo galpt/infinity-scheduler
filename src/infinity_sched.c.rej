@@ -1,7 +1,5 @@
-diff --git a/src/infinity_sched.c b/src/infinity_sched.c
-index 84a7680..964d92b 100644
---- a/src/infinity_sched.c
-+++ b/src/infinity_sched.c
+--- src/infinity_sched.c
++++ src/infinity_sched.c
 @@ -283,10 +283,10 @@ static int __init infinity_sched_init(void)
  }
  
