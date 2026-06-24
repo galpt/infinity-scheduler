@@ -95,7 +95,7 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | Consumption | $consumption = delta \times rate / 256$ | 8-bit fixed-point precision |
 
 | Symbol | Meaning |
-|---|---|---|
+|---|---|
 | `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
 | $\alpha$ ($1/16$) | Decay factor — determines how fast the EMA converges |
 | $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
