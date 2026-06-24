@@ -40,13 +40,18 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 ## Quick start
 
 ```bash
+# 1. Clone the repository
 git clone https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
+
+# 2. Build and install (detects running kernel version automatically)
 sudo bash tools/install-infinity-scheduler.sh
+
+# 3. Reboot and select "Infinity scheduler kernel" at the boot menu
 reboot
 ```
 
-After reboot, select "Infinity scheduler kernel (...)" at the boot menu.
+> **Remove:** `sudo bash tools/install-infinity-scheduler.sh --remove` cleans all boot entries, kernel images, and initramfs — the default kernel is never touched.
 
 ### Verify it's running
 
