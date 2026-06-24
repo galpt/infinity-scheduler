@@ -137,10 +137,10 @@ index 3bce48a..02a2509 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..e7690bb
+index 0000000..62456c3
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,406 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -354,10 +354,6 @@ index 0000000..e7690bb
 +	bool adjusted = false;
 +
 +	if (!READ_ONCE(infinity_tune_self_stabilize))
-+		goto reschedule;
-+
-+	/* Ignore the first 30 seconds of boot to let the system stabilize. */
-+	if (time_before(jiffies, msecs_to_jiffies(30000)))
 +		goto reschedule;
 +
 +	/*
