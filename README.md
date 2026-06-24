@@ -95,11 +95,11 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | Consumption | $consumption = delta \times rate / 256$ | 8-bit fixed-point precision |
 
 | Symbol | Meaning |
-|---|---|
+|---|---|---|
 | `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
-| `α` (`1/16`) | Decay factor — determines how fast the EMA converges |
-| `$B_{\max}$` | Maximum budget (2ms) — the EMA never exceeds this bound |
-| `$D_{\max}$` | Max acceleration multiplier (default 256×) |
+| $\alpha$ ($1/16$) | Decay factor — determines how fast the EMA converges |
+| $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
+| $D_{\max}$ | Max acceleration multiplier (default 256×) |
 | `rate` | Budget consumption rate — climbs from 1× to 257× as ema grows |
 
 **Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, budget ≈ 740µs, rate ≈ $1 + 0.63 \times 256 \approx 162\times$. The budget depletes 162× faster. After 256 ticks, $ema$ converges close to $B_{\max}$ and budget approaches 0 — but never reaches it, the true Limitless.
