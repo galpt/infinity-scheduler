@@ -97,7 +97,7 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | Symbol | Meaning |
 |---|---|
 | `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
-| $\alpha$ ($1/16$) | Decay factor — determines how fast the EMA converges |
+| $\alpha = 1/16$ | Decay factor (6.25% per tick) — determines how fast the EMA converges |
 | $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
 | $D_{\max}$ | Max acceleration multiplier (default 256×) |
 | `rate` | Budget consumption rate — climbs from 1× to 257× as ema grows |
