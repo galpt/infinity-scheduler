@@ -96,17 +96,18 @@ budget -= delta_exec * rate;
 runtime_debt = debt;
 ```
 
-In math terms, the acceleration factor $$r(t)$$ at any moment is:
+In math terms, the acceleration factor $r(t)$ at any moment is:
 
 $$
 r(t) = 1 + \frac{d(t)}{\text{CARRIAGE}}
 $$
 
-where $$d(t)$$ is the accumulated runtime since the task last woke up (capped at $$\text{CARRIAGE} \times \text{CAP}$$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches zero asymptotically but never reaches it:
+where $d(t)$ is the accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches the clamp floor asymptotically but never reaches zero:
 
 $$
-\lim_{t \to \infty} \text{budget}(t) = -\text{BUDGET\_MIN} \quad \text{(never zero, never undefined)}
+\lim_{t \to \infty} \text{budget}(t) = -\text{BUDGET-MIN}
 $$
+(The budget approaches the clamp floor but never reaches zero.)
 
 A task that has run for 4ms without sleeping: rate = 3x, budget depletes 3x faster.
 A task that has run for 20ms without sleeping: rate = 11x, budget depletes 11x faster.
