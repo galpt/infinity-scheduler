@@ -52,7 +52,7 @@ reboot
 ```
 
 > [!TIP]
-> `sudo bash tools/install-infinity-scheduler.sh --remove` cleans all boot entries, kernel images, and initramfs — the default kernel is never touched.
+> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity scheduler boot entries, kernel images, and initramfs — the default kernel and its boot entries are never touched.
 
 ### Verify it's running
 
