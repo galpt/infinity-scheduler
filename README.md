@@ -5,6 +5,8 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 > [!TIP]
 > The [v2 branch](https://github.com/galpt/infinity-scheduler/tree/v2) has a more refined implementation — no clamps, no external feedback loop, self-stabilizing by construction.
 
+## Project structure
+
 ```
 .
 │
