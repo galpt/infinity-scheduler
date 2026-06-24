@@ -185,7 +185,6 @@ static int reset_handler(const struct ctl_table *table, int write,
 		WRITE_ONCE(infinity_tune_debt_cap, INFINITY_DEBT_CAP_DEFAULT);
 		WRITE_ONCE(infinity_tune_refill_div, INFINITY_REFILL_DIV_DEFAULT);
 		WRITE_ONCE(infinity_tune_smt_divisor, INFINITY_SMT_DIVISOR_DEFAULT);
-		WRITE_ONCE(infinity_tune_self_stabilize, true);
 		pr_info("Infinity: reset to default values\n");
 	}
 	return ret;
