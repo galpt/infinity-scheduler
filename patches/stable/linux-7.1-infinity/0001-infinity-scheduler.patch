@@ -143,10 +143,10 @@ index 3ebec18..0ab2c94 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..6bea936
+index 0000000..5d092d3
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,377 @@
+@@ -0,0 +1,378 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -155,9 +155,10 @@ index 0000000..6bea936
 + *
 + * Accelerating budget consumption:
 + *
-+ *   debt += delta_exec
-+ *   rate = 1 + min(debt / CARRIAGE_NS, CAP)
++ *   debt = min(runtime_debt + delta_exec, CARRIAGE_NS * CAP)
++ *   rate = 1 + debt / CARRIAGE_NS
 + *   budget -= delta_exec * rate
++ *   runtime_debt = debt
 + *
 + * A freshly woken task has debt = 0, rate = 1 (linear).
 + * As the task runs, debt grows and rate increases — budget depletes
