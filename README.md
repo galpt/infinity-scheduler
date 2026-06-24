@@ -84,32 +84,26 @@ No explicit wakeup preemption logic is needed. The accelerating consumption natu
 
 ### Accelerating consumption formula
 
-The Limitless divides space infinitely; the Infinity scheduler divides time the same way.
-Each nanosecond of CPU time a task consumes is multiplied by a factor that grows the
-longer the task runs — so a CPU-bound task's remaining budget approaches zero
-asymptotically, just like a convergent series approaches its limit.
-
-```c
-debt = min(runtime_debt + delta_exec, CARRIAGE_NS * DEBT_CAP);
-rate = 1 + debt / CARRIAGE_NS;
-budget -= delta_exec * rate;
-runtime_debt = debt;
-```
-
-In math terms, the acceleration factor $r(t)$ at any moment is:
+The Infinity scheduler divides time the same way the Limitless divides space — each unit of
+runtime is multiplied by an ever-growing factor, so a CPU-bound task's remaining budget
+approaches zero asymptotically but never reaches it.
 
 $$
-r(t) = 1 + \frac{d(t)}{\text{CARRIAGE}}
+r = 1 + \frac{d}{\text{CARRIAGE}} \qquad \lim_{t \to \infty} b(t) = B_{\min}
 $$
 
-where $d(t)$ is the accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches the clamp floor asymptotically but never reaches zero:
+| Symbol | Meaning |
+|---|---|
+| $r$ | Acceleration factor — how fast this run's budget is consumed right now |
+| $d$ | Accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$) |
+| $\text{CARRIAGE}$ | Base fair-share window, default 2ms |
+| $\text{CAP}$ | Debt cap multiplier, default 256× |
+| $b(t)$ | Remaining budget at time $t$ |
+| $B_{\min}$ | Budget clamp floor — the budget stops dropping here, never reaching zero |
 
-$$
-\lim_{t \to \infty} b(t) = B_{\min}
-$$
-
-A task that has run for 4ms without sleeping: rate = 3x, budget depletes 3x faster.
-A task that has run for 20ms without sleeping: rate = 11x, budget depletes 11x faster.
+**Example:** a task that has run for 4ms without sleeping: $r = 1 + 4\text{ms} / 2\text{ms} = 3$, so its budget depletes 3× faster.  
+After 20ms: $r = 1 + 20\text{ms} / 2\text{ms} = 11$, so its budget depletes 11× faster.  
+The budget asymptotically approaches $B_{\min}$, exactly like a convergent series approaches its limit — never zero, never undefined.
 
 ## Tunables
 
