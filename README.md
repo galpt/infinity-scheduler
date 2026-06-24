@@ -102,9 +102,7 @@ $$
 r(t) = 1 + \frac{d(t)}{\text{CARRIAGE}}
 $$
 
-where $d(t)$ is the accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches the clamp floor asymptotically but never reaches zero:
-
-The budget converges to the clamp floor — it approaches zero asymptotically but never reaches it:
+where $d(t)$ is the accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches the clamp floor asymptotically but never reaches zero.
 
 $$
 \lim_{t \to \infty} b(t) = B_{\min}
