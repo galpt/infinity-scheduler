@@ -147,15 +147,15 @@ static const struct ctl_table infinity_sysctl_table[] = {
 	},
 	{
 		.procname	= "running",
-		.data		= &(int){1},
+		.data		= &infinity_running_flag,
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
-		.extra1		= SYSCTL_ONE,
-		.extra2		= SYSCTL_ONE,
 	},
 	{}
 };
+
+static int infinity_running_flag = 1;
 
 /* ------------------------------------------------------------------ */
 /* Per-CPU stats tracking (BSS-preallocated, like scx_flow)           */
@@ -284,9 +284,8 @@ static int __init infinity_sched_init(void)
 }
 
 /*
- * Called early from the kernel init path.
- * The Makefile adds infinity_sched.o to obj-y, so this runs during
- * the scheduler init phase.
+ * Called during the device init phase, after the sysctl infrastructure
+ * is guaranteed to be available.
  */
 early_initcall(infinity_sched_init);
 
