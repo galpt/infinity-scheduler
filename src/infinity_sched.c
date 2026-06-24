@@ -6,9 +6,10 @@
  *
  * Accelerating budget consumption:
  *
- *   debt += delta_exec
- *   rate = 1 + min(debt / CARRIAGE_NS, CAP)
+ *   debt = min(runtime_debt + delta_exec, CARRIAGE_NS * CAP)
+ *   rate = 1 + debt / CARRIAGE_NS
  *   budget -= delta_exec * rate
+ *   runtime_debt = debt
  *
  * A freshly woken task has debt = 0, rate = 1 (linear).
  * As the task runs, debt grows and rate increases — budget depletes
