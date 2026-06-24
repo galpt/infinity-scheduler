@@ -80,7 +80,7 @@ cmd_status() {
         warn "Infinity kernel not installed"
     fi
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
-        if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
+        if grep -qE "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
             ok "Limine entry: Infinity scheduler kernel"
             break
         fi
@@ -462,11 +462,12 @@ setup_limine_entry() {
     local initrd_path="/initramfs-infinity-$ver.img"
 
     # Remove old Infinity entries
-    if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
+    if grep -qE "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
         info "Removing old Infinity entries from Limine config..."
         awk '/^\/[Ii]nfinity scheduler kernel/ { skip = 1; next }
-             skip && /^\//              { skip = 0 }
-             !skip' "$limine_conf" > "${limine_conf}.tmp" && \
+             skip && /^\// && !/^\/[Ii]nfinity scheduler kernel/ { skip = 0 }
+             skip { next }
+             1' "$limine_conf" > "${limine_conf}.tmp" && \
             mv "${limine_conf}.tmp" "$limine_conf"
     fi
 
@@ -561,11 +562,12 @@ cmd_remove() {
     # Remove Limine entries
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
         [ -f "$limine_conf" ] || continue
-        if grep -qF "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
+        if grep -qE "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
             info "Removing Infinity entries from $limine_conf ..."
             awk '/^\/[Ii]nfinity scheduler kernel/ { skip = 1; next }
-                 skip && /^\//              { skip = 0 }
-                 !skip' "$limine_conf" > "${limine_conf}.tmp" && \
+                 skip && /^\// && !/^\/[Ii]nfinity scheduler kernel/ { skip = 0 }
+                 skip { next }
+                 1' "$limine_conf" > "${limine_conf}.tmp" && \
                 mv "${limine_conf}.tmp" "$limine_conf" && \
                 ok "Limine entries removed from $limine_conf"
         fi
