@@ -213,10 +213,6 @@ static void infinity_stabilize_fn(struct work_struct *work)
 	if (!READ_ONCE(infinity_tune_self_stabilize))
 		goto reschedule;
 
-	/* Ignore the first 30 seconds of boot to let the system stabilize. */
-	if (time_before(jiffies, msecs_to_jiffies(30000)))
-		goto reschedule;
-
 	/*
 	 * Aggregate per-CPU metrics over the last window.
 	 * Each CPU tracks its own budget exhaustion rate.
