@@ -61,7 +61,7 @@ reboot
 uname -r                                           # → 7.0.12-infinity
 
 # The running flag is set
-sysctl kernel.infinity.running                     # → kernel.infinity.running = 1
+sysctl kernel.infinity_running                     # → kernel.infinity_running = 1
 
 # The boot log confirms activation
 dmesg | grep Infinity                              # → Infinity scheduler active: carriage=...
@@ -113,18 +113,18 @@ A task that has run for 20ms without sleeping: rate = 11x, budget depletes 11x f
 
 ## Tunables
 
-The scheduler exposes sysctl parameters under `kernel.infinity.*` for live tuning.
+The scheduler exposes sysctl parameters under `kernel.infinity_*` for live tuning.
 All values are clamped at write time to safe ranges — the scheduler can never
 enter an invalid state regardless of input.
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|
-| `carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
-| `debt_cap` | 256 | [1, 4096] | Runtime debt cap (multiplier × CARRIAGE_NS) |
-| `refill_div` | 100 | [1, 65536] | Budget refill divisor |
-| `smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
-| `self_stabilize` | 1 | [0, 1] | Automatic tuning |
-| `running` | 1 (ro) | — | Active flag |
+|---|---|---|---|---|
+| `infinity_carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
+| `infinity_debt_cap` | 256 | [1, 4096] | Runtime debt cap (multiplier × CARRIAGE_NS) |
+| `infinity_refill_div` | 100 | [1, 65536] | Budget refill divisor |
+| `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
+| `infinity_self_stabilize` | 1 | [0, 1] | Automatic tuning |
+| `infinity_running` | 1 (ro) | — | Active flag |
 
 ### Self-stabilize mode
 
@@ -137,15 +137,15 @@ values are tightened for better interactivity.
 To disable auto-tuning and set values manually:
 
 ```bash
-sysctl kernel.infinity.self_stabilize=0
-sysctl kernel.infinity.carriage_ns=4000000     # 4ms base window
-sysctl kernel.infinity.debt_cap=128            # less aggressive
+sysctl kernel.infinity_self_stabilize=0
+sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
+sysctl kernel.infinity_debt_cap=128            # less aggressive
 ```
 
 Re-enable self-stabilize to let the feedback loop resume tuning:
 
 ```bash
-sysctl kernel.infinity.self_stabilize=1
+sysctl kernel.infinity_self_stabilize=1
 ```
 
 ## Feature comparison

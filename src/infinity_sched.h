@@ -15,13 +15,13 @@
  *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
  *   init/init_task.c        ──init──► infinity.{}             — static init
  *
- * Tunables (sysctl kernel.infinity.*):
- *   carriage_ns   — base fair-share window (default 2ms)
- *   debt_cap      — runtime debt cap multiplier (default 256x)
- *   refill_div    — budget refill divisor (default 100)
- *   smt_divisor   — SMT secondary slice divisor (default 2)
- *   self_stabilize — automatic tuning (default 1)
- *   running       — read-only flag, 1 if active
+ * Tunables (sysctl kernel.infinity_*):
+ *   infinity_carriage_ns   — base fair-share window (default 2ms)
+ *   infinity_debt_cap      — runtime debt cap multiplier (default 256x)
+ *   infinity_refill_div    — budget refill divisor (default 100)
+ *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
+ *   infinity_self_stabilize — automatic tuning (default 1)
+ *   infinity_running       — read-only flag, 1 if active
  *
  * Self-stabilize mode: when enabled, a feedback loop monitors per-CPU
  * scheduling metrics and adjusts tunables within safe clamped ranges.

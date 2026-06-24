@@ -124,42 +124,42 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
 
 static const struct ctl_table infinity_sysctl_table[] = {
 	{
-		.procname	= "carriage_ns",
+		.procname	= "infinity_carriage_ns",
 		.data		= &infinity_tune_carriage_ns,
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= clamp_carriage_ns,
 	},
 	{
-		.procname	= "debt_cap",
+		.procname	= "infinity_debt_cap",
 		.data		= &infinity_tune_debt_cap,
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= clamp_debt_cap,
 	},
 	{
-		.procname	= "refill_div",
+		.procname	= "infinity_refill_div",
 		.data		= &infinity_tune_refill_div,
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= clamp_refill_div,
 	},
 	{
-		.procname	= "smt_divisor",
+		.procname	= "infinity_smt_divisor",
 		.data		= &infinity_tune_smt_divisor,
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= clamp_smt_divisor,
 	},
 	{
-		.procname	= "self_stabilize",
+		.procname	= "infinity_self_stabilize",
 		.data		= &infinity_tune_self_stabilize,
 		.maxlen		= sizeof(bool),
 		.mode		= 0644,
 		.proc_handler	= proc_dobool,
 	},
 	{
-		.procname	= "running",
+		.procname	= "infinity_running",
 		.data		= &infinity_running_flag,
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
@@ -213,6 +213,10 @@ static void infinity_stabilize_fn(struct work_struct *work)
 	if (!READ_ONCE(infinity_tune_self_stabilize))
 		goto reschedule;
 
+	/* Ignore the first 30 seconds of boot to let the system stabilize. */
+	if (time_before(jiffies, msecs_to_jiffies(30000)))
+		goto reschedule;
+
 	/*
 	 * Aggregate per-CPU metrics over the last window.
 	 * Each CPU tracks its own budget exhaustion rate.
@@ -243,24 +247,28 @@ static void infinity_stabilize_fn(struct work_struct *work)
 
 	/*
 	 * Debounce: require 2 consecutive readings above/below threshold
-	 * before adjusting.  Adjustments use 25% steps (×5/4 or ×4/5)
-	 * instead of 2x to avoid abrupt scheduling changes.
+	 * before adjusting.  Adjustments use +12.5% (×9/8 instead of ×5/4)
+	 * to converge slowly over minutes rather than seconds.
+	 *
+	 * Thresholds: high if avg_load > 500 (was 50 — too sensitive).
+	 * With INFINITY_STATS_WINDOW = 16 exhaustions per CPU, 500 means
+	 * ~31 expensive-per-CPU budget events in the window.
 	 */
-	if (avg_load > 50 && carriage < INFINITY_CARRIAGE_NS_MAX) {
+	if (avg_load > 500 && carriage < INFINITY_CARRIAGE_NS_MAX) {
 		infinity_stabilize_count++;
 		if (infinity_stabilize_count >= 2) {
-			carriage = min(carriage + carriage / 4, INFINITY_CARRIAGE_NS_MAX);
+			carriage = min(carriage + carriage / 8, INFINITY_CARRIAGE_NS_MAX);
 			if (cap > INFINITY_DEBT_CAP_MIN)
-				cap = max(cap - cap / 4, (unsigned long)INFINITY_DEBT_CAP_MIN);
+				cap = max(cap - cap / 8, (unsigned long)INFINITY_DEBT_CAP_MIN);
 			adjusted = true;
 			infinity_stabilize_count = 0;
 		}
-	} else if (avg_load < 10 && carriage > INFINITY_CARRIAGE_NS_MIN) {
+	} else if (avg_load < 50 && carriage > INFINITY_CARRIAGE_NS_MIN) {
 		infinity_stabilize_count++;
 		if (infinity_stabilize_count >= 2) {
-			carriage = max(carriage - carriage / 4, INFINITY_CARRIAGE_NS_MIN);
+			carriage = max(carriage - carriage / 8, INFINITY_CARRIAGE_NS_MIN);
 			if (cap < INFINITY_DEBT_CAP_MAX)
-				cap = min(cap + cap / 4, (unsigned long)INFINITY_DEBT_CAP_MAX);
+				cap = min(cap + cap / 8, (unsigned long)INFINITY_DEBT_CAP_MAX);
 			adjusted = true;
 			infinity_stabilize_count = 0;
 		}
@@ -286,8 +294,8 @@ reschedule:
 
 static int __init infinity_sched_init(void)
 {
-	/* Register sysctl table */
-	register_sysctl_init("kernel/infinity", infinity_sysctl_table);
+	/* Register sysctl table under kernel/ (matching BORE's approach) */
+	register_sysctl_init("kernel", infinity_sysctl_table);
 
 	/* Initialize self-stabilize workqueue */
 	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);
