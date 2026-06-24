@@ -63,8 +63,8 @@ uname -r                                           # → 7.0.12-infinity
 # The running flag is set
 sysctl kernel.infinity_running                     # → kernel.infinity_running = 1
 
-# The boot log confirms activation
-dmesg | grep Infinity                              # → Infinity scheduler active: carriage=...
+# The boot log confirms activation (requires sudo)
+sudo dmesg | grep Infinity                         # → Infinity scheduler active: carriage=...
 ```
 
 ## How it works
