@@ -58,7 +58,7 @@ reboot
 
 ```bash
 # The kernel version ends with -infinity
-uname -r                                          # → 7.0.12-infinity
+uname -r                                           # → 7.0.12-infinity
 
 # The running flag is set
 sysctl kernel.infinity.running                     # → kernel.infinity.running = 1
