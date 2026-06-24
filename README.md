@@ -118,7 +118,7 @@ All values are clamped at write time to safe ranges — the scheduler can never
 enter an invalid state regardless of input.
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|---|
+|---|---|---|---|
 | `infinity_carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
 | `infinity_debt_cap` | 256 | [1, 4096] | Runtime debt cap (multiplier × CARRIAGE_NS) |
 | `infinity_refill_div` | 100 | [1, 65536] | Budget refill divisor |
