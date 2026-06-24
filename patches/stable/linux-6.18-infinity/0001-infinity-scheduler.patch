@@ -498,7 +498,7 @@ index 0000000..728897e
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..8850dc2
+index 0000000..c42da49
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,123 @@
@@ -559,7 +559,7 @@ index 0000000..8850dc2
 +#define INFINITY_CARRIAGE_NS_MAX	100000000ULL	/* 100ms */
 +
 +#define INFINITY_DEBT_CAP_MIN		1
-+#define INFINITY_DEBT_CAP_MAX		65536
++#define INFINITY_DEBT_CAP_MAX		4096
 +
 +#define INFINITY_REFILL_DIV_MIN		1
 +#define INFINITY_REFILL_DIV_MAX		65536

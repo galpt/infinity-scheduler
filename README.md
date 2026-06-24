@@ -84,7 +84,7 @@ enter an invalid state regardless of input.
 | Parameter | Default | Range | Description |
 |---|---|---|---|
 | `carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
-| `debt_cap` | 256 | [1, 65536] | Runtime debt cap (multiplier × CARRIAGE_NS) |
+| `debt_cap` | 256 | [1, 4096] | Runtime debt cap (multiplier × CARRIAGE_NS) |
 | `refill_div` | 100 | [1, 65536] | Budget refill divisor |
 | `self_stabilize` | 1 | [0, 1] | Automatic tuning |
 | `running` | 1 (ro) | — | Active flag |
