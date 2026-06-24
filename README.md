@@ -86,13 +86,13 @@ No explicit wakeup preemption logic is needed. The EMA naturally converges towar
 
 The EMA replaces the old accumulator + clamp approach with a smooth asymptotic convergence:
 
-```
-While running:  ema += (BUDGET_MAX - ema) * α / 256
-While sleeping: ema -= ema * α / 256           (via catch-up on wakeup)
-budget = BUDGET_MAX - ema                       (naturally bounded, no clamp)
-rate   = 1 + ema * DEBT_CAP / BUDGET_MAX        (smooth fixed-point)
-consumption = delta_exec * rate                 (8-bit fractional precision)
-```
+| Operation | Formula | Description |
+|---|---|---|
+| While running | `$\text{ema} = \text{ema} + (\text{BUDGET\_MAX} - \text{ema}) \times \alpha / 256$` | EMA climbs toward `BUDGET_MAX` |
+| While sleeping | `$\text{ema} = \text{ema} - \text{ema} \times \alpha / 256$` | EMA decays toward 0 (catch-up on wakeup) |
+| Budget | `$\text{budget} = \text{BUDGET\_MAX} - \text{ema}$` | Naturally in `[0, BUDGET_MAX]` — no clamp |
+| Rate | `$\text{rate} = 1 + \dfrac{\text{ema} \times \text{DEBT\_CAP}}{\text{BUDGET\_MAX}}$` | Consumption multiplier (fixed-point) |
+| Consumption | `$\text{consumption} = \text{delta} \times \text{rate} / 256$` | 8-bit fixed-point precision |
 
 | Symbol | Meaning |
 |---|---|
