@@ -137,10 +137,10 @@ index 3ebec18..0881a9f 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..e5742c8
+index 0000000..ad9d575
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,443 @@
+@@ -0,0 +1,442 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -328,7 +328,6 @@ index 0000000..e5742c8
 +		WRITE_ONCE(infinity_tune_debt_cap, INFINITY_DEBT_CAP_DEFAULT);
 +		WRITE_ONCE(infinity_tune_refill_div, INFINITY_REFILL_DIV_DEFAULT);
 +		WRITE_ONCE(infinity_tune_smt_divisor, INFINITY_SMT_DIVISOR_DEFAULT);
-+		WRITE_ONCE(infinity_tune_self_stabilize, true);
 +		pr_info("Infinity: reset to default values\n");
 +	}
 +	return ret;

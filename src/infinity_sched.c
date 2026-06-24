@@ -174,7 +174,6 @@ static int reset_handler(const struct ctl_table *table, int write,
 			 void *buf, size_t *lenp, loff_t *ppos)
 {
 	int ret;
-	unsigned long val = 0;
 	struct ctl_table tmp = *table;
 
 	infinity_reset_val = 0;
