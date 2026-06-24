@@ -50,7 +50,7 @@ index b1f1a36..9bea385 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48a..6622b6e 100644
+index 3bce48a..1fb0c5a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -84,7 +84,7 @@ index 3bce48a..6622b6e 100644
  	if (unlikely(delta_exec <= 0))
  		return;
  
-+	/* Infinity: accelerating budget consumption */
++	/* Infinity: budget consumption */
 +	if (entity_is_task(curr)) { struct task_struct *p__ = task_of(curr);
 +		infinity_consume(&p__->infinity, delta_exec); }
 +
@@ -130,7 +130,7 @@ index 3bce48a..6622b6e 100644
  {
 +	struct rq *rq = this_rq();
 +
-+	/* Infinity: init child budget and debt */
++	/* Infinity: init child */
 +	infinity_fork_init(&p->infinity, rq_clock(rq));
 +
  	set_task_max_allowed_capacity(p);
@@ -138,10 +138,10 @@ index 3bce48a..6622b6e 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..964d92b
+index 0000000..b2da459
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,394 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -190,14 +190,17 @@ index 0000000..964d92b
 +			     void *buf, size_t *lenp, loff_t *ppos)
 +{
 +	int ret;
-+	unsigned long val;
++	unsigned long old, val;
 +	struct ctl_table tmp = *table;
 +
-+	val = READ_ONCE(infinity_tune_carriage_ns);
++	old = READ_ONCE(infinity_tune_carriage_ns);
++	val = old;
 +	tmp.data = &val;
 +	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 +	if (write && ret == 0) {
 +		val = clamp(val, INFINITY_CARRIAGE_NS_MIN, INFINITY_CARRIAGE_NS_MAX);
++		if (val != old)
++			pr_info("Infinity: carriage_ns %lu -> %lu\n", old, val);
 +		WRITE_ONCE(infinity_tune_carriage_ns, val);
 +	}
 +	return ret;
@@ -207,14 +210,17 @@ index 0000000..964d92b
 +			  void *buf, size_t *lenp, loff_t *ppos)
 +{
 +	int ret;
-+	unsigned long val;
++	unsigned long old, val;
 +	struct ctl_table tmp = *table;
 +
-+	val = READ_ONCE(infinity_tune_debt_cap);
++	old = READ_ONCE(infinity_tune_debt_cap);
++	val = old;
 +	tmp.data = &val;
 +	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 +	if (write && ret == 0) {
 +		val = clamp(val, INFINITY_DEBT_CAP_MIN, INFINITY_DEBT_CAP_MAX);
++		if (val != old)
++			pr_info("Infinity: debt_cap %lu -> %lu\n", old, val);
 +		WRITE_ONCE(infinity_tune_debt_cap, val);
 +	}
 +	return ret;
@@ -224,14 +230,17 @@ index 0000000..964d92b
 +			    void *buf, size_t *lenp, loff_t *ppos)
 +{
 +	int ret;
-+	unsigned long val;
++	unsigned long old, val;
 +	struct ctl_table tmp = *table;
 +
-+	val = READ_ONCE(infinity_tune_refill_div);
++	old = READ_ONCE(infinity_tune_refill_div);
++	val = old;
 +	tmp.data = &val;
 +	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 +	if (write && ret == 0) {
 +		val = clamp(val, INFINITY_REFILL_DIV_MIN, INFINITY_REFILL_DIV_MAX);
++		if (val != old)
++			pr_info("Infinity: refill_div %lu -> %lu\n", old, val);
 +		WRITE_ONCE(infinity_tune_refill_div, val);
 +	}
 +	return ret;
@@ -241,14 +250,17 @@ index 0000000..964d92b
 +			     void *buf, size_t *lenp, loff_t *ppos)
 +{
 +	int ret;
-+	unsigned long val;
++	unsigned long old, val;
 +	struct ctl_table tmp = *table;
 +
-+	val = READ_ONCE(infinity_tune_smt_divisor);
++	old = READ_ONCE(infinity_tune_smt_divisor);
++	val = old;
 +	tmp.data = &val;
 +	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 +	if (write && ret == 0) {
 +		val = clamp(val, INFINITY_SMT_DIVISOR_MIN, INFINITY_SMT_DIVISOR_MAX);
++		if (val != old)
++			pr_info("Infinity: smt_divisor %lu -> %lu\n", old, val);
 +		WRITE_ONCE(infinity_tune_smt_divisor, val);
 +	}
 +	return ret;
@@ -319,6 +331,7 @@ index 0000000..964d92b
 +/* ------------------------------------------------------------------ */
 +
 +static struct delayed_work infinity_stabilize_work;
++static unsigned int infinity_stabilize_count;	/* debounce: consecutive high/low readings */
 +
 +/*
 + * Called from update_curr via the budget exhaustion path.
@@ -337,8 +350,9 @@ index 0000000..964d92b
 +	int cpu;
 +	u64 total_exhaustion_rate = 0;
 +	u64 avg_load = 0;
-+	unsigned long carriage, cap;
++	unsigned long carriage, cap, old_carriage, old_cap;
 +	int nr_active_cpus = 0;
++	bool adjusted = false;
 +
 +	if (!READ_ONCE(infinity_tune_self_stabilize))
 +		goto reschedule;
@@ -346,9 +360,6 @@ index 0000000..964d92b
 +	/*
 +	 * Aggregate per-CPU metrics over the last window.
 +	 * Each CPU tracks its own budget exhaustion rate.
-+	 * A high exhaustion rate means tasks are running out
-+	 * of budget too quickly, suggesting the acceleration
-+	 * is too aggressive or the carriage window is too small.
 +	 */
 +	for_each_online_cpu(cpu) {
 +		struct infinity_cpu_stats *st = per_cpu_ptr(&infinity_stats, cpu);
@@ -356,7 +367,6 @@ index 0000000..964d92b
 +		u64 exhaust_window = 0;
 +		int i;
 +
-+		/* Sum the last INFINITY_STATS_WINDOW samples */
 +		for (i = 0; i < INFINITY_STATS_WINDOW; i++) {
 +			u64 idx = (n >= INFINITY_STATS_WINDOW)
 +				? (n - INFINITY_STATS_WINDOW + i) % INFINITY_STATS_WINDOW
@@ -371,38 +381,46 @@ index 0000000..964d92b
 +		}
 +	}
 +
-+	/*
-+	 * Decision logic:
-+	 *
-+	 * If exhaustion rate is high → tasks are hitting budget cap often.
-+	 *   -> Increase carriage_ns (longer base window = lower rate)
-+	 *   -> Decrease debt_cap (lower cap = less aggressive acceleration)
-+	 *
-+	 * If exhaustion rate is very low → system is underutilized.
-+	 *   -> Decrease carriage_ns (shorter window = better interactivity)
-+	 *   -> Increase debt_cap (higher cap = more room for bursts)
-+	 */
-+	carriage = READ_ONCE(infinity_tune_carriage_ns);
-+	cap = READ_ONCE(infinity_tune_debt_cap);
++	old_carriage = carriage = READ_ONCE(infinity_tune_carriage_ns);
++	old_cap = cap = READ_ONCE(infinity_tune_debt_cap);
 +	avg_load = nr_active_cpus > 0 ? total_exhaustion_rate / nr_active_cpus : 0;
 +
++	/*
++	 * Debounce: require 2 consecutive readings above/below threshold
++	 * before adjusting.  Adjustments use 25% steps (×5/4 or ×4/5)
++	 * instead of 2x to avoid abrupt scheduling changes.
++	 */
 +	if (avg_load > 50 && carriage < INFINITY_CARRIAGE_NS_MAX) {
-+		/* Exhaustion rate is high — ease up on acceleration */
-+		carriage = min(carriage * 2, INFINITY_CARRIAGE_NS_MAX);
-+		if (cap > INFINITY_DEBT_CAP_MIN)
-+			cap = max(cap / 2, (unsigned long)INFINITY_DEBT_CAP_MIN);
++		infinity_stabilize_count++;
++		if (infinity_stabilize_count >= 2) {
++			carriage = min(carriage + carriage / 4, INFINITY_CARRIAGE_NS_MAX);
++			if (cap > INFINITY_DEBT_CAP_MIN)
++				cap = max(cap - cap / 4, (unsigned long)INFINITY_DEBT_CAP_MIN);
++			adjusted = true;
++			infinity_stabilize_count = 0;
++		}
 +	} else if (avg_load < 10 && carriage > INFINITY_CARRIAGE_NS_MIN) {
-+		/* Exhaustion rate is low — tighten for better interactivity */
-+		carriage = max(carriage / 2, INFINITY_CARRIAGE_NS_MIN);
-+		if (cap < INFINITY_DEBT_CAP_MAX)
-+			cap = min(cap * 2, (unsigned long)INFINITY_DEBT_CAP_MAX);
++		infinity_stabilize_count++;
++		if (infinity_stabilize_count >= 2) {
++			carriage = max(carriage - carriage / 4, INFINITY_CARRIAGE_NS_MIN);
++			if (cap < INFINITY_DEBT_CAP_MAX)
++				cap = min(cap + cap / 4, (unsigned long)INFINITY_DEBT_CAP_MAX);
++			adjusted = true;
++			infinity_stabilize_count = 0;
++		}
++	} else {
++		/* Reset debounce counter on in-range reading */
++		infinity_stabilize_count = 0;
 +	}
 +
-+	WRITE_ONCE(infinity_tune_carriage_ns, carriage);
-+	WRITE_ONCE(infinity_tune_debt_cap, cap);
++	if (adjusted) {
++		WRITE_ONCE(infinity_tune_carriage_ns, carriage);
++		WRITE_ONCE(infinity_tune_debt_cap, cap);
++		pr_info("Infinity: self-stabilize carriage_ns %lu -> %lu, debt_cap %lu -> %lu\n",
++			old_carriage, carriage, old_cap, cap);
++	}
 +
 +reschedule:
-+	/* Run every 2 seconds */
 +	schedule_delayed_work(&infinity_stabilize_work, msecs_to_jiffies(2000));
 +}
 +

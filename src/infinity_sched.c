@@ -46,14 +46,17 @@ static int clamp_carriage_ns(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
 {
 	int ret;
-	unsigned long val;
+	unsigned long old, val;
 	struct ctl_table tmp = *table;
 
-	val = READ_ONCE(infinity_tune_carriage_ns);
+	old = READ_ONCE(infinity_tune_carriage_ns);
+	val = old;
 	tmp.data = &val;
 	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 	if (write && ret == 0) {
 		val = clamp(val, INFINITY_CARRIAGE_NS_MIN, INFINITY_CARRIAGE_NS_MAX);
+		if (val != old)
+			pr_info("Infinity: carriage_ns %lu -> %lu\n", old, val);
 		WRITE_ONCE(infinity_tune_carriage_ns, val);
 	}
 	return ret;
@@ -63,14 +66,17 @@ static int clamp_debt_cap(const struct ctl_table *table, int write,
 			  void *buf, size_t *lenp, loff_t *ppos)
 {
 	int ret;
-	unsigned long val;
+	unsigned long old, val;
 	struct ctl_table tmp = *table;
 
-	val = READ_ONCE(infinity_tune_debt_cap);
+	old = READ_ONCE(infinity_tune_debt_cap);
+	val = old;
 	tmp.data = &val;
 	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 	if (write && ret == 0) {
 		val = clamp(val, INFINITY_DEBT_CAP_MIN, INFINITY_DEBT_CAP_MAX);
+		if (val != old)
+			pr_info("Infinity: debt_cap %lu -> %lu\n", old, val);
 		WRITE_ONCE(infinity_tune_debt_cap, val);
 	}
 	return ret;
@@ -80,14 +86,17 @@ static int clamp_refill_div(const struct ctl_table *table, int write,
 			    void *buf, size_t *lenp, loff_t *ppos)
 {
 	int ret;
-	unsigned long val;
+	unsigned long old, val;
 	struct ctl_table tmp = *table;
 
-	val = READ_ONCE(infinity_tune_refill_div);
+	old = READ_ONCE(infinity_tune_refill_div);
+	val = old;
 	tmp.data = &val;
 	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 	if (write && ret == 0) {
 		val = clamp(val, INFINITY_REFILL_DIV_MIN, INFINITY_REFILL_DIV_MAX);
+		if (val != old)
+			pr_info("Infinity: refill_div %lu -> %lu\n", old, val);
 		WRITE_ONCE(infinity_tune_refill_div, val);
 	}
 	return ret;
@@ -97,14 +106,17 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
 {
 	int ret;
-	unsigned long val;
+	unsigned long old, val;
 	struct ctl_table tmp = *table;
 
-	val = READ_ONCE(infinity_tune_smt_divisor);
+	old = READ_ONCE(infinity_tune_smt_divisor);
+	val = old;
 	tmp.data = &val;
 	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
 	if (write && ret == 0) {
 		val = clamp(val, INFINITY_SMT_DIVISOR_MIN, INFINITY_SMT_DIVISOR_MAX);
+		if (val != old)
+			pr_info("Infinity: smt_divisor %lu -> %lu\n", old, val);
 		WRITE_ONCE(infinity_tune_smt_divisor, val);
 	}
 	return ret;
@@ -175,6 +187,7 @@ static DEFINE_PER_CPU(struct infinity_cpu_stats, infinity_stats);
 /* ------------------------------------------------------------------ */
 
 static struct delayed_work infinity_stabilize_work;
+static unsigned int infinity_stabilize_count;	/* debounce: consecutive high/low readings */
 
 /*
  * Called from update_curr via the budget exhaustion path.
@@ -193,8 +206,9 @@ static void infinity_stabilize_fn(struct work_struct *work)
 	int cpu;
 	u64 total_exhaustion_rate = 0;
 	u64 avg_load = 0;
-	unsigned long carriage, cap;
+	unsigned long carriage, cap, old_carriage, old_cap;
 	int nr_active_cpus = 0;
+	bool adjusted = false;
 
 	if (!READ_ONCE(infinity_tune_self_stabilize))
 		goto reschedule;
@@ -202,9 +216,6 @@ static void infinity_stabilize_fn(struct work_struct *work)
 	/*
 	 * Aggregate per-CPU metrics over the last window.
 	 * Each CPU tracks its own budget exhaustion rate.
-	 * A high exhaustion rate means tasks are running out
-	 * of budget too quickly, suggesting the acceleration
-	 * is too aggressive or the carriage window is too small.
 	 */
 	for_each_online_cpu(cpu) {
 		struct infinity_cpu_stats *st = per_cpu_ptr(&infinity_stats, cpu);
@@ -212,7 +223,6 @@ static void infinity_stabilize_fn(struct work_struct *work)
 		u64 exhaust_window = 0;
 		int i;
 
-		/* Sum the last INFINITY_STATS_WINDOW samples */
 		for (i = 0; i < INFINITY_STATS_WINDOW; i++) {
 			u64 idx = (n >= INFINITY_STATS_WINDOW)
 				? (n - INFINITY_STATS_WINDOW + i) % INFINITY_STATS_WINDOW
@@ -227,38 +237,46 @@ static void infinity_stabilize_fn(struct work_struct *work)
 		}
 	}
 
-	/*
-	 * Decision logic:
-	 *
-	 * If exhaustion rate is high → tasks are hitting budget cap often.
-	 *   -> Increase carriage_ns (longer base window = lower rate)
-	 *   -> Decrease debt_cap (lower cap = less aggressive acceleration)
-	 *
-	 * If exhaustion rate is very low → system is underutilized.
-	 *   -> Decrease carriage_ns (shorter window = better interactivity)
-	 *   -> Increase debt_cap (higher cap = more room for bursts)
-	 */
-	carriage = READ_ONCE(infinity_tune_carriage_ns);
-	cap = READ_ONCE(infinity_tune_debt_cap);
+	old_carriage = carriage = READ_ONCE(infinity_tune_carriage_ns);
+	old_cap = cap = READ_ONCE(infinity_tune_debt_cap);
 	avg_load = nr_active_cpus > 0 ? total_exhaustion_rate / nr_active_cpus : 0;
 
+	/*
+	 * Debounce: require 2 consecutive readings above/below threshold
+	 * before adjusting.  Adjustments use 25% steps (×5/4 or ×4/5)
+	 * instead of 2x to avoid abrupt scheduling changes.
+	 */
 	if (avg_load > 50 && carriage < INFINITY_CARRIAGE_NS_MAX) {
-		/* Exhaustion rate is high — ease up on acceleration */
-		carriage = min(carriage * 2, INFINITY_CARRIAGE_NS_MAX);
-		if (cap > INFINITY_DEBT_CAP_MIN)
-			cap = max(cap / 2, (unsigned long)INFINITY_DEBT_CAP_MIN);
+		infinity_stabilize_count++;
+		if (infinity_stabilize_count >= 2) {
+			carriage = min(carriage + carriage / 4, INFINITY_CARRIAGE_NS_MAX);
+			if (cap > INFINITY_DEBT_CAP_MIN)
+				cap = max(cap - cap / 4, (unsigned long)INFINITY_DEBT_CAP_MIN);
+			adjusted = true;
+			infinity_stabilize_count = 0;
+		}
 	} else if (avg_load < 10 && carriage > INFINITY_CARRIAGE_NS_MIN) {
-		/* Exhaustion rate is low — tighten for better interactivity */
-		carriage = max(carriage / 2, INFINITY_CARRIAGE_NS_MIN);
-		if (cap < INFINITY_DEBT_CAP_MAX)
-			cap = min(cap * 2, (unsigned long)INFINITY_DEBT_CAP_MAX);
+		infinity_stabilize_count++;
+		if (infinity_stabilize_count >= 2) {
+			carriage = max(carriage - carriage / 4, INFINITY_CARRIAGE_NS_MIN);
+			if (cap < INFINITY_DEBT_CAP_MAX)
+				cap = min(cap + cap / 4, (unsigned long)INFINITY_DEBT_CAP_MAX);
+			adjusted = true;
+			infinity_stabilize_count = 0;
+		}
+	} else {
+		/* Reset debounce counter on in-range reading */
+		infinity_stabilize_count = 0;
 	}
 
-	WRITE_ONCE(infinity_tune_carriage_ns, carriage);
-	WRITE_ONCE(infinity_tune_debt_cap, cap);
+	if (adjusted) {
+		WRITE_ONCE(infinity_tune_carriage_ns, carriage);
+		WRITE_ONCE(infinity_tune_debt_cap, cap);
+		pr_info("Infinity: self-stabilize carriage_ns %lu -> %lu, debt_cap %lu -> %lu\n",
+			old_carriage, carriage, old_cap, cap);
+	}
 
 reschedule:
-	/* Run every 2 seconds */
 	schedule_delayed_work(&infinity_stabilize_work, msecs_to_jiffies(2000));
 }
 
