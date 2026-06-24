@@ -50,7 +50,7 @@ index b1f1a36..9bea385 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec18..928eee1 100644
+index 3ebec18..f0c11ef 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -80,20 +80,18 @@ index 3ebec18..928eee1 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1424,6 +1433,12 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1424,6 +1433,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
 +	/* Infinity: accelerating budget consumption */
-+	if (entity_is_task(curr)) {
-+		struct task_struct *p__ = task_of(curr);
-+		infinity_consume(&p__->infinity, delta_exec);
-+	}
++	if (entity_is_task(curr)) { struct task_struct *p__ = task_of(curr);
++		infinity_consume(&p__->infinity, delta_exec); }
 +
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  
-@@ -5783,6 +5798,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5783,6 +5796,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
@@ -102,7 +100,7 @@ index 3ebec18..928eee1 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7215,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7198,6 +7213,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -112,12 +110,11 @@ index 3ebec18..928eee1 100644
 +		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
 +		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
 +			infinity_refill_budget(&p->infinity, now - p->infinity.last_sleep_ns);
-+		p->infinity.runtime_debt = 0;
-+	}
++		p->infinity.runtime_debt = 0; }
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7455,9 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7430,6 +7452,9 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -127,7 +124,7 @@ index 3ebec18..928eee1 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13741,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,6 +13738,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -141,7 +138,7 @@ index 3ebec18..928eee1 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..84a7680
+index 0000000..964d92b
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,376 @@
@@ -430,10 +427,10 @@ index 0000000..84a7680
 +}
 +
 +/*
-+ * Called during the device init phase, after the sysctl infrastructure
-+ * is guaranteed to be available.
++ * Called during late init, after the sysctl and procfs infrastructures
++ * are guaranteed to be available for creating new subdirectories.
 + */
-+early_initcall(infinity_sched_init);
++late_initcall(infinity_sched_init);
 +
 +/* ------------------------------------------------------------------ */
 +/* infinity_slice                                                      */
