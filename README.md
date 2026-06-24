@@ -7,7 +7,7 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 ```
 .
 │
-├── src/                                  ★ Reference implementation (kernel/sched/infinity_sched.[ch])
+├── src/                                     ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 │   ├── infinity_sched.h                    Public API: constants, sysctl declarations, function declarations
 │   └── infinity_sched.c                    Algorithm: fair-share slice, accelerating consumption, fork init
 │
@@ -22,7 +22,7 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 │   │   └── ...                             Future kernel versions
 │
 ├── tools/
-│   ├── install-infinity-scheduler.sh       ★ One-command install
+│   ├── install-infinity-scheduler.sh        ★ One-command install
 │   ├── build-kernel.sh                     Standalone kernel build helper
 │   ├── adapt-patches.py                    Auto-adapt patches for other kernel versions
 │   ├── fix-patch-format.py                 Patch sanitization
