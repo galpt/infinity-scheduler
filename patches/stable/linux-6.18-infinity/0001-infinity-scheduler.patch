@@ -137,7 +137,7 @@ index 5b75232..c4d8932 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..006bfaa
+index 0000000..a81e94d
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,402 @@
@@ -265,7 +265,7 @@ index 0000000..006bfaa
 +	return ret;
 +}
 +
-+static const struct ctl_table infinity_sysctl_table[] = {
++static struct ctl_table infinity_sysctl_table[] = {
 +	{
 +		.procname	= "infinity_carriage_ns",
 +		.data		= &infinity_tune_carriage_ns,

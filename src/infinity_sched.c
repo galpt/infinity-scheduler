@@ -122,7 +122,7 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
 	return ret;
 }
 
-static const struct ctl_table infinity_sysctl_table[] = {
+static struct ctl_table infinity_sysctl_table[] = {
 	{
 		.procname	= "infinity_carriage_ns",
 		.data		= &infinity_tune_carriage_ns,
