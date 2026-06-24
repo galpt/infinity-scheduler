@@ -88,11 +88,11 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 
 | Operation | Formula | Description |
 |---|---|---|
-| While running | `$\text{ema} = \text{ema} + (\text{BUDGET\_MAX} - \text{ema}) \times \alpha / 256$` | EMA climbs toward `BUDGET_MAX` |
-| While sleeping | `$\text{ema} = \text{ema} - \text{ema} \times \alpha / 256$` | EMA decays toward 0 (catch-up on wakeup) |
-| Budget | `$\text{budget} = \text{BUDGET\_MAX} - \text{ema}$` | Naturally in `[0, BUDGET_MAX]` — no clamp |
-| Rate | `$\text{rate} = 1 + \dfrac{\text{ema} \times \text{DEBT\_CAP}}{\text{BUDGET\_MAX}}$` | Consumption multiplier (fixed-point) |
-| Consumption | `$\text{consumption} = \text{delta} \times \text{rate} / 256$` | 8-bit fixed-point precision |
+| While running | $ema = ema + (BUDGET\_MAX - ema) \times \alpha / 256$ | EMA climbs toward `BUDGET_MAX` |
+| While sleeping | $ema = ema - ema \times \alpha / 256$ | EMA decays toward 0 (catch-up on wakeup) |
+| Budget | $budget = BUDGET\_MAX - ema$ | Naturally in `[0, BUDGET_MAX]` — no clamp |
+| Rate | $rate = 1 + \dfrac{ema \times DEBT\_CAP}{BUDGET\_MAX}$ | Consumption multiplier (fixed-point) |
+| Consumption | $consumption = delta \times rate / 256$ | 8-bit fixed-point precision |
 
 | Symbol | Meaning |
 |---|---|
@@ -102,7 +102,7 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | `DEBT_CAP` | Max acceleration multiplier (default 256×) |
 | `rate` | Budget consumption rate — climbs from 1× to 257× as ema grows |
 
-**Example:** A task that runs continuously: after 16 ticks (~64ms), `ema ≈ 0.63 × BUDGET_MAX`, budget ≈ 740µs, rate ≈ 1 + 0.63 × 256 ≈ 162×. The budget depletes 162× faster. After 256 ticks, `ema` converges close to `BUDGET_MAX` and budget approaches 0 — but never reaches it, the true Limitless.
+**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times BUDGET\_MAX$, budget ≈ 740µs, rate ≈ $1 + 0.63 \times 256 \approx 162\times$. The budget depletes 162× faster. After 256 ticks, $ema$ converges close to $BUDGET\_MAX$ and budget approaches 0 — but never reaches it, the true Limitless.
 
 ## Tunables
 
