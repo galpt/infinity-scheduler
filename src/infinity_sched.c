@@ -34,6 +34,7 @@ unsigned long infinity_tune_debt_cap   = INFINITY_DEBT_CAP_DEFAULT;
 unsigned long infinity_tune_refill_div = INFINITY_REFILL_DIV_DEFAULT;
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 bool infinity_tune_self_stabilize = true;
+static int infinity_running_flag = 1;
 
 /*
  * Write-time clamping handlers.
@@ -154,8 +155,6 @@ static const struct ctl_table infinity_sysctl_table[] = {
 	},
 	{}
 };
-
-static int infinity_running_flag = 1;
 
 /* ------------------------------------------------------------------ */
 /* Per-CPU stats tracking (BSS-preallocated, like scx_flow)           */
