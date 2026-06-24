@@ -148,3 +148,10 @@ sysctl kernel.infinity.self_stabilize=1
 ## License
 
 GPL-2.0
+
+## Credits
+
+- **EEVDF** — Earliest Eligible Virtual Deadline First scheduling algorithm by Stride, Inc. and the Linux kernel community. EEVDF serves as the foundation that the Infinity scheduler modifies.
+- **scx_flow 3.1.0** — BPF sched-ext fair-share scheduler by the sched-ext community ([github.com/sched-ext/scx](https://github.com/sched-ext/scx)). The budget model and interactive floor logic are adapted from this implementation.
+- **BORE** — Burst-Oriented Response Enhancer scheduler by Honggyu Kim and Youngmin Nam ([github.com/firelzrd/bore-scheduler](https://github.com/firelzrd/bore-scheduler)). Insights from BORE's burst-aware scheduling influenced the self-stabilize feedback approach.
+- **BMQ / PDS / LF-BMQ** — BitMap Queue schedulers by Alfred Chen ([Project C](https://github.com/hamadmarri/BMQ-PDS-sched-patch)). Research into BMQ's complete scheduler replacement approach validated the decision to keep Infinity within EEVDF rather than replacing it entirely.
