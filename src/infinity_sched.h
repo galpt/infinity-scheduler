@@ -19,6 +19,7 @@
  *   carriage_ns   — base fair-share window (default 2ms)
  *   debt_cap      — runtime debt cap multiplier (default 256x)
  *   refill_div    — budget refill divisor (default 100)
+ *   smt_divisor   — SMT secondary slice divisor (default 2)
  *   self_stabilize — automatic tuning (default 1)
  *   running       — read-only flag, 1 if active
  *
@@ -47,6 +48,9 @@
 /** Budget refill divisor (100). */
 #define INFINITY_REFILL_DIV_DEFAULT	100
 
+/** SMT secondary slice divisor (2 = half slice). */
+#define INFINITY_SMT_DIVISOR_DEFAULT	2
+
 /* ------------------------------------------------------------------ */
 /* Clamp bounds                                                        */
 /* ------------------------------------------------------------------ */
@@ -59,6 +63,9 @@
 
 #define INFINITY_REFILL_DIV_MIN		1
 #define INFINITY_REFILL_DIV_MAX		65536
+
+#define INFINITY_SMT_DIVISOR_MIN	1
+#define INFINITY_SMT_DIVISOR_MAX	16
 
 /* ------------------------------------------------------------------ */
 /* Hard constants (not user-tunable)                                   */
@@ -94,6 +101,7 @@
 extern unsigned long infinity_tune_carriage_ns;
 extern unsigned long infinity_tune_debt_cap;
 extern unsigned long infinity_tune_refill_div;
+extern unsigned long infinity_tune_smt_divisor;
 extern bool infinity_tune_self_stabilize;
 
 /* ------------------------------------------------------------------ */

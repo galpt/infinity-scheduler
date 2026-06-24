@@ -31,6 +31,7 @@
 unsigned long infinity_tune_carriage_ns = INFINITY_CARRIAGE_NS_DEFAULT;
 unsigned long infinity_tune_debt_cap   = INFINITY_DEBT_CAP_DEFAULT;
 unsigned long infinity_tune_refill_div = INFINITY_REFILL_DIV_DEFAULT;
+unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 bool infinity_tune_self_stabilize = true;
 
 /*
@@ -87,6 +88,23 @@ static int clamp_refill_div(const struct ctl_table *table, int write,
 		val = clamp(val, INFINITY_REFILL_DIV_MIN, INFINITY_REFILL_DIV_MAX);
 		WRITE_ONCE(infinity_tune_refill_div, val);
 	}
+		return ret;
+}
+
+static int clamp_smt_divisor(const struct ctl_table *table, int write,
+			     void *buf, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+	unsigned long val;
+	struct ctl_table tmp = *table;
+
+	val = READ_ONCE(infinity_tune_smt_divisor);
+	tmp.data = &val;
+	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
+	if (write && ret == 0) {
+		val = clamp(val, INFINITY_SMT_DIVISOR_MIN, INFINITY_SMT_DIVISOR_MAX);
+		WRITE_ONCE(infinity_tune_smt_divisor, val);
+	}
 	return ret;
 }
 
@@ -111,6 +129,13 @@ static const struct ctl_table infinity_sysctl_table[] = {
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= clamp_refill_div,
+	},
+	{
+		.procname	= "smt_divisor",
+		.data		= &infinity_tune_smt_divisor,
+		.maxlen		= sizeof(unsigned long),
+		.mode		= 0644,
+		.proc_handler	= clamp_smt_divisor,
 	},
 	{
 		.procname	= "self_stabilize",
@@ -250,9 +275,9 @@ static int __init infinity_sched_init(void)
 	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);
 	schedule_delayed_work(&infinity_stabilize_work, msecs_to_jiffies(2000));
 
-	pr_info("Infinity scheduler active: carriage=%lu ns, debt_cap=%lu, refill_div=%lu\n",
+	pr_info("Infinity scheduler active: carriage=%lu ns, debt_cap=%lu, refill_div=%lu, smt_divisor=%lu\n",
 		infinity_tune_carriage_ns, infinity_tune_debt_cap,
-		infinity_tune_refill_div);
+		infinity_tune_refill_div, infinity_tune_smt_divisor);
 
 	return 0;
 }
@@ -282,8 +307,11 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary)
 	if (slice > INFINITY_BUDGET_MAX_NS)
 		slice = INFINITY_BUDGET_MAX_NS;
 
-	if (on_smt_secondary)
-		slice >>= 1;
+	if (on_smt_secondary) {
+		unsigned long div = READ_ONCE(infinity_tune_smt_divisor);
+		if (div > 1)
+			slice = div64_u64(slice, div);
+	}
 
 	return slice;
 }

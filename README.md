@@ -86,6 +86,7 @@ enter an invalid state regardless of input.
 | `carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
 | `debt_cap` | 256 | [1, 4096] | Runtime debt cap (multiplier × CARRIAGE_NS) |
 | `refill_div` | 100 | [1, 65536] | Budget refill divisor |
+| `smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `self_stabilize` | 1 | [0, 1] | Automatic tuning |
 | `running` | 1 (ro) | — | Active flag |
 
