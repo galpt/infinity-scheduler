@@ -283,10 +283,10 @@ static int __init infinity_sched_init(void)
 }
 
 /*
- * Called during the device init phase, after the sysctl infrastructure
- * is guaranteed to be available.
+ * Called during late init, after the sysctl and procfs infrastructures
+ * are guaranteed to be available for creating new subdirectories.
  */
-early_initcall(infinity_sched_init);
+late_initcall(infinity_sched_init);
 
 /* ------------------------------------------------------------------ */
 /* infinity_slice                                                      */
