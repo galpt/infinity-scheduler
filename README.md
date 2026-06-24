@@ -84,12 +84,29 @@ No explicit wakeup preemption logic is needed. The accelerating consumption natu
 
 ### Accelerating consumption formula
 
+The Limitless divides space infinitely; the Infinity scheduler divides time the same way.
+Each nanosecond of CPU time a task consumes is multiplied by a factor that grows the
+longer the task runs — so a CPU-bound task's remaining budget approaches zero
+asymptotically, just like a convergent series approaches its limit.
+
 ```c
 debt = min(runtime_debt + delta_exec, CARRIAGE_NS * DEBT_CAP);
 rate = 1 + debt / CARRIAGE_NS;
 budget -= delta_exec * rate;
 runtime_debt = debt;
 ```
+
+In math terms, the acceleration factor $$r(t)$$ at any moment is:
+
+$$
+r(t) = 1 + \frac{d(t)}{\text{CARRIAGE}}
+$$
+
+where $$d(t)$$ is the accumulated runtime since the task last woke up (capped at $$\text{CARRIAGE} \times \text{CAP}$$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches zero asymptotically but never reaches it:
+
+$$
+\lim_{t \to \infty} \text{budget}(t) = -\text{BUDGET\_MIN} \quad \text{(never zero, never undefined)}
+$$
 
 A task that has run for 4ms without sleeping: rate = 3x, budget depletes 3x faster.
 A task that has run for 20ms without sleeping: rate = 11x, budget depletes 11x faster.
