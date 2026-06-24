@@ -40,8 +40,8 @@ A fair-share CPU scheduler with exponential moving average (EMA) budget tracking
 ## Quick start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the v2 branch
+git clone -b v2 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
