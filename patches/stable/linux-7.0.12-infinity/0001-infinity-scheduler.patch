@@ -143,7 +143,7 @@ index 3bce48a..690b8be 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..b7461d6
+index 0000000..6bea936
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,377 @@
@@ -237,7 +237,7 @@ index 0000000..b7461d6
 +		val = clamp(val, INFINITY_REFILL_DIV_MIN, INFINITY_REFILL_DIV_MAX);
 +		WRITE_ONCE(infinity_tune_refill_div, val);
 +	}
-+		return ret;
++	return ret;
 +}
 +
 +static int clamp_smt_divisor(const struct ctl_table *table, int write,

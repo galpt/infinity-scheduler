@@ -88,7 +88,7 @@ static int clamp_refill_div(const struct ctl_table *table, int write,
 		val = clamp(val, INFINITY_REFILL_DIV_MIN, INFINITY_REFILL_DIV_MAX);
 		WRITE_ONCE(infinity_tune_refill_div, val);
 	}
-		return ret;
+	return ret;
 }
 
 static int clamp_smt_divisor(const struct ctl_table *table, int write,
