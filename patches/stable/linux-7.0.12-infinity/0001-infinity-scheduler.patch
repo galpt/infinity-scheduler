@@ -49,98 +49,12 @@ index b1f1a36..9bea385 100644
  obj-y += build_policy.o
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48a..02a2509 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -57,6 +57,7 @@
- #include "sched.h"
- #include "stats.h"
- #include "autogroup.h"
-+#include "infinity_sched.h"
- 
- /*
-  * The initial- and re-scaling of tunables is configurable
-@@ -1119,8 +1120,16 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
- 	 * nice) while the request time r_i is determined by
- 	 * sysctl_sched_base_slice.
- 	 */
--	if (!se->custom_slice)
--		se->slice = sysctl_sched_base_slice;
-+	if (!se->custom_slice) {
-+		unsigned long nr = cfs_rq->h_nr_runnable;
-+#ifdef CONFIG_SCHED_SMT
-+		bool smt_sec = cpumask_weight(cpu_smt_mask(smp_processor_id())) > 1 &&
-+		      smp_processor_id() != cpumask_first(cpu_smt_mask(smp_processor_id()));
-+#else
-+		bool smt_sec = false;
-+#endif
-+		se->slice = infinity_slice(nr, smt_sec);
-+	}
- 
- 	/*
- 	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1298,6 +1307,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
- 	if (unlikely(delta_exec <= 0))
- 		return;
- 
-+	/* Infinity: budget consumption */
-+	if (entity_is_task(curr)) { struct task_struct *p__ = task_of(curr);
-+		infinity_consume(&p__->infinity, delta_exec); }
-+
- 	curr->vruntime += calc_delta_fair(delta_exec, curr);
- 	resched = update_deadline(cfs_rq, curr);
- 
-@@ -5540,6 +5553,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
- 	struct sched_entity *se;
- 
- 	se = pick_eevdf(cfs_rq, protect);
-+	if (!se)
-+		return NULL;
- 	if (se->sched_delayed) {
- 		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
- 		/*
-@@ -6937,6 +6952,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
- {
- 	struct cfs_rq *cfs_rq;
- 	struct sched_entity *se = &p->se;
-+
-+	/* Infinity: reset runtime debt on wakeup */
-+	if (flags & ENQUEUE_WAKEUP) {
-+		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
-+		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
-+			infinity_refill_budget(&p->infinity, now - p->infinity.last_sleep_ns);
-+		p->infinity.runtime_debt = 0; }
- 	int h_nr_idle = task_has_idle_policy(p);
- 	int h_nr_runnable = 1;
- 	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7172,6 +7194,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
-  */
- static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
- {
-+	/* Infinity: record sleep start */
-+	if (flags & DEQUEUE_SLEEP) p->infinity.last_sleep_ns = rq_clock(rq_of(task_cfs_rq(p)));
- 	if (task_is_throttled(p)) {
- 		dequeue_throttled_task(p, flags);
- 		return true;
-@@ -13459,6 +13483,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
-  */
- static void task_fork_fair(struct task_struct *p)
- {
-+	struct rq *rq = this_rq();
-+
-+	/* Infinity: init child */
-+	infinity_fork_init(&p->infinity, rq_clock(rq));
-+
- 	set_task_max_allowed_capacity(p);
- }
- 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..62456c3
+index 0000000..e5742c8
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,406 @@
+@@ -0,0 +1,443 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -311,6 +225,40 @@ index 0000000..62456c3
 +	{}
 +};
 +
++static unsigned long infinity_reset_val;
++
++static int reset_handler(const struct ctl_table *table, int write,
++			 void *buf, size_t *lenp, loff_t *ppos)
++{
++	int ret;
++	unsigned long val = 0;
++	struct ctl_table tmp = *table;
++
++	infinity_reset_val = 0;
++	tmp.data = &infinity_reset_val;
++	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
++	if (write && ret == 0 && infinity_reset_val == 1) {
++		WRITE_ONCE(infinity_tune_carriage_ns, INFINITY_CARRIAGE_NS_DEFAULT);
++		WRITE_ONCE(infinity_tune_debt_cap, INFINITY_DEBT_CAP_DEFAULT);
++		WRITE_ONCE(infinity_tune_refill_div, INFINITY_REFILL_DIV_DEFAULT);
++		WRITE_ONCE(infinity_tune_smt_divisor, INFINITY_SMT_DIVISOR_DEFAULT);
++		WRITE_ONCE(infinity_tune_self_stabilize, true);
++		pr_info("Infinity: reset to default values\n");
++	}
++	return ret;
++}
++
++static struct ctl_table infinity_reset_table[] = {
++	{
++		.procname	= "infinity_reset",
++		.data		= &infinity_reset_val,
++		.maxlen		= sizeof(unsigned long),
++		.mode		= 0200,
++		.proc_handler	= reset_handler,
++	},
++	{}
++};
++
 +/* ------------------------------------------------------------------ */
 +/* Per-CPU stats tracking (BSS-preallocated, like scx_flow)           */
 +/* ------------------------------------------------------------------ */
@@ -443,6 +391,9 @@ index 0000000..62456c3
 +	__register_sysctl_init("kernel", infinity_sysctl_table,
 +			      "infinity_sysctl_table",
 +			      ARRAY_SIZE(infinity_sysctl_table) - 1);
++	__register_sysctl_init("kernel", infinity_reset_table,
++			      "infinity_reset_table",
++			      ARRAY_SIZE(infinity_reset_table) - 1);
 +
 +	/* Initialize self-stabilize workqueue */
 +	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);

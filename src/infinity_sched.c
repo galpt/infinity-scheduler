@@ -168,6 +168,40 @@ static struct ctl_table infinity_sysctl_table[] = {
 	{}
 };
 
+static unsigned long infinity_reset_val;
+
+static int reset_handler(const struct ctl_table *table, int write,
+			 void *buf, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+	unsigned long val = 0;
+	struct ctl_table tmp = *table;
+
+	infinity_reset_val = 0;
+	tmp.data = &infinity_reset_val;
+	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
+	if (write && ret == 0 && infinity_reset_val == 1) {
+		WRITE_ONCE(infinity_tune_carriage_ns, INFINITY_CARRIAGE_NS_DEFAULT);
+		WRITE_ONCE(infinity_tune_debt_cap, INFINITY_DEBT_CAP_DEFAULT);
+		WRITE_ONCE(infinity_tune_refill_div, INFINITY_REFILL_DIV_DEFAULT);
+		WRITE_ONCE(infinity_tune_smt_divisor, INFINITY_SMT_DIVISOR_DEFAULT);
+		WRITE_ONCE(infinity_tune_self_stabilize, true);
+		pr_info("Infinity: reset to default values\n");
+	}
+	return ret;
+}
+
+static struct ctl_table infinity_reset_table[] = {
+	{
+		.procname	= "infinity_reset",
+		.data		= &infinity_reset_val,
+		.maxlen		= sizeof(unsigned long),
+		.mode		= 0200,
+		.proc_handler	= reset_handler,
+	},
+	{}
+};
+
 /* ------------------------------------------------------------------ */
 /* Per-CPU stats tracking (BSS-preallocated, like scx_flow)           */
 /* ------------------------------------------------------------------ */
@@ -300,6 +334,9 @@ static int __init infinity_sched_init(void)
 	__register_sysctl_init("kernel", infinity_sysctl_table,
 			      "infinity_sysctl_table",
 			      ARRAY_SIZE(infinity_sysctl_table) - 1);
+	__register_sysctl_init("kernel", infinity_reset_table,
+			      "infinity_reset_table",
+			      ARRAY_SIZE(infinity_reset_table) - 1);
 
 	/* Initialize self-stabilize workqueue */
 	INIT_DELAYED_WORK(&infinity_stabilize_work, infinity_stabilize_fn);
