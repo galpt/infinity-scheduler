@@ -7,26 +7,26 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 ```
 .
 │
-├── src/                           ★ Reference implementation (kernel/sched/infinity_sched.[ch])
-│   ├── infinity_sched.h            Public API: constants, sysctl declarations, function declarations
-│   └── infinity_sched.c            Algorithm: fair-share slice, accelerating consumption, fork init
+├── src/                                  ★ Reference implementation (kernel/sched/infinity_sched.[ch])
+│   ├── infinity_sched.h                    Public API: constants, sysctl declarations, function declarations
+│   └── infinity_sched.c                    Algorithm: fair-share slice, accelerating consumption, fork init
 │
 ├── patches/
 │   ├── stable/
-│   │   ├── linux-7.0.12-infinity/  Kernel 7.0.12
+│   │   ├── linux-7.0.12-infinity/          Kernel 7.0.12
 │   │   │   └── 0001-*.patch
-│   │   ├── linux-6.18-infinity/    Kernel 6.18 LTS
+│   │   ├── linux-6.18-infinity/            Kernel 6.18 LTS
 │   │   │   └── 0001-*.patch
-│   │   ├── linux-7.1-infinity/     Kernel 7.1
+│   │   ├── linux-7.1-infinity/             Kernel 7.1
 │   │   │   └── 0001-*.patch
-│   │   └── ...                     Future kernel versions
+│   │   └── ...                             Future kernel versions
 │
 ├── tools/
-│   ├── install-infinity-scheduler.sh   ★ One-command install
-│   ├── build-kernel.sh             Standalone kernel build helper
-│   ├── adapt-patches.py            Auto-adapt patches for other kernel versions
-│   ├── fix-patch-format.py         Patch sanitization
-│   └── fix-patch-counts.py         Hunk count adjustment
+│   ├── install-infinity-scheduler.sh       ★ One-command install
+│   ├── build-kernel.sh                     Standalone kernel build helper
+│   ├── adapt-patches.py                    Auto-adapt patches for other kernel versions
+│   ├── fix-patch-format.py                 Patch sanitization
+│   └── fix-patch-counts.py                 Hunk count adjustment
 │
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
