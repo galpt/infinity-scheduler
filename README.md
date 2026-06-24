@@ -66,10 +66,10 @@ No explicit wakeup preemption logic is needed. The accelerating consumption natu
 ### Accelerating consumption formula
 
 ```c
-runtime_debt += delta_exec;
-rate = 1 + min(runtime_debt, DEBT_CAP) / CARRIAGE_NS;
-consumption = delta_exec * rate;
-budget -= consumption;
+debt = min(runtime_debt + delta_exec, CARRIAGE_NS * DEBT_CAP);
+rate = 1 + debt / CARRIAGE_NS;
+budget -= delta_exec * rate;
+runtime_debt = debt;
 ```
 
 A task that has run for 4ms without sleeping: rate = 3x, budget depletes 3x faster.
