@@ -84,8 +84,7 @@
 #define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
 
 /* ------------------------------------------------------------------ */
-/* Per-task context (embedded in struct task_struct as .infinity)     */
-/* (struct infinity_ctx is defined in include/linux/sched.h)         */
+/* API — called from fair.c                                           */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
@@ -107,8 +106,8 @@ void infinity_refill_budget(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 
 /**
- * infinity_try_stabilize — update budget exhaustion stat (called from fair.c).
- * Called each time a task exhausts its budget in update_curr.
+ * infinity_try_stabilize — update budget exhaustion stat.
+ * Called from infinity_consume() when a task's budget drops to zero.
  */
 void infinity_try_stabilize(void);
 

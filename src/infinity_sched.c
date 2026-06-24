@@ -141,14 +141,6 @@ struct infinity_cpu_stats {
 	/* Ring buffer of recent budget exhaustion counts */
 	u64 budget_exhaustions[INFINITY_STATS_WINDOW];
 	u64 exhaustion_idx;		/* current write index */
-	u64 exhaustion_samples;		/* total writes */
-
-	/* Running counters for the current window */
-	u64 cs_count;			/* approximate context switch count */
-	u64 prev_cs_count;		/* previous window snapshot */
-
-	/* Smoothed metrics */
-	u64 avg_nr_running;		/* smoothed average */
 };
 
 static DEFINE_PER_CPU(struct infinity_cpu_stats, infinity_stats);
@@ -169,14 +161,12 @@ void infinity_try_stabilize(void)
 
 	st->budget_exhaustions[st->exhaustion_idx % INFINITY_STATS_WINDOW]++;
 	st->exhaustion_idx++;
-	st->exhaustion_samples++;
 }
 
 static void infinity_stabilize_fn(struct work_struct *work)
 {
 	int cpu;
 	u64 total_exhaustion_rate = 0;
-	u64 total_cs_rate = 0;
 	u64 avg_load = 0;
 	unsigned long carriage, cap;
 	int nr_active_cpus = 0;
@@ -186,9 +176,8 @@ static void infinity_stabilize_fn(struct work_struct *work)
 
 	/*
 	 * Aggregate per-CPU metrics over the last window.
-	 * Each CPU tracks its own budget exhaustion rate and
-	 * context-switch rate.  These are coarse indicators:
-	 * a high exhaustion rate means tasks are running out
+	 * Each CPU tracks its own budget exhaustion rate.
+	 * A high exhaustion rate means tasks are running out
 	 * of budget too quickly, suggesting the acceleration
 	 * is too aggressive or the carriage window is too small.
 	 */
@@ -211,8 +200,6 @@ static void infinity_stabilize_fn(struct work_struct *work)
 			total_exhaustion_rate += exhaust_window;
 			nr_active_cpus++;
 		}
-		total_cs_rate += st->cs_count - st->prev_cs_count;
-		st->prev_cs_count = st->cs_count;
 	}
 
 	/*
@@ -222,11 +209,9 @@ static void infinity_stabilize_fn(struct work_struct *work)
 	 *   -> Increase carriage_ns (longer base window = lower rate)
 	 *   -> Decrease debt_cap (lower cap = less aggressive acceleration)
 	 *
-	 * If CS rate is high AND exhaustion is low → system is thrashing.
-	 *   -> Increase carriage_ns to reduce context-switch overhead
-	 *
-	 * If avg load is high → many tasks competing.
-	 *   -> Keep defaults; the formula already divides by nr_runnable.
+	 * If exhaustion rate is very low → system is underutilized.
+	 *   -> Decrease carriage_ns (shorter window = better interactivity)
+	 *   -> Increase debt_cap (higher cap = more room for bursts)
 	 */
 	carriage = READ_ONCE(infinity_tune_carriage_ns);
 	cap = READ_ONCE(infinity_tune_debt_cap);

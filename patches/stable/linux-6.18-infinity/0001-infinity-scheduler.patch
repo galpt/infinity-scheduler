@@ -143,10 +143,10 @@ index 5b75232..08bda2a 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..5375a89
+index 0000000..728897e
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,349 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -290,14 +290,6 @@ index 0000000..5375a89
 +	/* Ring buffer of recent budget exhaustion counts */
 +	u64 budget_exhaustions[INFINITY_STATS_WINDOW];
 +	u64 exhaustion_idx;		/* current write index */
-+	u64 exhaustion_samples;		/* total writes */
-+
-+	/* Running counters for the current window */
-+	u64 cs_count;			/* approximate context switch count */
-+	u64 prev_cs_count;		/* previous window snapshot */
-+
-+	/* Smoothed metrics */
-+	u64 avg_nr_running;		/* smoothed average */
 +};
 +
 +static DEFINE_PER_CPU(struct infinity_cpu_stats, infinity_stats);
@@ -318,14 +310,12 @@ index 0000000..5375a89
 +
 +	st->budget_exhaustions[st->exhaustion_idx % INFINITY_STATS_WINDOW]++;
 +	st->exhaustion_idx++;
-+	st->exhaustion_samples++;
 +}
 +
 +static void infinity_stabilize_fn(struct work_struct *work)
 +{
 +	int cpu;
 +	u64 total_exhaustion_rate = 0;
-+	u64 total_cs_rate = 0;
 +	u64 avg_load = 0;
 +	unsigned long carriage, cap;
 +	int nr_active_cpus = 0;
@@ -335,9 +325,8 @@ index 0000000..5375a89
 +
 +	/*
 +	 * Aggregate per-CPU metrics over the last window.
-+	 * Each CPU tracks its own budget exhaustion rate and
-+	 * context-switch rate.  These are coarse indicators:
-+	 * a high exhaustion rate means tasks are running out
++	 * Each CPU tracks its own budget exhaustion rate.
++	 * A high exhaustion rate means tasks are running out
 +	 * of budget too quickly, suggesting the acceleration
 +	 * is too aggressive or the carriage window is too small.
 +	 */
@@ -360,8 +349,6 @@ index 0000000..5375a89
 +			total_exhaustion_rate += exhaust_window;
 +			nr_active_cpus++;
 +		}
-+		total_cs_rate += st->cs_count - st->prev_cs_count;
-+		st->prev_cs_count = st->cs_count;
 +	}
 +
 +	/*
@@ -371,11 +358,9 @@ index 0000000..5375a89
 +	 *   -> Increase carriage_ns (longer base window = lower rate)
 +	 *   -> Decrease debt_cap (lower cap = less aggressive acceleration)
 +	 *
-+	 * If CS rate is high AND exhaustion is low → system is thrashing.
-+	 *   -> Increase carriage_ns to reduce context-switch overhead
-+	 *
-+	 * If avg load is high → many tasks competing.
-+	 *   -> Keep defaults; the formula already divides by nr_runnable.
++	 * If exhaustion rate is very low → system is underutilized.
++	 *   -> Decrease carriage_ns (shorter window = better interactivity)
++	 *   -> Increase debt_cap (higher cap = more room for bursts)
 +	 */
 +	carriage = READ_ONCE(infinity_tune_carriage_ns);
 +	cap = READ_ONCE(infinity_tune_debt_cap);
@@ -513,10 +498,10 @@ index 0000000..5375a89
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..99185ed
+index 0000000..8850dc2
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,123 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -603,8 +588,7 @@ index 0000000..99185ed
 +#define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
 +
 +/* ------------------------------------------------------------------ */
-+/* Per-task context (embedded in struct task_struct as .infinity)     */
-+/* (struct infinity_ctx is defined in include/linux/sched.h)         */
++/* API — called from fair.c                                           */
 +/* ------------------------------------------------------------------ */
 +
 +/* ------------------------------------------------------------------ */
@@ -626,8 +610,8 @@ index 0000000..99185ed
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 +
 +/**
-+ * infinity_try_stabilize — update budget exhaustion stat (called from fair.c).
-+ * Called each time a task exhausts its budget in update_curr.
++ * infinity_try_stabilize — update budget exhaustion stat.
++ * Called from infinity_consume() when a task's budget drops to zero.
 + */
 +void infinity_try_stabilize(void);
 +
