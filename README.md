@@ -1,6 +1,6 @@
 # infinity-scheduler
 
-A fair-share CPU scheduler with exponential moving average (EMA) budget tracking — the longer a task runs, the higher its EMA climbs and the faster its remaining budget depletes. Interactive tasks see their EMA decay naturally during sleep. Built into CFS/EEVDF, no BPF or sched-ext dependency. Self-stabilizing by construction — no external feedback loop needed.
+A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Built into CFS/EEVDF, no BPF or sched-ext dependency.
 
 ## Project structure
 
