@@ -104,10 +104,7 @@ $$
 
 where $d(t)$ is the accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$). Each nanosecond of runtime is multiplied by this ever-growing factor before being subtracted from budget — the budget approaches the clamp floor asymptotically but never reaches zero:
 
-$$
-\lim_{t \to \infty} \text{budget}(t) = -\text{BUDGET-MIN}
-$$
-(The budget approaches the clamp floor but never reaches zero.)
+(The budget $b(t)$ as $t \to \infty$ converges to the clamp floor — it approaches zero asymptotically but never reaches it.)
 
 A task that has run for 4ms without sleeping: rate = 3x, budget depletes 3x faster.
 A task that has run for 20ms without sleeping: rate = 11x, budget depletes 11x faster.
