@@ -2,7 +2,8 @@
 
 A fair-share CPU scheduler with accelerating budget consumption — the more a task runs, the faster its budget depletes. Interactive tasks reset this effect on wakeup. Built into CFS/EEVDF, no BPF or sched-ext dependency.
 
-## Project structure
+> [!TIP]
+> The [v2 branch](https://github.com/galpt/infinity-scheduler/tree/v2) has a more refined implementation — no clamps, no external feedback loop, self-stabilizing by construction.
 
 ```
 .
