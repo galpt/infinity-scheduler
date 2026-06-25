@@ -130,7 +130,7 @@ index 3bce48a..c94af8b 100644
 +	struct rq *rq = this_rq();
 +
 +	/* Infinity: init child */
-+	infinity_fork_init(&p->infinity, rq_clock(rq));
++	infinity_fork_init(&p->infinity, READ_ONCE(rq->clock));
 +
  	set_task_max_allowed_capacity(p);
  }
