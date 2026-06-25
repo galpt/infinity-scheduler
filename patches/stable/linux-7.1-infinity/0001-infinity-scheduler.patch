@@ -1,13 +1,12 @@
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba..0002270 100644
+index ee06cba..2adc761 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,15 @@ struct kmap_ctrl {
+@@ -817,6 +817,14 @@ struct kmap_ctrl {
  #endif
  };
  
 +struct infinity_ctx {
-+	s64		budget_ns;
 +	u64		ema;
 +	u64		rt_ema;
 +	bool		rt_disabled;
@@ -18,7 +17,7 @@ index ee06cba..0002270 100644
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +880,7 @@ struct task_struct {
+@@ -871,6 +879,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -39,15 +38,14 @@ index 33a4624..d854dc4 100644
  #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
  
 diff --git a/init/init_task.c b/init/init_task.c
-index b5f48eb..fc0b189 100644
+index b5f48eb..99ebf71 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,13 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
 +	.infinity		= {
-+				.budget_ns	= 0,
 +				.ema		= 0,
 +				.rt_ema		= 0,
 +				.rt_disabled	= false,
@@ -66,7 +64,7 @@ index b1f1a36..9bea385 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec18..f7f21ac 100644
+index 3ebec18..9a4a699 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -77,26 +75,7 @@ index 3ebec18..f7f21ac 100644
  
  /*
   * The initial- and re-scaling of tunables is configurable
-@@ -1245,8 +1246,16 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
- 	 * nice) while the request time r_i is determined by
- 	 * sysctl_sched_base_slice.
- 	 */
--	if (!se->custom_slice)
--		se->slice = sysctl_sched_base_slice;
-+	if (!se->custom_slice) {
-+		unsigned long nr = cfs_rq->h_nr_runnable;
-+#ifdef CONFIG_SCHED_SMT
-+		bool smt_sec = cpumask_weight(cpu_smt_mask(smp_processor_id())) > 1 &&
-+		      smp_processor_id() != cpumask_first(cpu_smt_mask(smp_processor_id()));
-+#else
-+		bool smt_sec = false;
-+#endif
-+		se->slice = infinity_slice(nr, smt_sec);
-+	}
- 
- 	/*
- 	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1424,6 +1433,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1424,6 +1425,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -107,7 +86,7 @@ index 3ebec18..f7f21ac 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  
-@@ -5783,6 +5796,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5783,6 +5788,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
@@ -116,7 +95,7 @@ index 3ebec18..f7f21ac 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7213,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7198,6 +7205,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -130,7 +109,7 @@ index 3ebec18..f7f21ac 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7452,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7430,6 +7444,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -139,7 +118,7 @@ index 3ebec18..f7f21ac 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13737,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,6 +13729,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -153,10 +132,10 @@ index 3ebec18..f7f21ac 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..a0ea2ff
+index 0000000..747a5b0
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,312 @@
+@@ -0,0 +1,309 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -167,9 +146,8 @@ index 0000000..a0ea2ff
 + *
 + *   While running:  ema = ema + (BUDGET_MAX - ema) * α / 256
 + *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
-+ *   budget = BUDGET_MAX - ema   (naturally in [0, BUDGET_MAX] — no clamps)
 + *   rate_fp = 256 + ema * DEBT_CAP / BUDGET_MAX  (fixed-point 8-bit)
-+ *   consumption = delta_exec * rate_fp / 256
++ *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
@@ -343,10 +321,10 @@ index 0000000..a0ea2ff
 +late_initcall(infinity_sched_init);
 +
 +/* ------------------------------------------------------------------ */
-+/* infinity_slice                                                      */
++/* infinity_slice — fair-share slice with EMA modulation               */
 +/* ------------------------------------------------------------------ */
 +
-+u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary)
++u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 +{
 +	u64 slice;
 +
@@ -354,6 +332,13 @@ index 0000000..a0ea2ff
 +		nr_runnable = 1;
 +
 +	slice = READ_ONCE(infinity_tune_carriage_ns) / nr_runnable;
++
++	/* EMA modulation: higher EMA → shorter slice (active throttle) */
++	if (ema > 0) {
++		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
++		/* Reduce slice by up to 75% at ema=100% */
++		slice = slice * (100ULL - pct * 3ULL / 4ULL) / 100ULL;
++	}
 +
 +	if (slice < INFINITY_SLICE_MIN_NS)
 +		slice = INFINITY_SLICE_MIN_NS;
@@ -375,7 +360,7 @@ index 0000000..a0ea2ff
 +
 +void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
-+	u64 cap, rate_fp, consumption;
++	u64 cap, rate_fp;
 +
 +	cap = READ_ONCE(infinity_tune_debt_cap);
 +
@@ -390,14 +375,6 @@ index 0000000..a0ea2ff
 +	rate_fp = div64_u64(ctx->ema * cap * INFINITY_FP_ONE,
 +			    INFINITY_BUDGET_MAX_NS);
 +	rate_fp += INFINITY_FP_ONE;
-+
-+	consumption = delta_ns * rate_fp / INFINITY_FP_ONE;
-+
-+	/* Budget = BUDGET_MAX - ema (naturally bounded, no clamp) */
-+	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
-+		ctx->budget_ns = 0;
-+	else
-+		ctx->budget_ns = INFINITY_BUDGET_MAX_NS - ctx->ema;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -428,7 +405,6 @@ index 0000000..a0ea2ff
 +
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 +{
-+	ctx->budget_ns = INFINITY_INIT_BUDGET_NS;
 +	ctx->ema = 0;
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
@@ -471,10 +447,10 @@ index 0000000..a0ea2ff
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..62ec11c
+index 0000000..ec6dd04
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,120 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -502,6 +478,7 @@ index 0000000..62ec11c
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
++ * Higher EMA → shorter time slice (active throttle via infinity_slice()).
 + */
 +
 +#ifndef __INFINITY_SCHED_H
@@ -571,9 +548,6 @@ index 0000000..62ec11c
 +/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 +#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
 +
-+/** Initial budget for newly forked tasks (one minimum slice). */
-+#define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
-+
 +/* ------------------------------------------------------------------ */
 +/* External sysctl tunables                                            */
 +/* ------------------------------------------------------------------ */
@@ -586,7 +560,7 @@ index 0000000..62ec11c
 +/* API — called from fair.c and rt.c                                   */
 +/* ------------------------------------------------------------------ */
 +
-+u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary);
++u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema);
 +void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now);

@@ -25,6 +25,7 @@
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
+ * Higher EMA → shorter time slice (active throttle via infinity_slice()).
  */
 
 #ifndef __INFINITY_SCHED_H
@@ -94,9 +95,6 @@
 /** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 #define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
 
-/** Initial budget for newly forked tasks (one minimum slice). */
-#define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
-
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
 /* ------------------------------------------------------------------ */
@@ -109,7 +107,7 @@ extern unsigned long infinity_tune_smt_divisor;
 /* API — called from fair.c and rt.c                                   */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary);
+u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema);
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
