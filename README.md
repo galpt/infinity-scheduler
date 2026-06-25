@@ -40,8 +40,8 @@ A fair-share CPU scheduler where the more a task runs, the faster its budget run
 ## Quick start
 
 ```bash
-# 1. Clone the v2 branch
-git clone -b v2 https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the v2-rt branch
+git clone -b v2-rt https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -69,14 +69,16 @@ sudo dmesg | grep Infinity                         # → Infinity scheduler acti
 
 ## How it works
 
-EEVDF functions modified by the Infinity scheduler:
+EEVDF and RT functions modified by the Infinity scheduler:
 
-| EEVDF function | Infinity replacement |
+| Function | Infinity replacement |
 |---|---|
 | `update_deadline()` | Fair-share slice via `infinity_slice()` |
 | `update_curr()` | EMA budget consumption via `infinity_consume()` — the core formula |
 | `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
 | `dequeue_task_fair()` (sleep) | Records sleep timestamp for wakeup decay |
+| `enqueue_task_rt()` (wakeup) | EMA climb via `infinity_rt_consume()` — RT priority modulation |
+| `dequeue_task_rt()` (block/sleep) | EMA decay via `infinity_rt_wakeup()` |
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
 
