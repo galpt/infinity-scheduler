@@ -1,0 +1,86 @@
+[
+    {
+        "kernel": "7.0.12-1-cachyos-bmq",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 15.12,
+            "y-cruncher pi 1b": 42.68,
+            "perf sched msg fork thread": 10.367,
+            "perf memcpy": 10.17,
+            "namd 92K atoms": 52.33,
+            "calculating prime numbers": 13.33,
+            "argon2 hashing": 7.08,
+            "ffmpeg compilation": 65.63,
+            "xz compression": 54.73,
+            "kernel defconfig": 133.14,
+            "blender render": 101.75,
+            "x265 encoding": 22.48,
+            "Total time (s)": 528.81,
+            "Total score": 71.64
+        }
+    },
+    {
+        "kernel": "7.1.1-1-cachyos-bore",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 14.29,
+            "y-cruncher pi 1b": 42.59,
+            "perf sched msg fork thread": 12.255,
+            "perf memcpy": 10.87,
+            "namd 92K atoms": 52.7,
+            "calculating prime numbers": 12.953,
+            "argon2 hashing": 7.79,
+            "ffmpeg compilation": 65.04,
+            "xz compression": 55.45,
+            "kernel defconfig": 133.31,
+            "blender render": 100.96,
+            "x265 encoding": 23.3,
+            "Total time (s)": 531.51,
+            "Total score": 73.34
+        }
+    },
+    {
+        "kernel": "7.1.1-2-cachyos",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 14.62,
+            "y-cruncher pi 1b": 42.58,
+            "perf sched msg fork thread": 10.042,
+            "perf memcpy": 10.86,
+            "namd 92K atoms": 51.56,
+            "calculating prime numbers": 13.022,
+            "argon2 hashing": 7.76,
+            "ffmpeg compilation": 65.25,
+            "xz compression": 54.36,
+            "kernel defconfig": 130.69,
+            "blender render": 101.22,
+            "x265 encoding": 23.17,
+            "Total time (s)": 525.13,
+            "Total score": 71.91
+        }
+    },
+    {
+        "kernel": "7.1.1-infinity",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 14.54,
+            "y-cruncher pi 1b": 42.75,
+            "perf sched msg fork thread": 11.776,
+            "perf memcpy": 10.37,
+            "namd 92K atoms": 52.54,
+            "calculating prime numbers": 13.186,
+            "argon2 hashing": 7.78,
+            "ffmpeg compilation": 66.31,
+            "xz compression": 55.06,
+            "kernel defconfig": 142.01,
+            "blender render": 102.57,
+            "x265 encoding": 23.69,
+            "Total time (s)": 542.58,
+            "Total score": 73.69
+        }
+    }
+]
