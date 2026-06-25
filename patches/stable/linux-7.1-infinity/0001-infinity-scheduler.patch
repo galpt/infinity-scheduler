@@ -146,7 +146,7 @@ index 3ebec18..f7f21ac 100644
 +	struct rq *rq = this_rq();
 +
 +	/* Infinity: init child */
-+	infinity_fork_init(&p->infinity, rq_clock(rq));
++	infinity_fork_init(&p->infinity, READ_ONCE(rq->clock));
 +
  	set_task_max_allowed_capacity(p);
  }
@@ -597,6 +597,18 @@ index 0000000..62ec11c
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 +
 +#endif /* __INFINITY_SCHED_H */
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 4ee8faf..de0dda5 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "sched.h"
++#include "infinity_sched.h"
+ #include "pelt.h"
+ 
+ int sched_rr_timeslice = RR_TIMESLICE;
 diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
 index b215b0e..4730cb1 100644
 --- a/kernel/sched/syscalls.c

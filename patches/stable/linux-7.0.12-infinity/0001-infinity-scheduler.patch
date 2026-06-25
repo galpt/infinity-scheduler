@@ -154,7 +154,7 @@ index 3bce48a..c94af8b 100644
 +	struct rq *rq = this_rq();
 +
 +	/* Infinity: init child */
-+	infinity_fork_init(&p->infinity, rq_clock(rq));
++	infinity_fork_init(&p->infinity, READ_ONCE(rq->clock));
 +
  	set_task_max_allowed_capacity(p);
  }
@@ -479,10 +479,10 @@ index 0000000..a0ea2ff
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..62ec11c
+index 0000000..5a2e9c2
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,120 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -491,14 +491,12 @@ index 0000000..62ec11c
 + *
 + * Architecture:
 + *
-+ *   fair.c / rt.c (Linux scheduler)   infinity_sched.c (Infinity algorithm)
-+ *   ────────────────────────────────   ─────────────────────────────────────
++ *   fair.c (EEVDF framework)           infinity_sched.c (Infinity algorithm)
++ *   ────────────────────────           ─────────────────────────────────────
 + *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
 + *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
 + *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
 + *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
-+ *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
-+ *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
 + *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
 + *   init/init_task.c        ──init──► infinity.{}             — static init
 + *
