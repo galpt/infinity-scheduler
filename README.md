@@ -1,6 +1,6 @@
 # infinity-scheduler
 
-A fair-share CPU scheduler with accelerating budget consumption — the more a task runs, the faster its budget depletes. Interactive tasks reset this effect on wakeup. Built into CFS/EEVDF, no BPF or sched-ext dependency.
+A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Built into CFS/EEVDF, no BPF or sched-ext dependency.
 
 > [!TIP]
 > The [v2 branch](https://github.com/galpt/infinity-scheduler/tree/v2) has a more refined implementation — no clamps, no external feedback loop, self-stabilizing by construction.
@@ -12,7 +12,7 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 │
 ├── src/                                     ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 │   ├── infinity_sched.h                    Public API: constants, sysctl declarations, function declarations
-│   └── infinity_sched.c                    Algorithm: fair-share slice, accelerating consumption, fork init
+│   └── infinity_sched.c                    Algorithm: fair-share slice, EMA consumption, wakeup decay, fork init
 │
 ├── patches/
 │   ├── stable/
@@ -43,8 +43,8 @@ A fair-share CPU scheduler with accelerating budget consumption — the more a t
 ## Quick start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the v2 branch
+git clone -b v2 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -77,36 +77,35 @@ EEVDF functions modified by the Infinity scheduler:
 | EEVDF function | Infinity replacement |
 |---|---|
 | `update_deadline()` | Fair-share slice via `infinity_slice()` |
-| `update_curr()` | Accelerating budget consumption via `infinity_consume()` — the core formula |
-| `enqueue_task_fair()` (wakeup) | Resets `runtime_debt = 0` — the "infinity resets" on sleep |
-| `dequeue_task_fair()` (sleep) | Records sleep timestamp for budget refill |
-| `task_fork_fair()` | Initializes budget and debt via `infinity_fork_init()` |
+| `update_curr()` | EMA budget consumption via `infinity_consume()` — the core formula |
+| `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
+| `dequeue_task_fair()` (sleep) | Records sleep timestamp for wakeup decay |
+| `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
 
-No explicit wakeup preemption logic is needed. The accelerating consumption naturally prevents CPU-bound tasks from maintaining a positive budget, while interactive tasks reset their debt on wakeup.
+No explicit wakeup preemption logic is needed. The EMA naturally converges toward `BUDGET_MAX` while running and toward `0` while sleeping — the budget is `BUDGET_MAX - ema`, always in `[0, BUDGET_MAX]` without any clamp.
 
-### Accelerating consumption formula
+### EMA consumption formula
 
-The Infinity scheduler divides time the same way the Limitless divides space — each unit of
-runtime is multiplied by an ever-growing factor, so a CPU-bound task's remaining budget
-approaches zero asymptotically but never reaches it.
+The EMA replaces the old accumulator + clamp approach with a smooth asymptotic convergence:
 
-$$
-r = 1 + \frac{d}{\text{CARRIAGE}} \qquad \lim_{t \to \infty} b(t) = B_{\min}
-$$
+| Operation | Formula | Description |
+|---|---|---|
+| While running | $ema \mathrel{+}= (B_{\max} - ema) \times \alpha / 256$ | EMA climbs toward `BUDGET_MAX` |
+| While sleeping | $ema \mathrel{-}= ema \times \alpha / 256$ | EMA decays toward 0 (catch-up on wakeup) |
+| Budget | $budget = B_{\max} - ema$ | Naturally in `[0, BUDGET_MAX]` — no clamp |
+| Rate | $rate = 1 + \dfrac{ema \times D_{\max}}{B_{\max}}$ | Consumption multiplier (fixed-point) |
+| Consumption | $consumption = delta \times rate / 256$ | 8-bit fixed-point precision |
 
 | Symbol | Meaning |
 |---|---|
-| $r$ | Acceleration factor — how fast this run's budget is consumed right now |
-| $d$ | Accumulated runtime since the task last woke up (capped at $\text{CARRIAGE} \times \text{CAP}$) |
-| $\text{CARRIAGE}$ | Base fair-share window, default 2ms |
-| $\text{CAP}$ | Debt cap multiplier, default 256× |
-| $b(t)$ | Remaining budget at time $t$ |
-| $B_{\min}$ | Budget clamp floor — the budget stops dropping here, never reaching zero |
+| `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
+| $\alpha = 1/16$ | Decay factor (6.25% per tick) — determines how fast the EMA converges |
+| $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
+| $D_{\max}$ | Max acceleration multiplier (default 256×) |
+| `rate` | Budget consumption rate — climbs from 1× to 257× as ema grows |
 
-**Example:** a task that has run for 4ms without sleeping: $r = 1 + 4\text{ms} / 2\text{ms} = 3$, so its budget depletes 3× faster.  
-After 20ms: $r = 1 + 20\text{ms} / 2\text{ms} = 11$, so its budget depletes 11× faster.  
-The budget asymptotically approaches $B_{\min}$, exactly like a convergent series approaches its limit — never zero, never undefined.
+**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, budget ≈ 740µs, rate ≈ $1 + 0.63 \times 256 \approx 162\times$. The budget depletes 162× faster. After 256 ticks, $ema$ converges close to $B_{\max}$ and budget approaches 0 — but never reaches it, the true Limitless.
 
 ## Tunables
 
@@ -117,33 +116,17 @@ enter an invalid state regardless of input.
 | Parameter | Default | Range | Description |
 |---|---|---|---|
 | `infinity_carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
-| `infinity_debt_cap` | 256 | [1, 4096] | Runtime debt cap (multiplier × CARRIAGE_NS) |
-| `infinity_refill_div` | 100 | [1, 65536] | Budget refill divisor |
+| `infinity_debt_cap` | 256 | [1, 4096] | Max acceleration multiplier |
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
-| `infinity_self_stabilize` | 1 | [0, 1] | Automatic tuning |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_reset` | — | — | Write `1` to reset all tunables to defaults |
 
-### Self-stabilize mode
-
-When `self_stabilize = 1` (default), a feedback loop runs every 2 seconds and
-monitors per-CPU budget exhaustion rates. If tasks are exhausting budget too
-quickly, the carriage window is increased and the debt cap is decreased to
-reduce acceleration aggressiveness. If the system is underutilized, the
-values are tightened for better interactivity.
-
-To disable auto-tuning and set values manually:
+The EMA formula is self-stabilizing by construction — no auto-tuning sysctl is needed.
+To set values manually and let the physics handle the rest:
 
 ```bash
-sysctl kernel.infinity_self_stabilize=0
-sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
-sysctl kernel.infinity_debt_cap=128            # less aggressive
-```
-
-Re-enable self-stabilize to let the feedback loop resume tuning:
-
-```bash
-sudo sysctl kernel.infinity_self_stabilize=1
+sudo sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
+sudo sysctl kernel.infinity_debt_cap=128            # less aggressive
 ```
 
 To reset all tunables to their kernel defaults:
@@ -157,14 +140,17 @@ sudo sysctl kernel.infinity_reset=1
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
 |---|---|---|
 | Fair-share slice | Yes | Yes |
-| Budget model | Linear consumption | **Accelerating** |
+| Budget model | Linear consumption | **EMA (Limitless)** |
 | Explicit preemption | Budget-gated | **None (inherent)** |
-| Interactive floor | Yes | Yes |
-| Sleep cap (250ms) | Yes | Yes |
 | SMT halving | No | Yes |
 | NULL guard | N/A (BPF) | Yes |
 | Work stealing | Yes (BPF) | No |
 | RT-stall immunity | No | Yes |
+
+EMA budget tracking converges asymptotically without clamps — the Limitless
+property holds mathematically.  No external feedback loop, no refill divisor,
+no interactive floor constants, no sleep cap.  The physics of the EMA is the
+only regulation mechanism.
 
 ## License
 
