@@ -479,10 +479,10 @@ index 0000000..a0ea2ff
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..1161064
+index 0000000..5a2e9c2
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,120 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -576,9 +576,6 @@ index 0000000..1161064
 +
 +/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 +#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
-+
-+/** Kernel RT thread priority threshold — skip Infinity RT. */
-+#define INFINITY_RT_KERNEL_PRIO		50
 +
 +/** Initial budget for newly forked tasks (one minimum slice). */
 +#define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS

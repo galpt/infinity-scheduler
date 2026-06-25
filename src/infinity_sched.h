@@ -92,9 +92,6 @@
 /** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 #define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
 
-/** Kernel RT thread priority threshold — skip Infinity RT. */
-#define INFINITY_RT_KERNEL_PRIO		50
-
 /** Initial budget for newly forked tasks (one minimum slice). */
 #define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
 
