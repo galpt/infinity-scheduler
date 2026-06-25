@@ -1,9 +1,6 @@
 # infinity-scheduler
 
-A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Built into CFS/EEVDF, no BPF or sched-ext dependency.
-
-> [!TIP]
-> The [v2 branch](https://github.com/galpt/infinity-scheduler/tree/v2) has a more refined implementation — no clamps, no external feedback loop, self-stabilizing by construction.
+A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
 
 ## Project structure
 
