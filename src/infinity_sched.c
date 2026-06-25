@@ -10,7 +10,7 @@
  *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
  *   budget = BUDGET_MAX - ema   (naturally in [0, BUDGET_MAX] — no clamps)
  *   rate_fp = 256 + ema * DEBT_CAP / BUDGET_MAX  (fixed-point 8-bit)
- *   consumption = delta_exec * rate_fp / 256
+ *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
  *
  * The EMA converges asymptotically toward BUDGET_MAX when running and
  * toward 0 when sleeping — the true Limitless.  No clamps, no external
@@ -187,7 +187,7 @@ late_initcall(infinity_sched_init);
 /* infinity_slice                                                      */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary)
+u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 {
 	u64 slice;
 
@@ -195,6 +195,12 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary)
 		nr_runnable = 1;
 
 	slice = READ_ONCE(infinity_tune_carriage_ns) / nr_runnable;
+
+	/* EMA modulation: higher EMA → shorter slice (active throttle) */
+	if (ema > 0) {
+		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
+		slice = slice * (100ULL - pct * 3ULL / 4ULL) / 100ULL;
+	}
 
 	if (slice < INFINITY_SLICE_MIN_NS)
 		slice = INFINITY_SLICE_MIN_NS;
@@ -216,7 +222,7 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary)
 
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
-	u64 cap, rate_fp, consumption;
+	u64 cap, rate_fp;
 
 	cap = READ_ONCE(infinity_tune_debt_cap);
 
@@ -232,13 +238,6 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 			    INFINITY_BUDGET_MAX_NS);
 	rate_fp += INFINITY_FP_ONE;
 
-	consumption = delta_ns * rate_fp / INFINITY_FP_ONE;
-
-	/* Budget = BUDGET_MAX - ema (naturally bounded, no clamp) */
-	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
-		ctx->budget_ns = 0;
-	else
-		ctx->budget_ns = INFINITY_BUDGET_MAX_NS - ctx->ema;
 }
 
 /* ------------------------------------------------------------------ */
@@ -269,7 +268,6 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 {
-	ctx->budget_ns = INFINITY_INIT_BUDGET_NS;
 	ctx->ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->fork_time_ns = now;
