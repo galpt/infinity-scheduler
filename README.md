@@ -83,7 +83,7 @@ EEVDF functions modified by the Infinity scheduler:
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
 
-No explicit wakeup preemption logic is needed. The EMA naturally converges toward `BUDGET_MAX` while running and toward `0` while sleeping — the budget is `BUDGET_MAX - ema`, always in `[0, BUDGET_MAX]` without any clamp.
+No explicit wakeup preemption logic is needed. The EMA naturally converges toward `BUDGET_MAX` while running and toward `0` while sleeping. The resulting EMA modulates the task's time slice — higher EMA → shorter slice, actively throttling CPU-bound tasks.
 
 ### EMA consumption formula
 
@@ -93,9 +93,8 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 |---|---|---|
 | While running | $ema \mathrel{+}= (B_{\max} - ema) \times \alpha / 256$ | EMA climbs toward `BUDGET_MAX` |
 | While sleeping | $ema \mathrel{-}= ema \times \alpha / 256$ | EMA decays toward 0 (catch-up on wakeup) |
-| Budget | $budget = B_{\max} - ema$ | Naturally in `[0, BUDGET_MAX]` — no clamp |
 | Rate | $rate = 1 + \dfrac{ema \times D_{\max}}{B_{\max}}$ | Consumption multiplier (fixed-point) |
-| Consumption | $consumption = delta \times rate / 256$ | 8-bit fixed-point precision |
+| Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
 
 | Symbol | Meaning |
 |---|---|
