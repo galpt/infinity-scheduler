@@ -271,6 +271,42 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 {
 	ctx->budget_ns = INFINITY_INIT_BUDGET_NS;
 	ctx->ema = 0;
+	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->fork_time_ns = now;
+}
+
+/* ------------------------------------------------------------------ */
+/* infinity_rt_consume — EMA climb on RT wakeup                        */
+/* ------------------------------------------------------------------ */
+
+void infinity_rt_consume(struct infinity_ctx *ctx)
+{
+	/* Asymptotic climb toward RT_BUDGET — no clamp, true Limitless */
+	u64 step = (u64)((s64)(INFINITY_RT_BUDGET_NS - ctx->rt_ema)) *
+		   INFINITY_RT_ALPHA / INFINITY_FP_ONE;
+	ctx->rt_ema += step;
+}
+
+/* ------------------------------------------------------------------ */
+/* infinity_rt_wakeup — EMA decay on RT block/sleep                    */
+/* ------------------------------------------------------------------ */
+
+void infinity_rt_wakeup(struct infinity_ctx *ctx)
+{
+	/* Fast decay toward 0 — well-behaved RT tasks recover quickly */
+	ctx->rt_ema = ctx->rt_ema - (ctx->rt_ema * INFINITY_RT_BETA /
+				      INFINITY_FP_ONE);
+}
+
+/* ------------------------------------------------------------------ */
+/* infinity_rt_effective_prio — priority after EMA modulation          */
+/* ------------------------------------------------------------------ */
+
+u8 infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx)
+{
+	u64 decay = div64_u64(ctx->rt_ema * INFINITY_RT_PRIO_RANGE,
+			      INFINITY_RT_BUDGET_NS);
+	s16 adj = (s16)base_prio - (s16)decay;
+	return (u8)max((int)adj, INFINITY_RT_PRIO_FLOOR);
 }

@@ -73,6 +73,28 @@
 #define INFINITY_FP_SHIFT		8
 #define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
 
+/* ------------------------------------------------------------------ */
+/* RT EMA constants                                                    */
+/* ------------------------------------------------------------------ */
+
+/** RT budget ceiling (10ms — larger than fair to give RT tasks runway). */
+#define INFINITY_RT_BUDGET_NS		10000000ULL
+
+/** RT alpha: slow climb (1/64 per wakeup). */
+#define INFINITY_RT_ALPHA		4
+
+/** RT beta: fast decay (1/4 per sleep). */
+#define INFINITY_RT_BETA			64
+
+/** Max priority decay. */
+#define INFINITY_RT_PRIO_RANGE		30
+
+/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
+#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
+
+/** Kernel RT thread priority threshold — skip Infinity RT. */
+#define INFINITY_RT_KERNEL_PRIO		50
+
 /** Initial budget for newly forked tasks (one minimum slice). */
 #define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
 
@@ -85,12 +107,17 @@ extern unsigned long infinity_tune_debt_cap;
 extern unsigned long infinity_tune_smt_divisor;
 
 /* ------------------------------------------------------------------ */
-/* API — called from fair.c                                           */
+/* API — called from fair.c and rt.c                                   */
 /* ------------------------------------------------------------------ */
 
 u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary);
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
+
+void infinity_rt_consume(struct infinity_ctx *ctx);
+void infinity_rt_wakeup(struct infinity_ctx *ctx);
+void infinity_rt_init(struct infinity_ctx *ctx);
+u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 
 #endif /* __INFINITY_SCHED_H */

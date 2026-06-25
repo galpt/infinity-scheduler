@@ -1,14 +1,16 @@
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index d41e7a8..d835c30 100644
+index d41e7a8..98a9c39 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,13 @@ struct kmap_ctrl {
+@@ -817,6 +817,15 @@ struct kmap_ctrl {
  #endif
  };
  
 +struct infinity_ctx {
 +	s64		budget_ns;
 +	u64		ema;
++	u64		rt_ema;
++	bool		rt_disabled;
 +	u64		last_sleep_ns;
 +	u64		fork_time_ns;
 +};
@@ -16,7 +18,7 @@ index d41e7a8..d835c30 100644
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +878,7 @@ struct task_struct {
+@@ -871,6 +880,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -24,17 +26,39 @@ index d41e7a8..d835c30 100644
  	struct sched_dl_entity		*dl_server;
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
+diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
+index 359a14c..0725287 100644
+--- a/include/uapi/linux/sched.h
++++ b/include/uapi/linux/sched.h
+@@ -131,6 +131,7 @@ struct clone_args {
+ #define SCHED_FLAG_DL_OVERRUN		0x04
+ #define SCHED_FLAG_KEEP_POLICY		0x08
+ #define SCHED_FLAG_KEEP_PARAMS		0x10
++#define SCHED_FLAG_NO_INFINITY_RT	0x10
+ #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
+ #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
+ 
+@@ -144,6 +145,6 @@ struct clone_args {
+ 			 SCHED_FLAG_RECLAIM		| \
+ 			 SCHED_FLAG_DL_OVERRUN		| \
+ 			 SCHED_FLAG_KEEP_ALL		| \
+-			 SCHED_FLAG_UTIL_CLAMP)
++			 SCHED_FLAG_UTIL_CLAMP	| \n			 SCHED_FLAG_NO_INFINITY_RT)
+ 
+ #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
-index 5c83875..d34b632 100644
+index 5c83875..d039a3b 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,13 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
 +	.infinity		= {
 +				.budget_ns	= 0,
 +				.ema		= 0,
++				.rt_ema		= 0,
++				.rt_disabled	= false,
 +				.last_sleep_ns	= 0,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
@@ -137,10 +161,10 @@ index 3bce48a..c94af8b 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..b67d4a4
+index 0000000..a0ea2ff
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,312 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -414,15 +438,51 @@ index 0000000..b67d4a4
 +{
 +	ctx->budget_ns = INFINITY_INIT_BUDGET_NS;
 +	ctx->ema = 0;
++	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
 +	ctx->fork_time_ns = now;
 +}
++
++/* ------------------------------------------------------------------ */
++/* infinity_rt_consume — EMA climb on RT wakeup                        */
++/* ------------------------------------------------------------------ */
++
++void infinity_rt_consume(struct infinity_ctx *ctx)
++{
++	/* Asymptotic climb toward RT_BUDGET — no clamp, true Limitless */
++	u64 step = (u64)((s64)(INFINITY_RT_BUDGET_NS - ctx->rt_ema)) *
++		   INFINITY_RT_ALPHA / INFINITY_FP_ONE;
++	ctx->rt_ema += step;
++}
++
++/* ------------------------------------------------------------------ */
++/* infinity_rt_wakeup — EMA decay on RT block/sleep                    */
++/* ------------------------------------------------------------------ */
++
++void infinity_rt_wakeup(struct infinity_ctx *ctx)
++{
++	/* Fast decay toward 0 — well-behaved RT tasks recover quickly */
++	ctx->rt_ema = ctx->rt_ema - (ctx->rt_ema * INFINITY_RT_BETA /
++				      INFINITY_FP_ONE);
++}
++
++/* ------------------------------------------------------------------ */
++/* infinity_rt_effective_prio — priority after EMA modulation          */
++/* ------------------------------------------------------------------ */
++
++u8 infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx)
++{
++	u64 decay = div64_u64(ctx->rt_ema * INFINITY_RT_PRIO_RANGE,
++			      INFINITY_RT_BUDGET_NS);
++	s16 adj = (s16)base_prio - (s16)decay;
++	return (u8)max((int)adj, INFINITY_RT_PRIO_FLOOR);
++}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..a61ef76
+index 0000000..1161064
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,123 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -498,6 +558,28 @@ index 0000000..a61ef76
 +#define INFINITY_FP_SHIFT		8
 +#define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
 +
++/* ------------------------------------------------------------------ */
++/* RT EMA constants                                                    */
++/* ------------------------------------------------------------------ */
++
++/** RT budget ceiling (10ms — larger than fair to give RT tasks runway). */
++#define INFINITY_RT_BUDGET_NS		10000000ULL
++
++/** RT alpha: slow climb (1/64 per wakeup). */
++#define INFINITY_RT_ALPHA		4
++
++/** RT beta: fast decay (1/4 per sleep). */
++#define INFINITY_RT_BETA			64
++
++/** Max priority decay. */
++#define INFINITY_RT_PRIO_RANGE		30
++
++/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
++#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
++
++/** Kernel RT thread priority threshold — skip Infinity RT. */
++#define INFINITY_RT_KERNEL_PRIO		50
++
 +/** Initial budget for newly forked tasks (one minimum slice). */
 +#define INFINITY_INIT_BUDGET_NS		INFINITY_SLICE_MIN_NS
 +
@@ -510,7 +592,7 @@ index 0000000..a61ef76
 +extern unsigned long infinity_tune_smt_divisor;
 +
 +/* ------------------------------------------------------------------ */
-+/* API — called from fair.c                                           */
++/* API — called from fair.c and rt.c                                   */
 +/* ------------------------------------------------------------------ */
 +
 +u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary);
@@ -518,4 +600,37 @@ index 0000000..a61ef76
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 +
++void infinity_rt_consume(struct infinity_ctx *ctx);
++void infinity_rt_wakeup(struct infinity_ctx *ctx);
++void infinity_rt_init(struct infinity_ctx *ctx);
++u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
++
 +#endif /* __INFINITY_SCHED_H */
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 0cbee03..61f8245 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "sched.h"
++#include "infinity_sched.h"
+ #include "pelt.h"
+ 
+ int sched_rr_timeslice = RR_TIMESLICE;
+diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
+index cadb0e9..002b0e4 100644
+--- a/kernel/sched/syscalls.c
++++ b/kernel/sched/syscalls.c
+@@ -546,6 +546,11 @@ int __sched_setscheduler(struct task_struct *p,
+ 	}
+ 
+ 	/* Update task specific "requested" clamps */
++	if (attr->sched_flags & SCHED_FLAG_NO_INFINITY_RT) {
++		p->infinity.rt_ema = 0;
++		p->infinity.rt_disabled = true;
++	}
++
+ 	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
+ 		retval = uclamp_validate(p, attr);
+ 		if (retval)
