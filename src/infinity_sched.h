@@ -6,12 +6,14 @@
  *
  * Architecture:
  *
- *   fair.c (EEVDF framework)           infinity_sched.c (Infinity algorithm)
- *   ────────────────────────           ─────────────────────────────────────
+ *   fair.c / rt.c (Linux scheduler)   infinity_sched.c (Infinity algorithm)
+ *   ────────────────────────────────   ─────────────────────────────────────
  *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
  *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
+ *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
+ *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
  *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
  *   init/init_task.c        ──init──► infinity.{}             — static init
  *
