@@ -478,7 +478,7 @@ new file mode 100644
 index 000000000..ec6dd0497
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,119 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -598,6 +598,7 @@ index 000000000..ec6dd0497
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 +
 +#endif /* __INFINITY_SCHED_H */
+
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
 index 0cbee0318..61f824560 100644
 --- a/kernel/sched/rt.c
@@ -626,22 +627,6 @@ index cadb0e9fe..002b0e468 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
--- 
-2.54.0
-
-
-From f598229592991bf05d30c42ab688e29c05e868b9 Mon Sep 17 00:00:00 2001
-From: Galih Tama <galpt@v.recipes>
-Date: Fri, 26 Jun 2026 18:00:07 +0700
-Subject: [PATCH 2/2] v2-rt base
-
-Signed-off-by: Galih Tama <galpt@v.recipes>
----
- kernel/sched/fair.c           |  34 +++++++++--
- kernel/sched/infinity_sched.c | 109 +++++++++++++++++++---------------
- kernel/sched/infinity_sched.h |  39 +++++++++---
- 3 files changed, 122 insertions(+), 60 deletions(-)
-
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 4baade636..4c0539204 100644
 --- a/kernel/sched/fair.c
@@ -923,7 +908,7 @@ index ec6dd0497..d14458cb5 100644
  extern unsigned long infinity_tune_smt_divisor;
  
  /* ------------------------------------------------------------------ */
-@@ -112,6 +106,35 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
+@@ -112,5 +106,34 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
  void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
  void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  
@@ -958,6 +943,3 @@ index ec6dd0497..d14458cb5 100644
 +
  void infinity_rt_consume(struct infinity_ctx *ctx);
  void infinity_rt_wakeup(struct infinity_ctx *ctx);
--- 
-2.54.0
-

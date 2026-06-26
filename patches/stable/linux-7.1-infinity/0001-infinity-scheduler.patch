@@ -552,7 +552,7 @@ new file mode 100644
 index 000000000..d14458cb5
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,142 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -695,6 +695,7 @@ index 000000000..d14458cb5
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 +
 +#endif /* __INFINITY_SCHED_H */
+
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
 index 4ee8faf01..de0dda51a 100644
 --- a/kernel/sched/rt.c
@@ -723,6 +724,3 @@ index b215b0ead..4730cb1d2 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
--- 
-2.54.0
-
