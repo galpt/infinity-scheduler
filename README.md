@@ -1,6 +1,6 @@
 # infinity-scheduler
 
-A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
+A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.  The v3 branch adds two EEVDF surgeries for sub-20µs wakeup latency: protect_slice bypass for CPU-bound tasks and EMA-modulated wakeup vslice for interactive tasks.
 
 ## Project structure
 
@@ -40,8 +40,8 @@ A fair-share CPU scheduler where the more a task runs, the faster its budget run
 ## Quick start
 
 ```bash
-# 1. Clone the v2-rt branch
-git clone -b v2-rt https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the v3 branch
+git clone -b v3 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -72,7 +72,7 @@ sudo dmesg | grep Infinity                         # → Infinity scheduler acti
 EEVDF and RT functions modified by the Infinity scheduler:
 
 | Function | Infinity replacement |
-|---|---|
+|---|---|---|
 | `update_deadline()` | Fair-share slice via `infinity_slice()` |
 | `update_curr()` | EMA budget consumption via `infinity_consume()` — the core formula |
 | `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
@@ -81,18 +81,19 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `dequeue_task_rt()` (block/sleep) | EMA decay via `infinity_rt_wakeup()` |
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
+| `pick_eevdf()` (v3) | EMA protect_slice bypass via `infinity_should_yield()` |
+| `place_entity()` (v3) | EMA-modulated wakeup vslice via `infinity_wakeup_scale()` |
 
-No explicit wakeup preemption logic is needed. The EMA naturally converges toward `BUDGET_MAX` while running and toward `0` while sleeping. The resulting EMA modulates the task's time slice — higher EMA → shorter slice, actively throttling CPU-bound tasks.
+The EMA signal drives two scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Additionally in v3, a high-EMA (CPU-bound) task yields its slice protection so that low-EMA (interactive) tasks preempt sooner, and low-EMA wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree.
 
 ### EMA consumption formula
 
 The EMA replaces the old accumulator + clamp approach with a smooth asymptotic convergence:
 
 | Operation | Formula | Description |
-|---|---|---|
+|---|---|---|---|
 | While running | $ema \mathrel{+}= (B_{\max} - ema) \times \alpha / 256$ | EMA climbs toward `BUDGET_MAX` |
 | While sleeping | $ema \mathrel{-}= ema \times \alpha / 256$ | EMA decays toward 0 (catch-up on wakeup) |
-| Rate | $rate = 1 + \dfrac{ema \times D_{\max}}{B_{\max}}$ | Consumption multiplier (fixed-point) |
 | Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
 
 | Symbol | Meaning |
@@ -100,10 +101,9 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
 | $\alpha = 1/16$ | Decay factor (6.25% per tick) — determines how fast the EMA converges |
 | $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
-| $D_{\max}$ | Max acceleration multiplier (default 256×) |
-| `rate` | Budget consumption rate — climbs from 1× to 257× as ema grows |
+| `slice` | Per-task time slice — shrinks as EMA grows (active throttle) |
 
-**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, budget ≈ 740µs, rate ≈ $1 + 0.63 \times 256 \approx 162\times$. The budget depletes 162× faster. After 256 ticks, $ema$ converges close to $B_{\max}$ and budget approaches 0 — but never reaches it, the true Limitless.
+**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, receiving a time slice of $slice = share \times (100 - 63 \times 3/4) / 100 \approx 0.53 \times share$. After 256 ticks, $ema$ converges close to $B_{\max}$ and the slice reaches its 500 µs minimum — but EMA never reaches BUDGET_MAX, the true Limitless.
 
 ## Tunables
 
@@ -112,19 +112,17 @@ All values are clamped at write time to safe ranges — the scheduler can never
 enter an invalid state regardless of input.
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|
+|---|---|---|---|---|
 | `infinity_carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
-| `infinity_debt_cap` | 256 | [1, 4096] | Max acceleration multiplier |
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_reset` | — | — | Write `1` to reset all tunables to defaults |
 
 The EMA formula is self-stabilizing by construction — no auto-tuning sysctl is needed.
-To set values manually and let the physics handle the rest:
+To set values manually:
 
 ```bash
 sudo sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
-sudo sysctl kernel.infinity_debt_cap=128            # less aggressive
 ```
 
 To reset all tunables to their kernel defaults:
@@ -136,19 +134,20 @@ sudo sysctl kernel.infinity_reset=1
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
-|---|---|---|
+|---|---|---|---|
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | **EMA (Limitless)** |
-| Explicit preemption | Budget-gated | **None (inherent)** |
+| Preemption model | Budget-gated | **EMA protect_slice bypass (v3)** |
 | SMT halving | No | Yes |
 | NULL guard | N/A (BPF) | Yes |
+| Wakeup deadline boost | N/A | **EMA vslice scaling (v3)** |
 | Work stealing | Yes (BPF) | No |
 | RT-stall immunity | No | Yes |
 
 EMA budget tracking converges asymptotically without clamps — the Limitless
 property holds mathematically.  No external feedback loop, no refill divisor,
-no interactive floor constants, no sleep cap.  The physics of the EMA is the
-only regulation mechanism.
+no interactive floor constants, no sleep cap, no tunable knobs beyond two
+safe-clamped sysctls.
 
 ## License
 

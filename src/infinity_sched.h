@@ -16,10 +16,11 @@
  *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
  *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
  *   init/init_task.c        ──init──► infinity.{}             — static init
+ *   pick_eevdf()            ──call──► infinity_should_yield() — protect_slice bypass (v3)
+ *   place_entity()          ──call──► infinity_wakeup_scale() — EMA-modulated wakeup vslice (v3)
  *
  * Tunables (sysctl kernel.infinity_*):
  *   infinity_carriage_ns   — base fair-share window (default 2ms)
- *   infinity_debt_cap      — max acceleration multiplier (default 256x)
  *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
  *   infinity_running       — read-only flag, 1 if active
  *
@@ -40,9 +41,6 @@
 /** Base fair-share window (2ms). */
 #define INFINITY_CARRIAGE_NS_DEFAULT	2000000ULL
 
-/** Runtime debt cap multiplier (256x). */
-#define INFINITY_DEBT_CAP_DEFAULT	256
-
 /** SMT secondary slice divisor (2 = half slice). */
 #define INFINITY_SMT_DIVISOR_DEFAULT	2
 
@@ -52,9 +50,6 @@
 
 #define INFINITY_CARRIAGE_NS_MIN	1000ULL
 #define INFINITY_CARRIAGE_NS_MAX	100000000ULL	/* 100ms */
-
-#define INFINITY_DEBT_CAP_MIN		1
-#define INFINITY_DEBT_CAP_MAX		4096
 
 #define INFINITY_SMT_DIVISOR_MIN	1
 #define INFINITY_SMT_DIVISOR_MAX	16
@@ -100,7 +95,6 @@
 /* ------------------------------------------------------------------ */
 
 extern unsigned long infinity_tune_carriage_ns;
-extern unsigned long infinity_tune_debt_cap;
 extern unsigned long infinity_tune_smt_divisor;
 
 /* ------------------------------------------------------------------ */
@@ -115,28 +109,29 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 /*
  * infinity_should_yield — should this fair task yield its protect_slice?
  *
- * Called from pick_eevdf() when protect_slice() would normally keep the
- * current task running.  Returns true when the current task's EMA is high
- * (CPU-bound behaviour), indicating it is fair to let other tasks preempt.
+ * Called from pick_eevdf() when protect_slice() would keep the current
+ * task running.  Returns true when the current task's EMA is high
+ * (CPU-bound behaviour), meaning it is fair to let other tasks preempt.
  *
- * This is NOT a copy of BORE's futex_waiting check.  BORE checks a flag
- * set on the waking task; this checks the running task's own consumption
- * history.  The EMA is a continuous asymptotic signal — no flag, no burst
- * tracking, no external state.
+ * This is distinct from BORE's futex_waiting check: BORE queries a flag
+ * on the waking task; this function examines the running task's own
+ * consumption history via the EMA — a continuous asymptotic signal
+ * that requires no flags, burst tracking, or external state.
  */
 bool infinity_should_yield(struct task_struct *p);
 
 /*
  * infinity_wakeup_scale — reduce vslice for low-EMA wakeups
  *
- * Called from place_entity() to shorten the vslice (and thus the deadline)
- * of a waking task whose EMA is low (interactive behaviour).  The lower
- * the EMA, the more aggressive the reduction — up to 50% for EMA ≈ 0.
+ * Called from place_entity() to shorten the vslice of a waking task
+ * whose EMA is low (interactive behaviour).  The reduction is
+ * proportional to the sleep depth encoded in the EMA:
  *
- * This is NOT a copy of BORE's unconditional vslice >>= 1 on wakeup.
- * The reduction is proportional to the wakeup depth encoded in the EMA:
- *   - EMA ≈ 0  (slept long):  ~50% reduction, deadline moved earlier
- *   - EMA ≈ BUDGET_MAX  (brief sleep):  ~0% reduction, normal placement
+ *   EMA ~= 0             (slept long):  ~50% reduction
+ *   EMA ~= BUDGET_MAX    (brief sleep):   ~0% reduction
+ *
+ * This is distinct from BORE's unconditional vslice >>= 1 on wakeup.
+ * The scaling here is continuous, not a fixed halving.
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
