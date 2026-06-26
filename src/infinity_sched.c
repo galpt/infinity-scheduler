@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.c — Infinity scheduler algorithm (v3 EMA / EEVDF surgery).
+ * infinity_sched.c — Infinity scheduler algorithm (v3).
  *
  * Exponential Moving Average based fair scheduling:
  *
@@ -10,9 +10,9 @@
  *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
  *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
  *
- * v3 adds two EEVDF surgeries driven by the EMA signal:
- *   pick_eevdf()   — protect_slice bypass when current task is CPU-bound
- *   place_entity() — wakeup vslice reduction proportional to sleep depth
+ * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
+ * deadlines, and EMA-modulated RT queue placement via
+ * infinity_rt_effective_prio().
  *
  * The EMA converges asymptotically toward BUDGET_MAX when running and
  * toward 0 when sleeping — the true Limitless.  No clamps, no external

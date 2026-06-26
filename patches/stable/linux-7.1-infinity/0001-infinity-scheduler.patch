@@ -46,7 +46,7 @@ index ee06cba5c..51413f02e 100644
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
 +};
-+
++ 
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
@@ -138,7 +138,7 @@ index 3ebec186f..7cf81f8a3 100644
 +	/* Infinity: EMA budget consumption */
 +	if (entity_is_task(curr)) { struct task_struct *p__ = task_of(curr);
 +		infinity_consume(&p__->infinity, delta_exec); }
-+
++ 
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  
@@ -153,7 +153,7 @@ index 3ebec186f..7cf81f8a3 100644
 +	 */
 +	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP))
 +		vslice = infinity_wakeup_scale(vslice, &task_of(se)->infinity);
-+
++ 
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
@@ -170,7 +170,7 @@ index 3ebec186f..7cf81f8a3 100644
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
-+
++ 
 +	/* Infinity: EMA decay on wakeup */
 +	if (flags & ENQUEUE_WAKEUP) {
 +		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
@@ -189,24 +189,24 @@ index 3ebec186f..7cf81f8a3 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13748,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,5 +13748,10 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
 +	struct rq *rq = this_rq();
-+
++ 
 +	/* Infinity: init child */
 +	infinity_fork_init(&p->infinity, READ_ONCE(rq->clock));
-+
++ 
  	set_task_max_allowed_capacity(p);
  }
- 
+
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
 index 000000000..adf7efb85
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,304 @@
+@@ -0,11 +1,313 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -219,27 +219,27 @@ index 000000000..adf7efb85
 + *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
 + *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
 + *
-+ * v3 adds EMA-modulated wakeup vslice for interactive tasks with shorter deadlines.
++ * v3 adds EMA-modulated wakeup vslice for shorter interactive-task deadlines, and EMA-modulated RT queue placement via infinity_rt_effective_prio().
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
 + * feedback loop.  Self-stabilizing by construction.
 + */
-+
++ 
 +#include <linux/types.h>
 +#include <linux/sched.h>
 +#include <linux/math64.h>
 +#include <linux/sysctl.h>
 +#include "infinity_sched.h"
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* Sysctl tunables with safe clamps                                    */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +unsigned long infinity_tune_carriage_ns = INFINITY_CARRIAGE_NS_DEFAULT;
 +unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 +static int infinity_running_flag = 1;
-+
++ 
 +/*
 + * Write-time clamping handlers.
 + * Every tunable write is intercepted, clamped to [MIN, MAX], and stored.
@@ -252,7 +252,7 @@ index 000000000..adf7efb85
 +	int ret;
 +	unsigned long old, val;
 +	struct ctl_table tmp = *table;
-+
++ 
 +	old = READ_ONCE(infinity_tune_carriage_ns);
 +	val = old;
 +	tmp.data = &val;
@@ -265,14 +265,15 @@ index 000000000..adf7efb85
 +	}
 +	return ret;
 +}
-+
+ 
++ 
 +static int clamp_smt_divisor(const struct ctl_table *table, int write,
 +			     void *buf, size_t *lenp, loff_t *ppos)
 +{
 +	int ret;
 +	unsigned long old, val;
 +	struct ctl_table tmp = *table;
-+
++ 
 +	old = READ_ONCE(infinity_tune_smt_divisor);
 +	val = old;
 +	tmp.data = &val;
@@ -285,7 +286,8 @@ index 000000000..adf7efb85
 +	}
 +	return ret;
 +}
-+
+ 
++ 
 +static struct ctl_table infinity_sysctl_table[] = {
 +	{
 +		.procname	= "infinity_carriage_ns",
@@ -310,15 +312,15 @@ index 000000000..adf7efb85
 +	},
 +	{}
 +};
-+
++ 
 +static unsigned long infinity_reset_val;
-+
++ 
 +static int reset_handler(const struct ctl_table *table, int write,
 +			 void *buf, size_t *lenp, loff_t *ppos)
 +{
 +	int ret;
 +	struct ctl_table tmp = *table;
-+
++ 
 +	infinity_reset_val = 0;
 +	tmp.data = &infinity_reset_val;
 +	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
@@ -329,7 +331,8 @@ index 000000000..adf7efb85
 +	}
 +	return ret;
 +}
-+
+ 
++ 
 +static struct ctl_table infinity_reset_table[] = {
 +	{
 +		.procname	= "infinity_reset",
@@ -340,11 +343,11 @@ index 000000000..adf7efb85
 +	},
 +	{}
 +};
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* Initialization                                                      */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +static int __init infinity_sched_init(void)
 +{
 +	__register_sysctl_init("kernel", infinity_sysctl_table,
@@ -353,54 +356,56 @@ index 000000000..adf7efb85
 +	__register_sysctl_init("kernel", infinity_reset_table,
 +			      "infinity_reset_table",
 +			      ARRAY_SIZE(infinity_reset_table) - 1);
-+
++ 
 +	pr_info("Infinity scheduler active: carriage=%lu ns, smt_divisor=%lu\n",
 +		infinity_tune_carriage_ns,
 +		infinity_tune_smt_divisor);
-+
++ 
 +	return 0;
 +}
-+
+ 
++ 
 +late_initcall(infinity_sched_init);
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_slice — fair-share slice with EMA modulation               */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 +{
 +	u64 slice;
-+
++ 
 +	if (nr_runnable == 0)
 +		nr_runnable = 1;
-+
++ 
 +	slice = READ_ONCE(infinity_tune_carriage_ns) / nr_runnable;
-+
++ 
 +	/* EMA modulation: higher EMA → shorter slice (active throttle) */
 +	if (ema > 0) {
 +		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
 +		/* Reduce slice by up to 75% at ema=100% */
 +		slice = slice * (100ULL - pct * 3ULL / 4ULL) / 100ULL;
 +	}
-+
++ 
 +	if (slice < INFINITY_SLICE_MIN_NS)
 +		slice = INFINITY_SLICE_MIN_NS;
 +	if (slice > INFINITY_BUDGET_MAX_NS)
 +		slice = INFINITY_BUDGET_MAX_NS;
-+
++ 
 +	if (on_smt_secondary) {
 +		unsigned long div = READ_ONCE(infinity_tune_smt_divisor);
 +		if (div > 1)
 +			slice = div64_u64(slice, div);
 +	}
-+
++ 
 +	return slice;
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_consume — EMA budget consumption                           */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
 +	/*
@@ -417,48 +422,51 @@ index 000000000..adf7efb85
 +		   INFINITY_EMA_ALPHA / INFINITY_FP_ONE;
 +	(void)delta_ns;
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_wakeup — EMA decay catch-up on wakeup                      */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
 +	u64 ticks = sleep_ns / (INFINITY_FP_ONE * 1000);
 +	int i;
-+
++ 
 +	if (ticks == 0)
 +		return;
-+
++ 
 +	/* Cap iterations to prevent unbounded loops */
 +	if (ticks > 256)
 +		ticks = 256;
-+
++ 
 +	/* Decay EMA toward 0 for each tick slept */
 +	for (i = 0; i < ticks; i++)
 +		ctx->ema = ctx->ema - (ctx->ema * INFINITY_EMA_ALPHA /
 +					INFINITY_FP_ONE);
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_fork_init                                                 */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 +{
 +	ctx->ema = 0;
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_wakeup_scale — EMA-modulated vslice for wakeups            */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 +{
 +	u64 ema_pct, boost;
-+
++ 
 +	/*
 +	 * Scale the vslice down for waking tasks whose EMA is low
 +	 * (i.e. they slept long enough for the EMA to decay).  This
@@ -471,14 +479,15 @@ index 000000000..adf7efb85
 +	 */
 +	ema_pct = ctx->ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 +	boost = (100ULL - ema_pct) * 50ULL / 100ULL;
-+
++ 
 +	return vslice * (100ULL - boost) / 100ULL;
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_rt_consume — EMA climb on RT wakeup                        */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +void infinity_rt_consume(struct infinity_ctx *ctx)
 +{
 +	/* Asymptotic climb toward RT_BUDGET — no clamp, true Limitless */
@@ -486,22 +495,24 @@ index 000000000..adf7efb85
 +		   INFINITY_RT_ALPHA / INFINITY_FP_ONE;
 +	ctx->rt_ema += step;
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_rt_wakeup — EMA decay on RT block/sleep                    */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +void infinity_rt_wakeup(struct infinity_ctx *ctx)
 +{
 +	/* Fast decay toward 0 — well-behaved RT tasks recover quickly */
 +	ctx->rt_ema = ctx->rt_ema - (ctx->rt_ema * INFINITY_RT_BETA /
 +				      INFINITY_FP_ONE);
 +}
-+
+ 
++ 
 +/* ------------------------------------------------------------------ */
 +/* infinity_rt_effective_prio — priority after EMA modulation          */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +u8 infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx)
 +{
 +	u64 decay = div64_u64(ctx->rt_ema * INFINITY_RT_PRIO_RANGE,
@@ -509,12 +520,13 @@ index 000000000..adf7efb85
 +	s16 adj = (s16)base_prio - (s16)decay;
 +	return (u8)max((int)adj, INFINITY_RT_PRIO_FLOOR);
 +}
+
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
 index 000000000..5f4f1193b
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,128 @@
+@@ -0,1 +1,129 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -545,84 +557,84 @@ index 000000000..5f4f1193b
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
 + * Higher EMA → shorter time slice (active throttle via infinity_slice()).
 + */
-+
++ 
 +#ifndef __INFINITY_SCHED_H
 +#define __INFINITY_SCHED_H
-+
++ 
 +#include <linux/sched.h>
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* Tunable defaults                                                    */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +/** Base fair-share window (2ms). */
 +#define INFINITY_CARRIAGE_NS_DEFAULT	2000000ULL
-+
++ 
 +/** SMT secondary slice divisor (2 = half slice). */
 +#define INFINITY_SMT_DIVISOR_DEFAULT	2
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* Clamp bounds                                                        */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +#define INFINITY_CARRIAGE_NS_MIN	1000ULL
 +#define INFINITY_CARRIAGE_NS_MAX	100000000ULL	/* 100ms */
-+
++ 
 +#define INFINITY_SMT_DIVISOR_MIN	1
 +#define INFINITY_SMT_DIVISOR_MAX	16
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* Hard constants (not user-tunable)                                   */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +/** Minimum slice floor (500us). */
 +#define INFINITY_SLICE_MIN_NS		500000ULL
-+
++ 
 +/** Maximum budget (2ms). */
 +#define INFINITY_BUDGET_MAX_NS		2000000ULL
-+
++ 
 +/** EMA alpha: 1/16 of convergence per tick. */
 +#define INFINITY_EMA_ALPHA		16
-+
++ 
 +/** Fixed-point shift for fractional precision (8 bits). */
 +#define INFINITY_FP_SHIFT		8
 +#define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* RT EMA constants                                                    */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +/** RT budget ceiling (10ms — larger than fair to give RT tasks runway). */
 +#define INFINITY_RT_BUDGET_NS		10000000ULL
-+
++ 
 +/** RT alpha: slow climb (1/64 per wakeup). */
 +#define INFINITY_RT_ALPHA		4
-+
++ 
 +/** RT beta: fast decay (1/4 per sleep). */
 +#define INFINITY_RT_BETA			64
-+
++ 
 +/** Max priority decay. */
 +#define INFINITY_RT_PRIO_RANGE		30
-+
++ 
 +/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 +#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* External sysctl tunables                                            */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +extern unsigned long infinity_tune_carriage_ns;
 +extern unsigned long infinity_tune_smt_divisor;
-+
++ 
 +/* ------------------------------------------------------------------ */
 +/* API — called from fair.c and rt.c                                   */
 +/* ------------------------------------------------------------------ */
-+
++ 
 +u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema);
 +void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
-+
++ 
 +/*
 + * infinity_wakeup_scale — reduce vslice for low-EMA wakeups
 + *
@@ -637,12 +649,13 @@ index 000000000..5f4f1193b
 + * The scaling here is continuous, not a fixed halving.
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
-+
++ 
 +void infinity_rt_consume(struct infinity_ctx *ctx);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx);
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
-+
++ 
 +#endif /* __INFINITY_SCHED_H */
+ 
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
 index 4ee8faf01..107d4cb50 100644
 --- a/kernel/sched/rt.c
@@ -673,7 +686,7 @@ index 4ee8faf01..107d4cb50 100644
  
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		infinity_rt_wakeup(&p->infinity);
-+
++ 
  	dequeue_pushable_task(rq, p);
  
  	return true;
@@ -683,7 +696,7 @@ index 4ee8faf01..107d4cb50 100644
  		struct rt_prio_array *array = &rt_rq->active;
 -		struct list_head *queue = array->queue + rt_se_prio(rt_se);
 +	struct list_head *queue = array->queue + rt_se_prio(rt_se);
-+
++ 
 +	/*
 +	 * Infinity: modulate queue placement by EMA consumption for RT tasks.
 +	 * A task that has consumed significant RT runtime (high rt_ema) is
@@ -715,10 +728,7 @@ index b215b0ead..90d1e26ac 100644
 +	if (attr->sched_flags & SCHED_FLAG_NO_INFINITY_RT) {
 +		p->infinity.rt_ema = 0;
 +	}
-+
++ 
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
--- 
-2.54.0
-
