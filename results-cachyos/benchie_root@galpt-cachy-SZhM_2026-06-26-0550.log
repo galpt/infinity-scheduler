@@ -1,0 +1,35 @@
+stress-ng cpu-cache-mem: 14.66
+y-cruncher pi 1b: 42.08
+perf sched msg fork thread: 9.856
+perf memcpy: 10.31
+namd 92K atoms: 51.90
+calculating prime numbers: 13.480
+argon2 hashing: 7.91
+ffmpeg compilation: 65.33
+xz compression: 55.26
+kernel defconfig: 133.56
+blender render: 101.20
+x265 encoding: 24.60
+schbench p99 latency (us): 389.00
+schbench avg rps: 1836.00
+cyclictest max latency (us): 1191.00
+
+Total time (s): 3946.15
+Total score: 116.45
+
+Name: root@galpt-cachy-SZhM
+Date: 2026-06-26-0550
+
+System:    Kernel: 7.1.1-2-cachyos arch: x86_64 bits: 64
+           Desktop: KDE Plasma v: 6.7.1 Distro: CachyOS
+Memory:    System RAM: total: 64 GiB available: 58.54 GiB used: 6.81 GiB (11.6%)
+           Device-1: Channel-A DIMM 0 type: DDR5 size: 32 GiB speed: 4800 MT/s
+           Device-2: Channel-B DIMM 0 type: DDR5 size: 32 GiB speed: 4800 MT/s
+CPU:       Info: 8-core model: AMD Ryzen 7 6800H with Radeon Graphics bits: 64 type: MT MCP cache: L2: 4 MiB
+           Speed (MHz): avg: 1397 min/max: 404/4787 cores: 1: 1397 2: 1397 3: 1397 4: 1397 5: 1397 6: 1397 7: 1397 8: 1397 9: 1397 10: 1397 11: 1397 12: 1397 13: 1397 14: 1397 15: 1397 16: 1397
+
+SCX Scheduler: none
+
+SCX Version: 
+
+ 

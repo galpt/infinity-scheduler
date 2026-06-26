@@ -1,25 +1,28 @@
-stress-ng cpu-cache-mem: 14.29
-y-cruncher pi 1b: 42.59
-perf sched msg fork thread: 12.255
-perf memcpy: 10.87
-namd 92K atoms: 52.70
-calculating prime numbers: 12.953
-argon2 hashing: 7.79
-ffmpeg compilation: 65.04
-xz compression: 55.45
-kernel defconfig: 133.31
-blender render: 100.96
-x265 encoding: 23.30
+stress-ng cpu-cache-mem: 14.41
+y-cruncher pi 1b: 41.96
+perf sched msg fork thread: 10.439
+perf memcpy: 10.21
+namd 92K atoms: 58.53
+calculating prime numbers: 14.344
+argon2 hashing: 8.92
+ffmpeg compilation: 76.44
+xz compression: 68.53
+kernel defconfig: 140.13
+blender render: 102.45
+x265 encoding: 23.72
+schbench p99 latency (us): 19.00
+schbench avg rps: 1916.73
+cyclictest max latency (us): 438.00
 
-Total time (s): 531.51
-Total score: 73.34
+Total time (s): 2943.81
+Total score: 99.16
 
-Name: root@galpt-cachy-b34o
-Date: 2026-06-25-2043
+Name: root@galpt-cachy-4geR
+Date: 2026-06-26-0639
 
 System:    Kernel: 7.1.1-1-cachyos-bore arch: x86_64 bits: 64
            Desktop: KDE Plasma v: 6.7.1 Distro: CachyOS
-Memory:    System RAM: total: 64 GiB available: 58.54 GiB used: 5.18 GiB (8.8%)
+Memory:    System RAM: total: 64 GiB available: 58.54 GiB used: 6.44 GiB (11.0%)
            Device-1: Channel-A DIMM 0 type: DDR5 size: 32 GiB speed: 4800 MT/s
            Device-2: Channel-B DIMM 0 type: DDR5 size: 32 GiB speed: 4800 MT/s
 CPU:       Info: 8-core model: AMD Ryzen 7 6800H with Radeon Graphics bits: 64 type: MT MCP cache: L2: 4 MiB
@@ -28,3 +31,5 @@ CPU:       Info: 8-core model: AMD Ryzen 7 6800H with Radeon Graphics bits: 64 t
 SCX Scheduler: none
 
 SCX Version: 
+
+ 

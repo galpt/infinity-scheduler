@@ -1,0 +1,26 @@
+[
+    {
+        "kernel": "7.1.1-infinity",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 15.13,
+            "y-cruncher pi 1b": 42.29,
+            "perf sched msg fork thread": 11.338,
+            "perf memcpy": 10.18,
+            "namd 92K atoms": 52.27,
+            "calculating prime numbers": 12.968,
+            "argon2 hashing": 7.76,
+            "ffmpeg compilation": 65.44,
+            "xz compression": 54.9,
+            "kernel defconfig": 136.14,
+            "blender render": 101.67,
+            "x265 encoding": 23.66,
+            "schbench p99 latency (us)": 122.0,
+            "schbench avg rps": 1916.23,
+            "cyclictest max latency (us)": 360.0,
+            "Total time (s)": 2931.98,
+            "Total score": 108.23
+        }
+    }
+]

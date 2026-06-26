@@ -1,0 +1,26 @@
+[
+    {
+        "kernel": "7.0.12-1-cachyos-bmq",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 14.52,
+            "y-cruncher pi 1b": 41.58,
+            "perf sched msg fork thread": 10.812,
+            "perf memcpy": 10.13,
+            "namd 92K atoms": 60.1,
+            "calculating prime numbers": 13.324,
+            "argon2 hashing": 7.55,
+            "ffmpeg compilation": 65.51,
+            "xz compression": 55.03,
+            "kernel defconfig": 132.28,
+            "blender render": 101.92,
+            "x265 encoding": 22.31,
+            "schbench p99 latency (us)": 8.0,
+            "schbench avg rps": 1667.9,
+            "cyclictest max latency (us)": 499.0,
+            "Total time (s)": 2709.97,
+            "Total score": 87.88
+        }
+    }
+]

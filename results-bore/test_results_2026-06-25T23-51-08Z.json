@@ -1,0 +1,26 @@
+[
+    {
+        "kernel": "7.1.1-1-cachyos-bore",
+        "scx_scheduler": "none",
+        "scx_version": "none",
+        "metrics": {
+            "stress-ng cpu-cache-mem": 14.41,
+            "y-cruncher pi 1b": 41.96,
+            "perf sched msg fork thread": 10.439,
+            "perf memcpy": 10.21,
+            "namd 92K atoms": 58.53,
+            "calculating prime numbers": 14.344,
+            "argon2 hashing": 8.92,
+            "ffmpeg compilation": 76.44,
+            "xz compression": 68.53,
+            "kernel defconfig": 140.13,
+            "blender render": 102.45,
+            "x265 encoding": 23.72,
+            "schbench p99 latency (us)": 19.0,
+            "schbench avg rps": 1916.73,
+            "cyclictest max latency (us)": 438.0,
+            "Total time (s)": 2943.81,
+            "Total score": 99.16
+        }
+    }
+]
