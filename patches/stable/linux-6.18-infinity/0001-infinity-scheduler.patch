@@ -1,6 +1,6 @@
-From 51b7b2a7a080719161fa523fe86ffc521f1ada0f Mon Sep 17 00:00:00 2001
+From b5316c097af68ded9a85078077666d8c2c48346c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 01:22:55 +0700
+Date: Sat, 27 Jun 2026 01:33:41 +0700
 Subject: [PATCH] infinity-scheduler v3
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -9,12 +9,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  include/uapi/linux/sched.h    |   3 +-
  init/init_task.c              |   5 +
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  46 ++++-
+ kernel/sched/fair.c           |  75 ++++++++-
  kernel/sched/infinity_sched.c | 304 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 128 ++++++++++++++
  kernel/sched/rt.c             |  27 ++-
  kernel/sched/syscalls.c       |   4 +
- 9 files changed, 520 insertions(+), 5 deletions(-)
+ 9 files changed, 549 insertions(+), 5 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -89,7 +89,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..4433c5707 100644
+index 5b7523242..800738ad3 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -173,7 +173,43 @@ index 5b7523242..4433c5707 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7193,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -6983,6 +7016,35 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		flags = ENQUEUE_WAKEUP;
+ 	}
+ 
++	/*
++	 * Infinity: wakeup-EMA comparison.
++	 *
++	 * When a low-EMA (interactive) task wakes up while a high-EMA
++	 * (CPU-bound) fair task is running on this CPU, set a lazy
++	 * reschedule flag so the interactive task runs at the next
++	 * natural scheduling point (timer tick or voluntary yield).
++	 *
++	 * resched_curr_lazy() only sets TIF_NEED_RESCHED — it does NOT
++	 * send an IPI or force an immediate context switch.  The running
++	 * task continues until its next scheduling point, by which time
++	 * any spinlock it held has been released.  This is the same API
++	 * used by EEVDF's update_deadline() on every tick.
++	 *
++	 * Thresholds: waker < 12.5% BUDGET_MAX (interactive),
++	 *             runner > 75% BUDGET_MAX (CPU-bound).
++	 */
++	if (flags & ENQUEUE_WAKEUP) {
++		struct rq *rq = rq_of(cfs_rq);
++		struct sched_entity *curr = rq->cfs.curr;
++		if (curr && entity_is_task(curr)) {
++			struct task_struct *waker = p;
++			struct task_struct *runner = task_of(curr);
++			if (waker->infinity.ema < INFINITY_BUDGET_MAX_NS / 8 &&
++			    runner->infinity.ema > INFINITY_BUDGET_MAX_NS * 3 / 4)
++				resched_curr_lazy(rq);
++		}
++	}
++
+ 	for_each_sched_entity(se) {
+ 		cfs_rq = cfs_rq_of(se);
+ 
+@@ -7160,6 +7222,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -182,7 +218,7 @@ index 5b7523242..4433c5707 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13137,6 +13172,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13201,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {

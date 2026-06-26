@@ -1,27 +1,23 @@
-From 1913a0dfbed344dd9d051092f0558273ca63d086 Mon Sep 17 00:00:00 2001
+From 1c0407949130ac13c75d39ecad83c8d443170a58 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 01:18:54 +0700
+Date: Sat, 27 Jun 2026 01:32:47 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + EEVDF surgery + RT
- hooks
+ hooks + wakeup-EMA comparison
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-Complete v3 patch with all hooks connected.
+Add wakeup-EMA comparison in enqueue_task_fair(): when a low-EMA
+(interactive) task wakes up while a high-EMA (CPU-bound) task is
+running, call resched_curr_lazy() so the interactive task runs
+at the next natural scheduling point (~1ms on 1000Hz tick).
 
-Fair (fair.c):
-  - update_deadline(): infinity_slice() for EMA-modulated slice
-    (CPU-bound -> shorter slice, interactive -> full slice)
-  - update_curr(): infinity_consume() for EMA tracking
-  - place_entity(): infinity_wakeup_scale() for deadline boost on
-    low-EMA wakeups (vslice reduced proportionally to sleep depth)
+Uses resched_curr_lazy() (not resched_curr()) — sets TIF_NEED_RESCHED
+without sending an IPI.  The running task continues until its next
+timer tick or voluntary yield, by which time any spinlock it held
+has been released.  Same API used by stock EEVDF update_deadline().
 
-RT (rt.c):
-  - enqueue_task_rt(): infinity_rt_consume() EMA climb on wakeup
-  - dequeue_task_rt(): infinity_rt_wakeup() EMA decay on sleep
-  - requeue_rt_entity(): EMA-modulated queue placement via
-    infinity_rt_effective_prio() — tasks with high rt_ema go to
-    lower-priority queues, well-behaved RT tasks run first
+Conservative thresholds: waker < 12.5%, runner > 75% of BUDGET_MAX.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -29,12 +25,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  include/uapi/linux/sched.h    |   1 +
  init/init_task.c              |   5 +
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  46 ++++-
+ kernel/sched/fair.c           |  79 ++++++++-
  kernel/sched/infinity_sched.c | 304 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 128 ++++++++++++++
  kernel/sched/rt.c             |  27 ++-
  kernel/sched/syscalls.c       |   4 +
- 9 files changed, 519 insertions(+), 4 deletions(-)
+ 9 files changed, 552 insertions(+), 4 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -101,7 +97,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec186f..7cf81f8a3 100644
+index 3ebec186f..e91419865 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -185,7 +181,47 @@ index 3ebec186f..7cf81f8a3 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7463,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7262,6 +7295,39 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		flags = ENQUEUE_WAKEUP;
+ 	}
+ 
++	/*
++	 * Infinity: wakeup-EMA comparison.
++	 *
++	 * When a low-EMA (interactive) task wakes up while a high-EMA
++	 * (CPU-bound) fair task is running on this CPU, set a lazy
++	 * reschedule flag so the interactive task runs at the next
++	 * natural scheduling point (timer tick or voluntary yield).
++	 *
++	 * resched_curr_lazy() only sets TIF_NEED_RESCHED — it does NOT
++	 * send an IPI or force an immediate context switch.  The running
++	 * task continues until its next scheduling point, by which time
++	 * any spinlock it held has been released.  This is the same API
++	 * used by EEVDF's update_deadline() on every tick.
++	 *
++	 * Thresholds: waker < 12.5% BUDGET_MAX (interactive),
++	 *             runner > 75% BUDGET_MAX (CPU-bound).
++	 * These are conservative enough that y-cruncher threads (which are
++	 * symmetric compute tasks) never trigger each other, while the
++	 * desktop compositor (EMA ~= 0%) waking against a y-cruncher
++	 * thread (EMA >> 75%) always triggers a prompt reschedule.
++	 */
++	if (flags & ENQUEUE_WAKEUP) {
++		struct rq *rq = rq_of(cfs_rq);
++		struct sched_entity *curr = rq->cfs.curr;
++		if (curr && entity_is_task(curr)) {
++			struct task_struct *waker = p;
++			struct task_struct *runner = task_of(curr);
++			if (waker->infinity.ema < INFINITY_BUDGET_MAX_NS / 8 &&
++			    runner->infinity.ema > INFINITY_BUDGET_MAX_NS * 3 / 4)
++				resched_curr_lazy(rq);
++		}
++	}
++
+ 	for_each_sched_entity(se) {
+ 		cfs_rq = cfs_rq_of(se);
+ 
+@@ -7430,6 +7496,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -194,7 +230,7 @@ index 3ebec186f..7cf81f8a3 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13748,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,6 +13781,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {

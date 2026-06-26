@@ -11,6 +11,7 @@
  *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
  *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
+ *   enqueue_task_fair()     ──inline──► resched_curr_lazy()   — wakeup-EMA comparison (v3)
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
  *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
  *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
