@@ -72,7 +72,7 @@ sudo dmesg | grep Infinity                         # → Infinity scheduler acti
 EEVDF and RT functions modified by the Infinity scheduler:
 
 | Function | Infinity replacement |
-|---|---|---|
+|---|---|
 | `update_deadline()` | Fair-share slice via `infinity_slice()` |
 | `update_curr()` | EMA budget consumption via `infinity_consume()` — the core formula |
 | `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
@@ -91,7 +91,7 @@ The EMA signal drives two scheduling decisions.  Higher EMA → shorter slice (a
 The EMA replaces the old accumulator + clamp approach with a smooth asymptotic convergence:
 
 | Operation | Formula | Description |
-|---|---|---|---|
+|---|---|---|
 | While running | $ema \mathrel{+}= (B_{\max} - ema) \times \alpha / 256$ | EMA climbs toward `BUDGET_MAX` |
 | While sleeping | $ema \mathrel{-}= ema \times \alpha / 256$ | EMA decays toward 0 (catch-up on wakeup) |
 | Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
@@ -112,7 +112,7 @@ All values are clamped at write time to safe ranges — the scheduler can never
 enter an invalid state regardless of input.
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|---|
+|---|---|---|---|
 | `infinity_carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
@@ -134,7 +134,7 @@ sudo sysctl kernel.infinity_reset=1
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
-|---|---|---|---|
+|---|---|---|
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | **EMA (Limitless)** |
 | Preemption model | Budget-gated | **EMA protect_slice bypass (v3)** |
