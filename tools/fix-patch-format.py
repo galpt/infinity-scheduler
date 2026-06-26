@@ -9,6 +9,10 @@ This script reads each patch, identifies lines inside hunk bodies that are
 bare newlines (empty lines that should be context), and prefixes them with
 `` `` (a single space).
 
+Handles multi-file patches correctly by tracking diff --git boundaries
+and NOT modifying lines outside hunk bodies (e.g. git version trailers
+like "-- 2.54.0").
+
 Usage:
   python3 fix-patch-format.py patches/stable/*/*.patch
   python3 fix-patch-format.py --rewrite patches/stable/*/*.patch
@@ -19,6 +23,7 @@ import re
 import sys
 
 HUNK_HEADER_RE = re.compile(r'^@@ ')
+GIT_TRAILER_RE = re.compile(r'^-- $')
 
 
 def fix_patch(path, in_place=False):
@@ -27,29 +32,41 @@ def fix_patch(path, in_place=False):
 
     fixed = []
     in_hunk_body = False
+    in_diff_section = False
 
     for i, line in enumerate(lines):
-        # Detect hunk end / start transitions
-        if HUNK_HEADER_RE.match(line):
+        # Track whether we're inside any diff section at all
+        if line.startswith('diff --git '):
+            in_diff_section = True
+            in_hunk_body = False
+            fixed.append(line)
+        elif GIT_TRAILER_RE.match(line):
+            # Git format-patch trailer: "-- 2.54.0\n" — NOT a hunk line
+            in_hunk_body = False
+            fixed.append(line)
+        elif HUNK_HEADER_RE.match(line):
             in_hunk_body = True
             fixed.append(line)
-        elif line.startswith('---') or line.startswith('diff ') or (not in_hunk_body):
+        elif line.startswith('---') or (line.startswith('diff ') and not line.startswith('diff --git ')):
+            # "diff --git" is handled above; plain "diff " is a fallback
             in_hunk_body = False
+            fixed.append(line)
+        elif not in_diff_section:
+            # Lines before the first diff --git (email headers) — pass through
+            fixed.append(line)
+        elif not in_hunk_body:
+            # Between sections: diff metadata lines (index, ---, +++) — pass through
             fixed.append(line)
         elif in_hunk_body:
             # Inside a hunk body: lines must start with ' ', '+', '-', or '\'
             if line == '\n':
-                # Bare newline — should be a space-prefixed empty context line
                 fixed.append(' \n')
             elif line == '\r\n':
                 fixed.append(' \r\n')
             elif line.startswith(' ') or line.startswith('+') \
                     or line.startswith('-') or line.startswith('\\'):
-                # Valid unified diff line
                 fixed.append(line)
             else:
-                # Line doesn't start with any valid prefix — it's a context
-                # line that's missing the leading space (e.g. '\t ...').
                 fixed.append(' ' + line)
 
     content = ''.join(fixed)

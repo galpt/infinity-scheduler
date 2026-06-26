@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Fix hunk header line counts in unified diff patches.
 
-Reads a unified diff patch, for each hunk counts the actual pre-image
-(context + '-') and new-file (context + '+') lines in the body, and
-rewrites the hunk header to match.  Also ensures the body has the
-correct number of trailing context lines.
+Reads a unified diff patch (single or multi-file), for each hunk counts the
+actual pre-image (context + '-') and new-file (context + '+') lines in the
+body, and rewrites the hunk header to match.
+
+Handles multi-file patches (git format-patch output with multiple diff --git
+sections) correctly by splitting on diff --git boundaries first.
 
 Usage:
   python3 fix-patch-counts.py path/to/patch [path/to/patch ...]
@@ -32,43 +34,71 @@ def count_hunk_body(body):
             added += 1
         elif ln.startswith('-'):
             pre += 1
-            # '-' lines are NOT in the new file
         elif ln.startswith('+'):
             added += 1
-        # lines starting with '\' (no newline) don't count
     return pre, added
 
 
-def fix_patch(path, in_place=False):
+def parse_patch(path):
+    """Parse a patch file into sections.
+
+    Returns (email_header, sections) where email_header is the metadata lines
+    before the first diff --git (From/Date/Subject/Signed-off-by), and sections
+    is a list of (preamble, hunks) tuples.
+    """
     with open(path, 'r', newline='') as f:
-        content = f.read()
-    lines = content.splitlines(keepends=True)
+        lines = f.readlines()
 
-    # Split into header + hunks
+    # Find first diff --git to split email header from body
+    first_diff = None
+    for i, ln in enumerate(lines):
+        if ln.startswith('diff --git '):
+            first_diff = i
+            break
+
+    if first_diff is None:
+        # No diff --git at all — not a multi-file patch, treat the whole
+        # file as a single section
+        return [], [([], lines)]
+
+    email_header = lines[:first_diff]
+    body = lines[first_diff:]
+
+    # Split body on diff --git boundaries
+    sections = []
     i = 0
-    while i < len(lines) and not lines[i].startswith('@@'):
-        i += 1
-    header = lines[:i]
-
-    hunks = []
-    while i < len(lines):
-        if not lines[i].startswith('@@'):
+    while i < len(body):
+        if body[i].startswith('diff --git '):
+            preamble = []
+            while i < len(body) and not body[i].startswith('@@'):
+                preamble.append(body[i])
+                i += 1
+            # Collect hunks
+            hunks = []
+            while i < len(body):
+                if body[i].startswith('@@'):
+                    hdr = body[i]
+                    i += 1
+                    hunk_body = []
+                    while i < len(body) and not body[i].startswith('@@') \
+                          and not body[i].startswith('diff --git ') \
+                          and not re.match(r'^-- $', body[i]):
+                        hunk_body.append(body[i])
+                        i += 1
+                    hunks.append((hdr, hunk_body))
+                elif body[i].startswith('diff --git '):
+                    break
+                else:
+                    i += 1
+            sections.append((preamble, hunks))
+        else:
             i += 1
-            continue
-        hdr = lines[i]
-        i += 1
-        body = []
-        while i < len(lines) and not lines[i].startswith('@@') \
-                and not lines[i].startswith('---') \
-                and not lines[i].startswith('diff --'):
-            body.append(lines[i])
-            i += 1
-        hunks.append((hdr, body))
 
-    if not hunks:
-        print(f"  {path}: no hunks, skipping")
-        return False
+    return email_header, sections
 
+
+def fix_section(preamble, hunks, path):
+    """Fix hunk counts in one section, return (preamble, fixed_hunks, changed)."""
     changed = False
     fixed_hunks = []
     for hdr, body in hunks:
@@ -89,21 +119,54 @@ def fix_patch(path, in_place=False):
             fixed_hunks.append((hdr, body))
             continue
 
-        # Fix the hunk header
         new_hdr = f"@@ -{old_start},{pre_actual} +{new_start},{new_actual} @@{func_hdr}\n"
         fixed_hunks.append((new_hdr, body))
         changed = True
-        print(f"  {path}: hunk @{old_start}: ({old_cnt},{new_cnt}) -> ({pre_actual},{new_actual})")
+        file = "unknown"
+        for ln in preamble:
+            if ln.startswith('+++ b/'):
+                file = ln[6:].strip()
+                break
+        print(f"  {path}: {file} hunk @{old_start}: ({old_cnt},{new_cnt}) -> ({pre_actual},{new_actual})")
 
-    if not changed:
+    return preamble, fixed_hunks, changed
+
+
+def fix_patch(path, in_place=False):
+    email_header, sections = parse_patch(path)
+
+    if not sections:
+        print(f"  {path}: no diff sections, skipping")
+        return False
+
+    # The email header may contain trailing metadata lines after the last
+    # diff section (e.g. "-- 2.54.0" from git format-patch).  Strip them.
+    trailer_start = None
+    for i, ln in enumerate(email_header):
+        if re.match(r'^-- $', ln):
+            trailer_start = i
+            break
+    if trailer_start is not None:
+        email_header = email_header[:trailer_start]
+
+    fixed_sections = []
+    any_changed = False
+    for preamble, hunks in sections:
+        p, h, changed = fix_section(preamble, hunks, path)
+        fixed_sections.append((p, h))
+        any_changed = any_changed or changed
+
+    if not any_changed:
         print(f"  {path}: all counts correct")
         return False
 
     if in_place:
-        output = list(header)
-        for hdr, body in fixed_hunks:
-            output.append(hdr)
-            output.extend(body)
+        output = list(email_header)
+        for preamble, hunks in fixed_sections:
+            output.extend(preamble)
+            for hdr, body in hunks:
+                output.append(hdr)
+                output.extend(body)
         with open(path, 'w', newline='') as f:
             f.writelines(output)
         print(f"  {path}: rewritten")
