@@ -1,7 +1,8 @@
-From a080c5cf02678f74377f8134364dc675daf3bfd8 Mon Sep 17 00:00:00 2001
+From bab966443de2e1ba833439413313c0712ad81dc3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 26 Jun 2026 20:38:42 +0700
-Subject: [PATCH] infinity-scheduler v3
+Date: Fri, 26 Jun 2026 21:01:49 +0700
+Subject: [PATCH] infinity-scheduler v3: EMA modulation + EEVDF surgery + RT
+ hooks + wakeup-EMA-comparison
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -9,12 +10,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  include/uapi/linux/sched.h    |   3 +-
  init/init_task.c              |   5 +
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  46 ++++-
+ kernel/sched/fair.c           |  73 +++++++-
  kernel/sched/infinity_sched.c | 304 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 128 ++++++++++++++
  kernel/sched/rt.c             |  27 ++-
  kernel/sched/syscalls.c       |   4 +
- 9 files changed, 520 insertions(+), 5 deletions(-)
+ 9 files changed, 547 insertions(+), 5 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -89,7 +90,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..1b05e42f7 100644
+index 3bce48ad0..be654f846 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -173,7 +174,41 @@ index 3bce48ad0..1b05e42f7 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7172,6 +7205,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7001,6 +7034,33 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		flags = ENQUEUE_WAKEUP;
+ 	}
+ 
++	/*
++	 * Infinity: wakeup-EMA-comparison.
++	 *
++	 * When an interactive (low-EMA) task wakes up while a CPU-bound
++	 * (high-EMA) fair task is running, request a reschedule so the
++	 * interactive task runs sooner.  The comparison is done under
++	 * rq->lock, on the wakeup path, with conservative thresholds:
++	 *
++	 *   waker EMA < 25%    (interactive)
++	 *   curr  EMA > 50%    (CPU-bound)
++	 *
++	 * This is provably safe: rq->lock is already held, all accesses
++	 * are under entity_is_task() guards, and resched_curr() is the
++	 * same API used by the tick scheduler for normal preemption.
++	 */
++	if (flags & ENQUEUE_WAKEUP) {
++		struct rq *rq = rq_of(cfs_rq);
++		struct sched_entity *curr = rq->cfs.curr;
++		if (curr && entity_is_task(curr)) {
++			struct task_struct *waker = p;
++			struct task_struct *runner = task_of(curr);
++			if (waker->infinity.ema < INFINITY_BUDGET_MAX_NS / 4 &&
++			    runner->infinity.ema > INFINITY_BUDGET_MAX_NS / 2)
++				resched_curr(rq);
++		}
++	}
++
+ 	for_each_sched_entity(se) {
+ 		cfs_rq = cfs_rq_of(se);
+ 
+@@ -7172,6 +7232,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -182,7 +217,7 @@ index 3bce48ad0..1b05e42f7 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13459,6 +13494,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13459,6 +13521,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
