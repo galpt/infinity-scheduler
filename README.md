@@ -86,8 +86,9 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
 | `place_entity()` (v3) | EMA-modulated wakeup vslice via `infinity_wakeup_scale()` |
+| `enqueue_task_fair()` (v3) | Wakeup-EMA comparison: low-EMA waker + high-EMA runner → `resched_curr()` |
 
-The EMA signal drives two scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree.
+The EMA signal drives three scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree.  When a low-EMA task wakes up while a high-EMA task is running, the scheduler immediately requests a reschedule so the interactive task runs sooner.
 
 ### EMA consumption formula
 
