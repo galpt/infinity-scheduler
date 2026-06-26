@@ -1,6 +1,6 @@
 # infinity-scheduler
 
-A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.  The v3 branch adds two EEVDF surgeries for sub-20µs wakeup latency: protect_slice bypass for CPU-bound tasks and EMA-modulated wakeup vslice for interactive tasks.
+A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.  The v3 branch adds EMA-modulated wakeup vslice for shorter interactive-task deadlines and RT queue placement modulation.
 
 > [!CAUTION]
 > This is still being tested, with changes ongoing until it is stable enough for daily use. Please use the [v2-rt](https://github.com/galpt/infinity-scheduler/tree/v2-rt) branch and occasionally check this v3 branch. This notice will be updated once v3 is considered stable.
@@ -85,10 +85,9 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `__enqueue_rt_entity()` (v3) | EMA-modulated RT queue placement via `infinity_rt_effective_prio()` |
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
-| `pick_eevdf()` (v3) | EMA protect_slice bypass via `infinity_should_yield()` |
 | `place_entity()` (v3) | EMA-modulated wakeup vslice via `infinity_wakeup_scale()` |
 
-The EMA signal drives two scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Additionally in v3, a high-EMA (CPU-bound) task yields its slice protection so that low-EMA (interactive) tasks preempt sooner, and low-EMA wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree.
+The EMA signal drives two scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree.
 
 ### EMA consumption formula
 
@@ -141,7 +140,6 @@ sudo sysctl kernel.infinity_reset=1
 |---|---|---|
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | **EMA (Limitless)** |
-| Preemption model | Budget-gated | **EMA protect_slice bypass (v3)** |
 | SMT halving | No | Yes |
 | NULL guard | N/A (BPF) | Yes |
 | Wakeup deadline boost | N/A | **EMA vslice scaling (v3)** |

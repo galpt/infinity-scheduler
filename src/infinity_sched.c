@@ -245,25 +245,6 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_should_yield — EMA protect_slice bypass                    */
-/* ------------------------------------------------------------------ */
-
-bool infinity_should_yield(struct task_struct *p)
-{
-	/*
-	 * Yield the CPU when the current task's EMA exceeds 50% of
-	 * BUDGET_MAX, which corresponds to approximately 10 ticks
-	 * (~10 ms at 1000 Hz) of uninterrupted runtime.  Beyond this
-	 * threshold the task is classified as CPU-bound and should
-	 * not be allowed to hide behind EEVDF's slice protection.
-	 *
-	 * Short bursts — common in interactive tasks — stay below
-	 * the threshold and are not affected.
-	 */
-	return p->infinity.ema > INFINITY_BUDGET_MAX_NS / 2;
-}
-
-/* ------------------------------------------------------------------ */
 /* infinity_wakeup_scale — EMA-modulated vslice for wakeups            */
 /* ------------------------------------------------------------------ */
 
