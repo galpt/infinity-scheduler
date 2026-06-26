@@ -12,9 +12,8 @@
  *
  * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
  * deadlines, EMA-modulated RT queue placement via
- * infinity_rt_effective_prio(), and a wakeup-EMA comparison that
- * requests a lazy reschedule when a low-EMA (interactive) task wakes
- * up while a high-EMA (CPU-bound) task is running.
+ * infinity_rt_effective_prio(), and a reduced SLICE_MIN of 200us for
+ * faster scheduling points.
  *
  * The EMA converges asymptotically toward BUDGET_MAX when running and
  * toward 0 when sleeping — the true Limitless.  No clamps, no external

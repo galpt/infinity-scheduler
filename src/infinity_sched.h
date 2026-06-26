@@ -11,7 +11,6 @@
  *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
  *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
- *   enqueue_task_fair()     ──inline──► resched_curr_lazy()   — wakeup-EMA comparison (v3)
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
  *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
  *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
@@ -59,8 +58,8 @@
 /* Hard constants (not user-tunable)                                   */
 /* ------------------------------------------------------------------ */
 
-/** Minimum slice floor (500us). */
-#define INFINITY_SLICE_MIN_NS		500000ULL
+/** Minimum slice floor (200us). */
+#define INFINITY_SLICE_MIN_NS		200000ULL
 
 /** Maximum budget (2ms). */
 #define INFINITY_BUDGET_MAX_NS		2000000ULL

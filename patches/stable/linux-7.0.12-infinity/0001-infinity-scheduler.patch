@@ -1,6 +1,6 @@
-From f131cfa359395eee2a8c4ed910ba688a21fb890a Mon Sep 17 00:00:00 2001
+From 4dfa6bef5f77952e709bbf72608f25f33b723551 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 01:33:20 +0700
+Date: Sat, 27 Jun 2026 02:35:54 +0700
 Subject: [PATCH] infinity-scheduler v3
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -9,12 +9,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  include/uapi/linux/sched.h    |   3 +-
  init/init_task.c              |   5 +
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  75 ++++++++-
- kernel/sched/infinity_sched.c | 304 ++++++++++++++++++++++++++++++++++
+ kernel/sched/fair.c           |  46 ++++-
+ kernel/sched/infinity_sched.c | 305 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 128 ++++++++++++++
- kernel/sched/rt.c             |  27 ++-
+ kernel/sched/rt.c             |  26 ++-
  kernel/sched/syscalls.c       |   4 +
- 9 files changed, 549 insertions(+), 5 deletions(-)
+ 9 files changed, 520 insertions(+), 5 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -89,7 +89,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..2e3ab5291 100644
+index 3bce48ad0..1b05e42f7 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -173,43 +173,7 @@ index 3bce48ad0..2e3ab5291 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7001,6 +7034,35 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
- 		flags = ENQUEUE_WAKEUP;
- 	}
- 
-+	/*
-+	 * Infinity: wakeup-EMA comparison.
-+	 *
-+	 * When a low-EMA (interactive) task wakes up while a high-EMA
-+	 * (CPU-bound) fair task is running on this CPU, set a lazy
-+	 * reschedule flag so the interactive task runs at the next
-+	 * natural scheduling point (timer tick or voluntary yield).
-+	 *
-+	 * resched_curr_lazy() only sets TIF_NEED_RESCHED — it does NOT
-+	 * send an IPI or force an immediate context switch.  The running
-+	 * task continues until its next scheduling point, by which time
-+	 * any spinlock it held has been released.  This is the same API
-+	 * used by EEVDF's update_deadline() on every tick.
-+	 *
-+	 * Thresholds: waker < 12.5% BUDGET_MAX (interactive),
-+	 *             runner > 75% BUDGET_MAX (CPU-bound).
-+	 */
-+	if (flags & ENQUEUE_WAKEUP) {
-+		struct rq *rq = rq_of(cfs_rq);
-+		struct sched_entity *curr = rq->cfs.curr;
-+		if (curr && entity_is_task(curr)) {
-+			struct task_struct *waker = p;
-+			struct task_struct *runner = task_of(curr);
-+			if (waker->infinity.ema < INFINITY_BUDGET_MAX_NS / 8 &&
-+			    runner->infinity.ema > INFINITY_BUDGET_MAX_NS * 3 / 4)
-+				resched_curr_lazy(rq);
-+		}
-+	}
-+
- 	for_each_sched_entity(se) {
- 		cfs_rq = cfs_rq_of(se);
- 
-@@ -7172,6 +7234,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7172,6 +7205,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -218,7 +182,7 @@ index 3bce48ad0..2e3ab5291 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13459,6 +13523,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13459,6 +13494,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -232,10 +196,10 @@ index 3bce48ad0..2e3ab5291 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..ee18dbcd1
+index 000000000..04dbaa7ff
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,305 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -249,8 +213,9 @@ index 000000000..ee18dbcd1
 + *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
 + *
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
-+ * deadlines, and EMA-modulated RT queue placement via
-+ * infinity_rt_effective_prio().
++ * deadlines, EMA-modulated RT queue placement via
++ * infinity_rt_effective_prio(), and a reduced SLICE_MIN of 200us for
++ * faster scheduling points.
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
@@ -542,7 +507,7 @@ index 000000000..ee18dbcd1
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..5f4f1193b
+index 000000000..f227c4468
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,128 @@
@@ -606,8 +571,8 @@ index 000000000..5f4f1193b
 +/* Hard constants (not user-tunable)                                   */
 +/* ------------------------------------------------------------------ */
 +
-+/** Minimum slice floor (500us). */
-+#define INFINITY_SLICE_MIN_NS		500000ULL
++/** Minimum slice floor (200us). */
++#define INFINITY_SLICE_MIN_NS		200000ULL
 +
 +/** Maximum budget (2ms). */
 +#define INFINITY_BUDGET_MAX_NS		2000000ULL
@@ -675,7 +640,7 @@ index 000000000..5f4f1193b
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..0bd56c157 100644
+index 0cbee0318..5486b95e5 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -708,17 +673,16 @@ index 0cbee0318..0bd56c157 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1476,25 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1476,24 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
 +		/*
-+		 * Infinity: modulate queue placement by EMA consumption for
-+		 * RT tasks.  A task that has consumed significant RT runtime
-+		 * (high rt_ema) is placed in a lower-priority queue so that
-+		 * well-behaved RT tasks (low rt_ema) run first.  The task's
-+		 * actual priority is unchanged; only its queue position is
-+		 * modulated.
++		 * Modulate queue placement by EMA consumption for RT tasks.
++		 * A task that has consumed significant RT runtime (high rt_ema)
++		 * is placed in a lower-priority queue so that well-behaved RT
++		 * tasks (low rt_ema) run first.  The task's actual priority is
++		 * unchanged; only its queue position is modulated.
 +		 *
 +		 * For RT group scheduling, skip group entities since they
 +		 * represent a CPU reservation, not an individual task.
