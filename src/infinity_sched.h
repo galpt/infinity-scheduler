@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.h — Infinity scheduler API (v2 EMA).
+ * infinity_sched.h — Infinity scheduler API (v3).
  *
  * Architecture:
  *
@@ -23,6 +23,9 @@
  *   infinity_carriage_ns   — base fair-share window (default 2ms)
  *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
  *   infinity_running       — read-only flag, 1 if active
+ *
+ * infinity_ctx reserved fields: fork_time_ns (set), rt_disabled (set).
+ * Both are placeholders for future rate-limiting and RT-opt-out logic.
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -137,7 +140,6 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
 void infinity_rt_consume(struct infinity_ctx *ctx);
 void infinity_rt_wakeup(struct infinity_ctx *ctx);
-void infinity_rt_init(struct infinity_ctx *ctx);
 u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 
 #endif /* __INFINITY_SCHED_H */

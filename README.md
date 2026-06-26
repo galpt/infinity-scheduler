@@ -147,7 +147,7 @@ sudo sysctl kernel.infinity_reset=1
 EMA budget tracking converges asymptotically without clamps — the Limitless
 property holds mathematically.  No external feedback loop, no refill divisor,
 no interactive floor constants, no sleep cap, no tunable knobs beyond two
-safe-clamped sysctls.
+safe-clamped tunable sysctls (plus one read-only flag and one reset trigger).
 
 ## License
 

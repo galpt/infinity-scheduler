@@ -483,7 +483,7 @@ index 000000000..ec6dd0497
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.h — Infinity scheduler API (v2 EMA).
++ * infinity_sched.h — Infinity scheduler API (v3).
 + *
 + * Architecture:
 + *
@@ -595,7 +595,6 @@ index 000000000..ec6dd0497
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx);
-+void infinity_rt_init(struct infinity_ctx *ctx);
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 +
 +#endif /* __INFINITY_SCHED_H */
@@ -959,7 +958,6 @@ index ec6dd0497..d14458cb5 100644
 +
  void infinity_rt_consume(struct infinity_ctx *ctx);
  void infinity_rt_wakeup(struct infinity_ctx *ctx);
- void infinity_rt_init(struct infinity_ctx *ctx);
 -- 
 2.54.0
 
