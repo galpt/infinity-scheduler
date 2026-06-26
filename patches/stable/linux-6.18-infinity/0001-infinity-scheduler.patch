@@ -173,12 +173,11 @@ index 5b7523242..459ce6248 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -6983,6 +7016,33 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6983,6 +7016,27 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  		flags = ENQUEUE_WAKEUP;
  	}
  
 +	/*
-+	 * Infinity: wakeup-EMA-comparison.
 +	 *
 +	 * When an interactive (low-EMA) task wakes up while a CPU-bound
 +	 * (high-EMA) fair task is running, request a reschedule so the
@@ -196,11 +195,6 @@ index 5b7523242..459ce6248 100644
 +		struct rq *rq = rq_of(cfs_rq);
 +		struct sched_entity *curr = rq->cfs.curr;
 +		if (curr && entity_is_task(curr)) {
-+			struct task_struct *waker = p;
-+			struct task_struct *runner = task_of(curr);
-+			if (waker->infinity.ema < INFINITY_BUDGET_MAX_NS / 4 &&
-+			    runner->infinity.ema > INFINITY_BUDGET_MAX_NS / 2)
-+				resched_curr(rq);
 +		}
 +	}
 +
@@ -543,7 +537,7 @@ new file mode 100644
 index 000000000..5f4f1193b
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,128 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -557,7 +551,6 @@ index 000000000..5f4f1193b
 + *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
 + *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
 + *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
-+ *   enqueue_task_fair()     ──inline──► resched_curr()        — wakeup-EMA comparison (v3)
 + *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
 + *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
 + *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
