@@ -1,69 +1,113 @@
-From 9e638f47c3b8da2aaec826d6923e0609dd0c54bc Mon Sep 17 00:00:00 2001
+From 2754b082a0f52fa24f54dce6f782525de91ba4d5 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 26 Jun 2026 15:19:59 +0700
-Subject: [PATCH] infinity-scheduler v3: EMA EEVDF surgery for sub-20us wakeup
- latency
+Date: Fri, 26 Jun 2026 17:33:40 +0700
+Subject: [PATCH] infinity-scheduler v3: EMA slice modulation + EEVDF surgery
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-Implement two targeted EEVDF modifications driven by the existing
-Infinity EMA signals (based on v2-rt):
+This is the complete v3 patch including the critical fix that
+infinity_slice() was never called from update_deadline().
 
-1. pick_eevdf() — protect_slice bypass for CPU-bound tasks.
-   When the running fair task has EMA > 50% of BUDGET_MAX, it has been
-   consuming CPU for ~10+ ticks.  It is considered CPU-bound and should
-   yield to eligible interactive tasks rather than hiding behind
-   protect_slice().  Different from BORE (which checks a futex_waiting
-   flag on the waking task) — this checks the running task's own EMA
-   consumption history.
-
-2. place_entity() — EMA-modulated wakeup vslice.
-   When a task wakes up with low EMA (interactive, slept long), its
-   vslice is reduced proportionally to sleep depth, placing its
-   deadline earlier in the EEVDF tree.  Different from BORE (fixed
-   vslice >>= 1 on all wakeups) — this is proportional to the sleep
-   depth encoded in the EMA, with up to 50% reduction at EMA ~= 0.
-
-These surgeries are designed to achieve sub-20us schbench P99 latency
-while preserving full compatibility with the v2-rt EMA logic and the
-existing cyclictest advantage (360us max, lowest of all tested).
-
+Changes:
+  - update_deadline(): call infinity_slice() for EMA-modulated slice
+    (CPU-bound → shorter slice, interactive → full slice)
+  - update_curr(): call infinity_consume() for EMA tracking
+  - pick_eevdf(): bypass protect_slice when current EMA > 50%
+  - place_entity(): EMA-modulated wakeup vslice for low-EMA tasks
+  - enqueue_task_fair(): infinity_wakeup() EMA decay on wakeup
+  - dequeue_task_fair(): record sleep timestamp
+  - pick_next_entity(): NULL guard for pick_eevdf()
+  - task_fork_fair(): infinity_fork_init()
+  - plus RT EMA modulation and sysctl infrastructure
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |   9 +
+ include/linux/sched.h         |  63 ++-----
  include/uapi/linux/sched.h    |   1 +
  init/init_task.c              |   6 +
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  38 +++-
+ kernel/sched/fair.c           |  55 +++++-
  kernel/sched/infinity_sched.c | 324 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 143 +++++++++++++++
  kernel/sched/rt.c             |   1 +
  kernel/sched/syscalls.c       |   5 +
- 9 files changed, 526 insertions(+), 2 deletions(-)
+ 9 files changed, 544 insertions(+), 55 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba5c..2adc76127 100644
+index ee06cba5c..12f42f954 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,14 @@ struct kmap_ctrl {
+@@ -815,62 +815,25 @@ struct kmap_ctrl {
+ 	int				idx;
+ 	pte_t				pteval[KM_MAX_IDX];
  #endif
- };
- 
++ };
++
 +struct infinity_ctx {
 +	u64		ema;
 +	u64		rt_ema;
 +	bool		rt_disabled;
 +	u64		last_sleep_ns;
 +	u64		fork_time_ns;
-+};
-+
- struct task_struct {
- #ifdef CONFIG_THREAD_INFO_IN_TASK
- 	/*
-@@ -871,6 +879,7 @@ struct task_struct {
+ };
+ 
+-struct task_struct {
+-#ifdef CONFIG_THREAD_INFO_IN_TASK
+-	/*
+-	 * For reasons of header soup (see current_thread_info()), this
+-	 * must be the first element of task_struct.
++ struct task_struct {
++ #ifdef CONFIG_THREAD_INFO_IN_TASK
++ 	/*
++	 * Allow task_struct size to be determined at compile time.
+ 	 */
+-	struct thread_info		thread_info;
+-#endif
+-	unsigned int			__state;
+-
+-	/* saved state for "spinlock sleepers" */
+-	unsigned int			saved_state;
+-
+-	/*
+-	 * This begins the randomizable portion of task_struct. Only
+-	 * scheduling-critical items should be added above here.
+-	 */
+-	randomized_struct_fields_start
+-
+-	void				*stack;
+-	refcount_t			usage;
+-	/* Per task flags (PF_*), defined further below: */
+-	unsigned int			flags;
+-	unsigned int			ptrace;
+-
+-#ifdef CONFIG_MEM_ALLOC_PROFILING
+-	struct alloc_tag		*alloc_tag;
+-#endif
+-
+-	int				on_cpu;
+-	struct __call_single_node	wake_entry;
+-	unsigned int			wakee_flips;
+-	unsigned long			wakee_flip_decay_ts;
+-	struct task_struct		*last_wakee;
+-
+-	/*
+-	 * recent_used_cpu is initially set as the last CPU used by a task
+-	 * that wakes affine another task. Waker/wakee relationships can
+-	 * push tasks around a CPU where each wakeup moves to the next one.
+-	 * Tracking a recently used CPU allows a quick search for a recently
+-	 * used CPU that may be idle.
+-	 */
+-	int				recent_used_cpu;
+-	int				wake_cpu;
+-	int				on_rq;
+-
+-	int				prio;
+-	int				static_prio;
+-	int				normal_prio;
+-	unsigned int			rt_priority;
+-
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -110,7 +154,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec186f..d4eb7d721 100644
+index 3ebec186f..a5631cf06 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -137,7 +181,31 @@ index 3ebec186f..d4eb7d721 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1424,6 +1430,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1244,9 +1250,20 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ 	 * For EEVDF the virtual time slope is determined by w_i (iow.
+ 	 * nice) while the request time r_i is determined by
+ 	 * sysctl_sched_base_slice.
+-	 */
+-	if (!se->custom_slice)
+-		se->slice = sysctl_sched_base_slice;
++	 *
++	 * Infinity: replace the fixed slice with an EMA-modulated slice
++	 * for fair-class tasks.  CPU-bound tasks (high EMA) get shorter
++	 * slices; interactive tasks (low EMA) retain the full share.
++	 */
++	if (!se->custom_slice) {
++		if (entity_is_task(se)) {
++			struct task_struct *p__ = task_of(se);
++			se->slice = infinity_slice(cfs_rq->nr_queued, false,
++						   p__->infinity.ema);
++		} else {
++			se->slice = sysctl_sched_base_slice;
++		}
++	}
+ 
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i / w_i
+@@ -1424,6 +1441,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -148,7 +216,7 @@ index 3ebec186f..d4eb7d721 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  
-@@ -5507,6 +5517,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5507,6 +5528,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -163,7 +231,7 @@ index 3ebec186f..d4eb7d721 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5783,6 +5801,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5783,6 +5812,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
@@ -172,7 +240,7 @@ index 3ebec186f..d4eb7d721 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7218,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7198,6 +7229,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -186,7 +254,7 @@ index 3ebec186f..d4eb7d721 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7457,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7430,6 +7468,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -195,7 +263,7 @@ index 3ebec186f..d4eb7d721 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13742,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,6 +13753,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
