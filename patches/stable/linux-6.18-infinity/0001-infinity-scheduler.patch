@@ -1,5 +1,25 @@
+From 4e26eada05e79f8e9d889a11ca07ee9ddc723bd3 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Fri, 26 Jun 2026 15:22:21 +0700
+Subject: [PATCH 1/2] infinity-scheduler v2-rt base
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ include/linux/sched.h         |   9 +
+ include/uapi/linux/sched.h    |   3 +-
+ init/init_task.c              |   6 +
+ kernel/sched/Makefile         |   1 +
+ kernel/sched/fair.c           |  21 +++
+ kernel/sched/infinity_sched.c | 309 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 120 +++++++++++++
+ kernel/sched/rt.c             |   1 +
+ kernel/sched/syscalls.c       |   5 +
+ 9 files changed, 474 insertions(+), 1 deletion(-)
+ create mode 100644 kernel/sched/infinity_sched.c
+ create mode 100644 kernel/sched/infinity_sched.h
+
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878..d060723 100644
+index b469878de..d060723d9 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -816,6 +816,14 @@ struct kmap_ctrl {
@@ -26,7 +46,7 @@ index b469878..d060723 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 359a14c..0725287 100644
+index 359a14cc7..072528722 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
 @@ -131,6 +131,7 @@ struct clone_args {
@@ -46,7 +66,7 @@ index 359a14c..0725287 100644
  
  #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
-index a55e218..b0ef569 100644
+index a55e21892..b0ef56939 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
 @@ -122,6 +122,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
@@ -63,7 +83,7 @@ index a55e218..b0ef569 100644
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
-index 8ae8637..601556b 100644
+index 8ae86371d..601556b31 100644
 --- a/kernel/sched/Makefile
 +++ b/kernel/sched/Makefile
 @@ -37,3 +37,4 @@ obj-y += core.o
@@ -72,7 +92,7 @@ index 8ae8637..601556b 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b75232..55fed4a 100644
+index 5b7523242..55fed4a25 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -140,7 +160,7 @@ index 5b75232..55fed4a 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 0000000..747a5b0
+index 000000000..747a5b049
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,309 @@
@@ -455,7 +475,7 @@ index 0000000..747a5b0
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 0000000..ec6dd04
+index 000000000..ec6dd0497
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,120 @@
@@ -580,7 +600,7 @@ index 0000000..ec6dd04
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d43..d4c0808 100644
+index 7936d4333..d4c080836 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -592,7 +612,7 @@ index 7936d43..d4c0808 100644
  
  int sched_rr_timeslice = RR_TIMESLICE;
 diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
-index 77ae87f..ed07293 100644
+index 77ae87f36..ed07293a2 100644
 --- a/kernel/sched/syscalls.c
 +++ b/kernel/sched/syscalls.c
 @@ -566,6 +566,11 @@ int __sched_setscheduler(struct task_struct *p,
@@ -607,3 +627,151 @@ index 77ae87f..ed07293 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
+-- 
+2.54.0
+
+
+From 7d48e4d896c7039fa62caa9cc22c99889a7b27a0 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Fri, 26 Jun 2026 15:22:37 +0700
+Subject: [PATCH 2/2] infinity-scheduler v3: EMA EEVDF surgery for sub-20us
+ wakeup latency
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           | 17 ++++++++++++--
+ kernel/sched/infinity_sched.c | 43 +++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 28 +++++++++++++++++++++++
+ 3 files changed, 86 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 55fed4a25..5e5f7f44f 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -959,8 +959,13 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
+ 	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
+ 		curr = NULL;
+ 
+-	if (curr && protect && protect_slice(curr))
+-		return curr;
++	if (curr && protect && protect_slice(curr)) {
++		if (entity_is_task(curr) &&
++		    infinity_should_yield(task_of(curr)))
++			; /* yield to eligible interactive tasks */
++		else
++			return curr;
++	}
+ 
+ 	/* Pick the leftmost entity if it's eligible */
+ 	if (se && entity_eligible(cfs_rq, se)) {
+@@ -5228,6 +5233,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
+ 		vslice /= 2;
+ 
++	/*
++	 * Infinity: EMA-modulated wakeup vslice.
++	 * Low-EMA (interactive) tasks get a shorter vslice on wakeup,
++	 * placing their deadline earlier in the EEVDF tree.
++	 */
++	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP))
++		vslice = infinity_wakeup_scale(vslice, &task_of(se)->infinity);
++
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i/w_i
+ 	 */
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 747a5b049..cde07bd3c 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -273,6 +273,49 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->fork_time_ns = now;
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* infinity_should_yield — EMA protect_slice bypass                    */
++/* ------------------------------------------------------------------ */
++
++bool infinity_should_yield(struct task_struct *p)
++{
++	/*
++	 * A task whose EMA has climbed above 50% of BUDGET_MAX has been
++	 * running continuously for ~10+ ticks (~10ms+ on 1000Hz).
++	 * It is considered CPU-bound and should yield the CPU to incoming
++	 * interactive tasks rather than hiding behind protect_slice().
++	 *
++	 * The 50% threshold is chosen so that short bursts of CPU work
++	 * (common in interactive tasks) do not trigger preemption —
++	 * only sustained CPU consumption does.
++	 */
++	return p->infinity.ema > INFINITY_BUDGET_MAX_NS / 2;
++}
++
++/* ------------------------------------------------------------------ */
++/* infinity_wakeup_scale — EMA-modulated vslice for wakeups            */
++/* ------------------------------------------------------------------ */
++
++u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
++{
++	u64 ema_pct, boost;
++
++	/*
++	 * Compute the percentage of BUDGET_MAX consumed by this task's EMA.
++	 * A low-EMA task (slept long) gets a significant vslice reduction,
++	 * moving its deadline earlier in the EEVDF tree so it is picked
++	 * sooner after wakeup.  A high-EMA task (brief sleep) gets little
++	 * or no boost.
++	 *
++	 *   ema_pct = 0   → boost = 50%  (fully interactive, max boost)
++	 *   ema_pct = 100  → boost = 0%  (CPU-bound, no boost)
++	 */
++	ema_pct = ctx->ema * 100ULL / INFINITY_BUDGET_MAX_NS;
++	boost = (100ULL - ema_pct) * 50ULL / 100ULL;
++
++	return vslice * (100ULL - boost) / 100ULL;
++}
++
+ /* ------------------------------------------------------------------ */
+ /* infinity_rt_consume — EMA climb on RT wakeup                        */
+ /* ------------------------------------------------------------------ */
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index ec6dd0497..ec9c10397 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -112,6 +112,34 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
+ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
+ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
+ 
++/*
++ * infinity_should_yield — should this fair task yield its protect_slice?
++ *
++ * Called from pick_eevdf() when protect_slice() would normally keep the
++ * current task running.  Returns true when the current task's EMA is high
++ * (CPU-bound behaviour), indicating it is fair to let other tasks preempt.
++ *
++ * This is NOT a copy of BORE's futex_waiting check.  BORE checks a flag
++ * set on the waking task; this checks the running task's own consumption
++ * history.  The EMA is a continuous asymptotic signal — no flag, no burst
++ * tracking, no external state.
++ */
++bool infinity_should_yield(struct task_struct *p);
++
++/*
++ * infinity_wakeup_scale — reduce vslice for low-EMA wakeups
++ *
++ * Called from place_entity() to shorten the vslice (and thus the deadline)
++ * of a waking task whose EMA is low (interactive behaviour).  The lower
++ * the EMA, the more aggressive the reduction — up to 50% for EMA ≈ 0.
++ *
++ * This is NOT a copy of BORE's unconditional vslice >>= 1 on wakeup.
++ * The reduction is proportional to the wakeup depth encoded in the EMA:
++ *   - EMA ≈ 0  (slept long):  ~50% reduction, deadline moved earlier
++ *   - EMA ≈ BUDGET_MAX  (brief sleep):  ~0% reduction, normal placement
++ */
++u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
++
+ void infinity_rt_consume(struct infinity_ctx *ctx);
+ void infinity_rt_wakeup(struct infinity_ctx *ctx);
+ void infinity_rt_init(struct infinity_ctx *ctx);
+-- 
+2.54.0
+

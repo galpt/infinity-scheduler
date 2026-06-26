@@ -274,6 +274,49 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 }
 
 /* ------------------------------------------------------------------ */
+/* infinity_should_yield — EMA protect_slice bypass                    */
+/* ------------------------------------------------------------------ */
+
+bool infinity_should_yield(struct task_struct *p)
+{
+	/*
+	 * A task whose EMA has climbed above 50% of BUDGET_MAX has been
+	 * running continuously for ~10+ ticks (~10ms+ on 1000Hz).
+	 * It is considered CPU-bound and should yield the CPU to incoming
+	 * interactive tasks rather than hiding behind protect_slice().
+	 *
+	 * The 50% threshold is chosen so that short bursts of CPU work
+	 * (common in interactive tasks) do not trigger preemption —
+	 * only sustained CPU consumption does.
+	 */
+	return p->infinity.ema > INFINITY_BUDGET_MAX_NS / 2;
+}
+
+/* ------------------------------------------------------------------ */
+/* infinity_wakeup_scale — EMA-modulated vslice for wakeups            */
+/* ------------------------------------------------------------------ */
+
+u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
+{
+	u64 ema_pct, boost;
+
+	/*
+	 * Compute the percentage of BUDGET_MAX consumed by this task's EMA.
+	 * A low-EMA task (slept long) gets a significant vslice reduction,
+	 * moving its deadline earlier in the EEVDF tree so it is picked
+	 * sooner after wakeup.  A high-EMA task (brief sleep) gets little
+	 * or no boost.
+	 *
+	 *   ema_pct = 0   → boost = 50%  (fully interactive, max boost)
+	 *   ema_pct = 100  → boost = 0%  (CPU-bound, no boost)
+	 */
+	ema_pct = ctx->ema * 100ULL / INFINITY_BUDGET_MAX_NS;
+	boost = (100ULL - ema_pct) * 50ULL / 100ULL;
+
+	return vslice * (100ULL - boost) / 100ULL;
+}
+
+/* ------------------------------------------------------------------ */
 /* infinity_rt_consume — EMA climb on RT wakeup                        */
 /* ------------------------------------------------------------------ */
 

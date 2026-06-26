@@ -112,6 +112,34 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 
+/*
+ * infinity_should_yield — should this fair task yield its protect_slice?
+ *
+ * Called from pick_eevdf() when protect_slice() would normally keep the
+ * current task running.  Returns true when the current task's EMA is high
+ * (CPU-bound behaviour), indicating it is fair to let other tasks preempt.
+ *
+ * This is NOT a copy of BORE's futex_waiting check.  BORE checks a flag
+ * set on the waking task; this checks the running task's own consumption
+ * history.  The EMA is a continuous asymptotic signal — no flag, no burst
+ * tracking, no external state.
+ */
+bool infinity_should_yield(struct task_struct *p);
+
+/*
+ * infinity_wakeup_scale — reduce vslice for low-EMA wakeups
+ *
+ * Called from place_entity() to shorten the vslice (and thus the deadline)
+ * of a waking task whose EMA is low (interactive behaviour).  The lower
+ * the EMA, the more aggressive the reduction — up to 50% for EMA ≈ 0.
+ *
+ * This is NOT a copy of BORE's unconditional vslice >>= 1 on wakeup.
+ * The reduction is proportional to the wakeup depth encoded in the EMA:
+ *   - EMA ≈ 0  (slept long):  ~50% reduction, deadline moved earlier
+ *   - EMA ≈ BUDGET_MAX  (brief sleep):  ~0% reduction, normal placement
+ */
+u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
+
 void infinity_rt_consume(struct infinity_ctx *ctx);
 void infinity_rt_wakeup(struct infinity_ctx *ctx);
 void infinity_rt_init(struct infinity_ctx *ctx);
