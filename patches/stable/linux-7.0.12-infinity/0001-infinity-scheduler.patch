@@ -23,16 +23,14 @@ diff --git a/include/linux/sched.h b/include/linux/sched.h
 index d41e7a8f9..395d99c07 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,14 @@ struct kmap_ctrl {
+@@ -817,6 +817,12 @@ struct kmap_ctrl {
  #endif
  };
  
 +struct infinity_ctx {
 +	u64		ema;
 +	u64		rt_ema;
-+	bool		rt_disabled;
 +	u64		last_sleep_ns;
-+	u64		fork_time_ns;
 +};
 +
  struct task_struct {
@@ -71,14 +69,13 @@ diff --git a/init/init_task.c b/init/init_task.c
 index 5c838757f..a0fb17cf5 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
 +	.infinity		= {
 +				.ema		= 0,
 +				.rt_ema		= 0,
-+				.rt_disabled	= false,
 +				.last_sleep_ns	= 0,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
@@ -220,7 +217,7 @@ new file mode 100644
 index 000000000..3fedf5fed
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,324 @@
+@@ -0,0 +1,323 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -465,7 +462,6 @@ index 000000000..3fedf5fed
 +	ctx->ema = 0;
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
-+	ctx->fork_time_ns = now;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -550,7 +546,7 @@ new file mode 100644
 index 000000000..00e043526
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,145 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -578,7 +574,6 @@ index 000000000..00e043526
 + *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
 + *   infinity_running       — read-only flag, 1 if active
 + *
-+ * infinity_ctx reserved fields: fork_time_ns (set), rt_disabled (set).
 + * Both are placeholders for future rate-limiting and RT-opt-out logic.
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
@@ -760,13 +755,12 @@ diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
 index cadb0e9fe..002b0e468 100644
 --- a/kernel/sched/syscalls.c
 +++ b/kernel/sched/syscalls.c
-@@ -546,6 +546,11 @@ int __sched_setscheduler(struct task_struct *p,
+@@ -546,6 +546,10 @@ int __sched_setscheduler(struct task_struct *p,
  	}
  
  	/* Update task specific "requested" clamps */
 +	if (attr->sched_flags & SCHED_FLAG_NO_INFINITY_RT) {
 +		p->infinity.rt_ema = 0;
-+		p->infinity.rt_disabled = true;
 +	}
 +
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
