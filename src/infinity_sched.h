@@ -25,9 +25,6 @@
  *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
  *   infinity_running       — read-only flag, 1 if active
  *
- * infinity_ctx reserved fields: fork_time_ns (set), rt_disabled (set).
- * Both are placeholders for future rate-limiting and RT-opt-out logic.
- *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
  * Higher EMA → shorter time slice (active throttle via infinity_slice()).
