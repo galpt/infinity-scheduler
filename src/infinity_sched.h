@@ -14,6 +14,7 @@
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
  *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
  *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
+ *   __enqueue_rt_entity()   ──call──► infinity_rt_effective_prio() — RT queue placement (v3)
  *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
  *   init/init_task.c        ──init──► infinity.{}             — static init
  *   pick_eevdf()            ──call──► infinity_should_yield() — protect_slice bypass (v3)

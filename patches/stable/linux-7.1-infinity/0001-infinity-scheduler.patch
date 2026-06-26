@@ -1,19 +1,30 @@
-From c1c522ba1fe66d2c9a0bd6c79e839a39649e7639 Mon Sep 17 00:00:00 2001
+From c228629739d9807eb7d5df48a558afad8de786f6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 26 Jun 2026 17:55:26 +0700
-Subject: [PATCH] infinity-scheduler v3: EMA slice modulation + EEVDF surgery
+Date: Fri, 26 Jun 2026 18:24:31 +0700
+Subject: [PATCH] infinity-scheduler v3: EMA modulation + EEVDF surgery + RT
+ hooks
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
-Complete v3 patch including:
-- update_deadline(): infinity_slice() for EMA-modulated slice (FIX:
-  this function was dead code since v1, never called)
-- update_curr(): infinity_consume() for EMA tracking
-- pick_eevdf(): protect_slice bypass when EMA > 50%
-- place_entity(): EMA-modulated wakeup vslice for low-EMA tasks
-- enqueue_task_fair(): infinity_wakeup() EMA decay
-- dequeue_task_fair(): sleep timestamp tracking
-- pick_next_entity(): NULL guard
-- task_fork_fair(): infinity_fork_init()
-- RT EMA modulation and sysctl infrastructure
+Complete v3 patch with all hooks connected:
+
+Fair (fair.c):
+  - update_deadline(): infinity_slice() for EMA-modulated slice
+  - update_curr(): infinity_consume() for EMA tracking
+  - pick_eevdf(): protect_slice bypass when EMA > 50%
+  - place_entity(): EMA-modulated wakeup vslice for low-EMA tasks
+  - enqueue_task_fair(): infinity_wakeup() EMA decay on wakeup
+  - dequeue_task_fair(): sleep timestamp recording
+  - pick_next_entity(): NULL guard for pick_eevdf()
+  - task_fork_fair(): infinity_fork_init()
+
+RT (rt.c):
+  - enqueue_task_rt(): infinity_rt_consume() EMA climb on wakeup
+  - dequeue_task_rt(): infinity_rt_wakeup() EMA decay on sleep
+  - __enqueue_rt_entity(): EMA-modulated queue placement via
+    infinity_rt_effective_prio() — tasks with high rt_ema go to
+    lower-priority queues, well-behaved RT tasks run first
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -23,10 +34,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  55 +++++-
  kernel/sched/infinity_sched.c | 324 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 143 +++++++++++++++
- kernel/sched/rt.c             |   1 +
+ kernel/sched/infinity_sched.h | 145 +++++++++++++++
+ kernel/sched/rt.c             |  28 ++-
  kernel/sched/syscalls.c       |   5 +
- 9 files changed, 540 insertions(+), 5 deletions(-)
+ 9 files changed, 567 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -549,10 +560,10 @@ index 000000000..3fedf5fed
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..d14458cb5
+index 000000000..03a640dc2
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,145 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -578,6 +589,9 @@ index 000000000..d14458cb5
 + *   infinity_carriage_ns   — base fair-share window (default 2ms)
 + *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
 + *   infinity_running       — read-only flag, 1 if active
++ *
++ * infinity_ctx reserved fields: fork_time_ns (set), rt_disabled (set).
++ * Both are placeholders for future rate-limiting and RT-opt-out logic.
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -695,9 +709,8 @@ index 000000000..d14458cb5
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 +
 +#endif /* __INFINITY_SCHED_H */
-
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..de0dda51a 100644
+index 4ee8faf01..107d4cb50 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -708,6 +721,55 @@ index 4ee8faf01..de0dda51a 100644
  #include "pelt.h"
  
  int sched_rr_timeslice = RR_TIMESLICE;
+@@ -1437,8 +1438,10 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+ {
+ 	struct sched_rt_entity *rt_se = &p->rt;
+ 
+-	if (flags & ENQUEUE_WAKEUP)
++	if (flags & ENQUEUE_WAKEUP) {
+ 		rt_se->timeout = 0;
++		infinity_rt_consume(&p->infinity);
++	}
+ 
+ 	check_schedstat_required();
+ 	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
+@@ -1459,6 +1462,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+ 	update_curr_rt(rq);
+ 	dequeue_rt_entity(rt_se, flags);
+ 
++	if ((flags & DEQUEUE_SLEEP) && p)
++		infinity_rt_wakeup(&p->infinity);
++
+ 	dequeue_pushable_task(rq, p);
+ 
+ 	return true;
+@@ -1473,7 +1479,25 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+ {
+ 	if (on_rt_rq(rt_se)) {
+ 		struct rt_prio_array *array = &rt_rq->active;
+-		struct list_head *queue = array->queue + rt_se_prio(rt_se);
++	struct list_head *queue = array->queue + rt_se_prio(rt_se);
++
++	/*
++	 * Infinity: modulate queue placement by EMA consumption for RT tasks.
++	 * A task that has consumed significant RT runtime (high rt_ema) is
++	 * placed in a lower-priority queue so that well-behaved RT tasks
++	 * (low rt_ema) run first.  The task's actual priority is unchanged;
++	 * only its queue position is modulated.
++	 *
++	 * For RT group scheduling, skip group entities (those with my_q)
++	 * since they represent a CPU reservation, not an individual task.
++	 */
++	if (!group_rt_rq(rt_se)) {
++		struct task_struct *p = rt_task_of(rt_se);
++		int qprio = infinity_rt_effective_prio(rt_se_prio(rt_se),
++						       &p->infinity);
++		if (qprio != rt_se_prio(rt_se))
++			queue = array->queue + qprio;
++	}
+ 
+ 		if (head)
+ 			list_move(&rt_se->run_list, queue);
 diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
 index b215b0ead..4730cb1d2 100644
 --- a/kernel/sched/syscalls.c
@@ -724,3 +786,6 @@ index b215b0ead..4730cb1d2 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
+-- 
+2.54.0
+
