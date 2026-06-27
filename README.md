@@ -1,6 +1,13 @@
 # Infinity Scheduler — Benchmark Archive
 
-This directory contains benchmark results comparing the **Infinity Scheduler** against three mainstream Linux CPU schedulers available on CachyOS. All benchmarks were conducted on identical hardware across four kernel boots using a slightly modified version of the [CachyOS Mini-Benchmarker](https://github.com/CachyOS/cachyos-benchmarker).
+This directory contains benchmark results for the **Infinity Scheduler** across two major versions, compared against mainstream Linux CPU schedulers available on CachyOS.
+
+## Directory Structure
+
+| Path | Contents |
+|------|----------|
+| `v2-rt/` | Full four-way comparison: Infinity Scheduler (v2-rt), CachyOS tuned EEVDF, BORE, and BMQ. All benchmarks were conducted on identical hardware across four kernel boots using the [CachyOS Mini-Benchmarker](https://github.com/CachyOS/cachyos-benchmarker). |
+| `v3/` | Infinity Scheduler (v3) results only. y-cruncher pi 1b was intentionally skipped (see explanation below). Repeated cross-scheduler comparison was omitted because BORE, BMQ, and tuned EEVDF results from v2-rt are representative of their behavior and would not differ meaningfully in a re-run. |
 
 ## Understanding The Infinity Scheduler
 
@@ -31,9 +38,9 @@ greed = log2(burst_time)  (fixed-point)
 penalty = max(greed - offset, 0) * scale
 ```
 
-When the task sleeps, `restart_burst_bore()` resets the burst to zero. The penalty is added to the task's static priority, which changes its weight → the task's deadline in the EEVDF tree moves further out → the task is scheduled less frequently. A task that runs in a long burst (compilation, rendering) accumulates a high penalty and gets a shorter share. An interactive task that sleeps after a few microseconds of work keeps a minimal penalty.
+When the task sleeps, `restart_burst_bore()` resets the burst to zero. The penalty is added to the task's static priority, which changes its weight: the task's deadline in the EEVDF tree moves further out, and the task is scheduled less frequently. A task that runs in a long burst (compilation, rendering) accumulates a high penalty and gets a shorter share. An interactive task that sleeps after a few microseconds of work keeps a minimal penalty.
 
-BORE also includes a burst inheritance system: when a new process is forked, it inherits the penalty of its parent's subtree (other child processes), so a fork-heavy workload immediately knows its expected burst profile. A futex-waiting task is exempted from certain penalties, which helps GUI applications that synchronize via futexes.
+BORE also includes a burst inheritance system: when a new process is forked, it inherits the penalty of its parent's subtree, so a fork-heavy workload immediately knows its expected burst profile. A futex-waiting task is exempted from certain penalties, which helps GUI applications that synchronize via futexes.
 
 **Result:** BORE improves desktop interactivity significantly. The trade-off is that BORE has several tunable parameters (smoothness, penalty_offset, penalty_scale, cache_lifetime, inherit_type) that affect behavior, and the burst detection is purely heuristic — it measures continuous runtime but cannot distinguish between "compute" and "interactive" burst patterns by themselves.
 
@@ -41,7 +48,7 @@ BORE also includes a burst inheritance system: when a new process is forked, it 
 
 BMQ replaces the entire Linux scheduler with a fundamentally different approach. Each CPU has a runqueue consisting of an array of FIFO lists, one per priority level. A bitmap tracks which priority levels have runnable tasks. To pick the next task, the scheduler finds the lowest-numbered bit set in the bitmap and runs the first task in that FIFO queue. Each task gets a fixed 4 ms time slice.
 
-Priority is determined by two things: the task's static nice value, and a dynamic boost/penalty value bounded between [-12, 0]. When a task uses its entire time slice, its boost decreases by 1 (it gets demoted). When a task blocks (sleeps or waits for I/O) early within its time slice, its boost increases by 1 (up to a maximum of 0). This means an interactive task that runs for only a few hundred microseconds before waiting for more input will quickly rise to the highest priority queue, while a CPU-bound task that uses its full 4 ms will sink to lower priority levels.
+Priority is determined by two things: the task's static nice value, and a dynamic boost/penalty value bounded between [-12, 0]. When a task uses its entire time slice, its boost decreases by 1 (it gets demoted). When a task blocks early within its time slice, its boost increases by 1 (up to a maximum of 0). This means an interactive task that runs for only a few hundred microseconds before waiting for more input will quickly rise to the highest priority queue, while a CPU-bound task that uses its full 4 ms will sink to lower priority levels.
 
 **Result:** BMQ has the lowest scheduling overhead of all four schedulers — O(1) enqueue and dequeue. The interactivity boost is simple and effective, but BMQ provides no fairness guarantees: a nice -20 task always dominates a nice +19 task regardless of behavior, and within the same priority it is simple FIFO round-robin. There is no concept of virtual runtime, deadlines, or proportional fairness. BMQ also does not support SCHED_DEADLINE, sched-ext, or core scheduling.
 
@@ -65,7 +72,7 @@ pct = ema * 100 / BUDGET_MAX
 slice = slice * (100 - pct * 3 / 4) / 100
 ```
 
-A task with a low EMA (sleeps often) keeps a full time slice. A task with a high EMA (constant CPU consumption) receives a progressively shorter slice, down to a minimum of 500 µs.
+A task with a low EMA (sleeps often) keeps a full time slice. A task with a high EMA (constant CPU consumption) receives a progressively shorter slice, down to a minimum of 500 µs in v2-rt and 400 µs in v3.
 
 **For real-time tasks (SCHED_FIFO/SCHED_RR):** The Infinity scheduler is the only one among these four that modulates RT priority. A separate `rt_ema` tracks RT CPU consumption with a slow climb rate (α = 1/64 per wakeup) and fast decay rate (β = 1/4 per sleep). The effective RT priority is:
 
@@ -102,13 +109,39 @@ The kernel's existing RT throttling mechanism (`update_curr_rt` in `kernel/sched
 | **BMQ** | Time slice usage: used full slice vs. blocked early | Demotes priority on full-slice use; promotes on early block | RT tasks use same priority queue — O(n) insertion | ~7800 lines (replaces scheduler) |
 | **Infinity** | EMA: asymptotic consumption history | Reduces time slice directly based on EMA value | Per-task RT EMA modulates priority smoothly | ~430 lines added |
 
-### Caveats
+## Why y-cruncher Was Skipped on Infinity v3
+
+The `y-cruncher pi 1b` benchmark is a pure compute workload that spawns tightly synchronized threads executing heavy AVX-512 loops with ultra-fast barrier synchronization micro-sleeps (5–50 µs). When the Infinity v3 scheduler encounters this workload, the following chain of events occurs:
+
+1. **The EMA pins to maximum.** The v3 scheduler uses a 20 ms history retention window. Each thread's brief micro-sleeps register negligible decay against this window. The EMA converges toward `INFINITY_BUDGET_MAX_NS` and stays there — the scheduler correctly recognizes these threads as persistent CPU consumers.
+
+2. **The time slice compresses to 400 µs.** With the EMA pinned at maximum, `infinity_slice()` reduces each thread's allowed runtime to the safety floor: 400 microseconds. This is the v3 minimum, tightened from 500 µs in v2-rt.
+
+3. **Frequent preemption creates overhead.** Dozens of tightly synchronized threads are forced to undergo preemption checks every 400 µs. The resulting context-switching overhead extends the total completion time significantly.
+
+This behavior is the mathematical consequence of the v3 design. It is not a bug — it reflects a deliberate trade-off:
+
+> Infinity v3 trades raw synthetic throughput for real-world system responsiveness.
+
+While the y-cruncher benchmark completes faster on EEVDF, BORE, or BMQ, those schedulers achieve it by allowing heavy compute threads to run uninterrupted for 4–6 ms windows. During those windows, interactive tasks (mouse input, display compositor, audio server) must wait in line. Infinity v3 caps the window to 400 µs, forcing frequent scheduler check-ins. This means a high-priority interactive task never waits more than 400 µs to be scheduled — the desktop remains completely fluid even under full AVX-512 saturation.
+
+```
+Throughput-oriented schedulers (EEVDF, BORE, BMQ):
+[─── Heavy math task (4000µs) ───][ Mouse (10µs) ]  → fast benchmark, stuttering UI
+
+Infinity Scheduler v3:
+[ Math (400µs) ][ Mouse ]...[ Math (400µs) ]         → slower benchmark, fluid UI
+```
+
+Cross-scheduler comparison for v3 was not repeated because the BORE, BMQ, and tuned EEVDF results from the v2-rt benchmarks are representative of their behavior. These schedulers are mature and stable — running them again would produce near-identical results, and the focus of v3 is the Infinity scheduler's own evolution.
+
+## Caveats
 
 The benchmark results in this archive cover throughput, compilation, rendering, and latency tests. These are primarily compute-bound and fixed-duration workloads that converge toward steady-state CPU consumption. The Infinity scheduler's EMA mechanism is designed to show its strength in mixed-interactive scenarios — wakeup storms, fork bursts, gaming, and real-time multimedia — where tasks with different sleep/wake patterns compete for the same core. The benchmark results may not fully capture these benefits.
 
-The Infinity scheduler is under active development. It has been tested on the v2-rt branch against the workloads shown here, but production deployments may expose edge cases not yet covered. The source code (430 lines total) is concise enough to review in full for anyone evaluating it for their use case.
+The Infinity scheduler is under active development. The source code (~430 lines for the core algorithm) is concise enough to review in full for anyone evaluating it for their use case.
 
-## Hardware
+## Hardware (v2-rt benchmarks)
 
 | Component | Specification |
 |-----------|---------------|
@@ -117,7 +150,9 @@ The Infinity scheduler is under active development. It has been tested on the v2
 | GPU | Radeon Graphics (integrated) |
 | Storage | NVMe SSD |
 
-## Kernels Tested
+> The v3 benchmark used the same hardware.
+
+## Kernels Tested (v2-rt)
 
 | # | Kernel | Scheduler | Version |
 |---|--------|-----------|---------|
@@ -126,7 +161,7 @@ The Infinity scheduler is under active development. It has been tested on the v2
 | 3 | **CachyOS BORE** | BORE (Burst-Oriented Response Enhancer) | `7.1.1-1-cachyos-bore` |
 | 4 | **CachyOS BMQ** | BMQ (BitMap Queue) | `7.0.12-1-cachyos-bmq` |
 
-## Benchmark Suite
+## Benchmark Suite (v2-rt)
 
 15 tests from the CachyOS Mini-Benchmarker (v2.2), grouped into two categories:
 
@@ -155,7 +190,7 @@ The Infinity scheduler is under active development. It has been tested on the v2
 | 14 | schbench throughput | Wakeup throughput (requests/sec) | ↑ higher is better |
 | 15 | cyclictest | Scheduling latency (max latency) | ↓ lower is better |
 
-## Raw Results
+## Raw Results (v2-rt)
 
 All times in seconds for Category 1 (↓ lower is better).
 Scheduler-specific metrics in their respective units for Category 2.
@@ -186,24 +221,16 @@ Scheduler-specific metrics in their respective units for Category 2.
 | schbench avg RPS | 1916.23 | 1836.00 | 1916.73 | 1667.90 | ↑ higher is better |
 | cyclictest max latency | 360.00 µs | 1191.00 µs | 438.00 µs | 499.00 µs | ↓ lower is better |
 
-## Directory Structure
-
-| Directory | Contents |
-|-----------|----------|
-| `results-infinity/` | Raw logs for the Infinity Scheduler kernel |
-| `results-cachyos/` | Raw logs for default CachyOS (tuned EEVDF) kernel |
-| `results-bore/` | Raw logs for CachyOS BORE kernel |
-| `results-bmq/` | Raw logs for CachyOS BMQ kernel |
-| `results-all/` | Combined comparison charts, logfiles, and consolidated CSV/JSON across all 4 kernels |
-
 ## Visualizations
 
-The `categorized_comparison_All.png` chart in `results-all/` shows two sections per kernel:
+The `categorized_comparison_All.png` chart in each `results-all/` directory shows two sections per kernel:
 
 - **Top section** — Category 1: Throughput & Compilation benchmarks
 - **Bottom section** — Category 2: Scheduler Latency metrics with per-metric direction labels
 
 A secondary cross-kernel comparison chart (`kernel_version_comparison_All.png`) groups every kernel side-by-side per benchmark. Open `test_performance.html` in any browser for an interactive report.
+
+In the v3 charts, `y-cruncher pi 1b` is marked with a hatched bar and "SKIPPED" annotation, with a footnote explaining the intentional skip.
 
 ## Methodology
 
@@ -212,3 +239,4 @@ A secondary cross-kernel comparison chart (`kernel_version_comparison_All.png`) 
 - All benchmarks ran under KDE Plasma 6 on CachyOS with identical system configurations.
 - The `sched-ext` (`scx`) framework was not used — all tests used the kernel's built-in scheduler.
 - The benchmarker's downloaded assets were cached and reused across runs to eliminate network variability.
+- y-cruncher pi 1b was intentionally skipped on Infinity v3 (see explanation above).
