@@ -122,7 +122,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
-void infinity_rt_consume(struct infinity_ctx *ctx);
+void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx);
 u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 

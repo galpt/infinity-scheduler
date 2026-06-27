@@ -235,8 +235,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/* Decay proportional to sleep_ns; 16ms of sleep = full decay */
-	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA, 1000000ULL);
+	/* Fixed-point upscaling protects sub-62us micro-sleeps from truncation */
+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 1000000ULL);
 	if (dec > INFINITY_FP_ONE)
 		dec = INFINITY_FP_ONE;
 
@@ -282,11 +282,12 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 /* infinity_rt_consume — EMA climb on RT wakeup                        */
 /* ------------------------------------------------------------------ */
 
-void infinity_rt_consume(struct infinity_ctx *ctx)
+void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
-	/* Asymptotic climb toward RT_BUDGET — no clamp, true Limitless */
-	u64 step = (u64)((s64)(INFINITY_RT_BUDGET_NS - ctx->rt_ema)) *
-		   INFINITY_RT_ALPHA / INFINITY_FP_ONE;
+	/* Scale the RT EMA step proportionally to actual runtime */
+	u64 step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
+			   INFINITY_RT_ALPHA,
+			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 	ctx->rt_ema += step;
 }
 

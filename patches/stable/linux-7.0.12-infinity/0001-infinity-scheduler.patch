@@ -1,4 +1,4 @@
-From 23959fd2f96d4dec0d4a47a1f5722c717ca7ba07 Mon Sep 17 00:00:00 2001
+From bf7ea8f19e8f269643c86e56b409e71807ac78aa Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:23:38 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -9,14 +9,14 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  include/linux/sched.h         |  15 ++
  include/uapi/linux/sched.h    |   3 +-
  init/init_task.c              |  10 ++
- kernel/futex/waitwake.c       |   5 +-
+ kernel/futex/waitwake.c       |   4 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  64 ++++++-
- kernel/sched/infinity_sched.c | 314 ++++++++++++++++++++++++++++++++++
+ kernel/sched/fair.c           |  65 ++++++-
+ kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  46 ++++-
+ kernel/sched/rt.c             |  49 +++++-
  kernel/sched/syscalls.c       |   8 +
- 10 files changed, 587 insertions(+), 8 deletions(-)
+ 10 files changed, 591 insertions(+), 8 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -95,10 +95,10 @@ index 5c838757f..c48cdb423 100644
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
 diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index 1c2dd03f1..f2406896c 100644
+index 1c2dd03f1..3ed7d83fe 100644
 --- a/kernel/futex/waitwake.c
 +++ b/kernel/futex/waitwake.c
-@@ -354,8 +354,11 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
+@@ -354,8 +354,10 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
  		 * flagged for rescheduling. Only call schedule if there
  		 * is no timeout, or if it has yet to expire.
  		 */
@@ -106,7 +106,6 @@ index 1c2dd03f1..f2406896c 100644
 +		if (!timeout || timeout->task) {
 +			current->infinity.futex_waiting = true;
  			schedule();
-+			current->infinity.futex_waiting = false;
 +		}
  	}
  	__set_current_state(TASK_RUNNING);
@@ -121,7 +120,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..b177bee93 100644
+index 3bce48ad0..2a702d98c 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -216,21 +215,22 @@ index 3bce48ad0..b177bee93 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6937,6 +6977,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6937,6 +6977,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
 +
-+	/* Infinity: EMA decay on wakeup */
++	/* Infinity: EMA decay on wakeup and futex clear */
 +	if (flags & ENQUEUE_WAKEUP) {
 +		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
 +		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
 +			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);
++		p->infinity.futex_waiting = false;
 +	}
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7172,6 +7219,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7172,6 +7220,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -239,7 +239,7 @@ index 3bce48ad0..b177bee93 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13459,6 +13508,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13459,6 +13509,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -253,10 +253,10 @@ index 3bce48ad0..b177bee93 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..e2aa8a93a
+index 000000000..71cf3d861
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,315 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -494,8 +494,8 @@ index 000000000..e2aa8a93a
 +	if (sleep_ns == 0)
 +		return;
 +
-+	/* Decay proportional to sleep_ns; 16ms of sleep = full decay */
-+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA, 1000000ULL);
++	/* Fixed-point upscaling protects sub-62us micro-sleeps from truncation */
++	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 1000000ULL);
 +	if (dec > INFINITY_FP_ONE)
 +		dec = INFINITY_FP_ONE;
 +
@@ -541,11 +541,12 @@ index 000000000..e2aa8a93a
 +/* infinity_rt_consume — EMA climb on RT wakeup                        */
 +/* ------------------------------------------------------------------ */
 +
-+void infinity_rt_consume(struct infinity_ctx *ctx)
++void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
-+	/* Asymptotic climb toward RT_BUDGET — no clamp, true Limitless */
-+	u64 step = (u64)((s64)(INFINITY_RT_BUDGET_NS - ctx->rt_ema)) *
-+		   INFINITY_RT_ALPHA / INFINITY_FP_ONE;
++	/* Scale the RT EMA step proportionally to actual runtime */
++	u64 step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
++			   INFINITY_RT_ALPHA,
++			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 +	ctx->rt_ema += step;
 +}
 +
@@ -573,7 +574,7 @@ index 000000000..e2aa8a93a
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..4e8ff09e7
+index 000000000..fa7843156
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,129 @@
@@ -701,13 +702,13 @@ index 000000000..4e8ff09e7
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 +
-+void infinity_rt_consume(struct infinity_ctx *ctx);
++void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx);
 +u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..dc24f4069 100644
+index 0cbee0318..925ff4543 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -718,7 +719,17 @@ index 0cbee0318..dc24f4069 100644
  #include "pelt.h"
  
  int sched_rr_timeslice = RR_TIMESLICE;
-@@ -1432,8 +1433,10 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
+ 	if (unlikely(delta_exec <= 0))
+ 		return;
+ 
++	if (entity_is_task(&donor->se))
++		infinity_rt_consume(&donor->infinity, delta_exec);
++
+ #ifdef CONFIG_RT_GROUP_SCHED
+ 	struct sched_rt_entity *rt_se = &donor->rt;
+ 
+@@ -1432,8 +1436,10 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -730,7 +741,7 @@ index 0cbee0318..dc24f4069 100644
  
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
-@@ -1454,6 +1457,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1460,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -740,7 +751,7 @@ index 0cbee0318..dc24f4069 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1476,44 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1479,44 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
