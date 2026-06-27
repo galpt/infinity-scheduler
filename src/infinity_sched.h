@@ -12,6 +12,7 @@
  *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
+ *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice (v3)
  *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
  *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
  *   __enqueue_rt_entity()   ──call──► infinity_rt_effective_prio() — RT queue placement (v3)
@@ -116,7 +117,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  *   EMA ~= 0             (slept long):  ~50% reduction
  *   EMA ~= BUDGET_MAX    (brief sleep):   ~0% reduction
  *
- * This is distinct from BORE's unconditional vslice >>= 1 on wakeup.
+ * This is distinct from a fixed vslice >>= 1 on wakeup.
  * The scaling here is continuous, not a fixed halving.
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);

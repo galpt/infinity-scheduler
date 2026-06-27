@@ -86,8 +86,9 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
 | `place_entity()` (v3) | EMA-modulated wakeup vslice via `infinity_wakeup_scale()` |
+| `pick_eevdf()` (v3) | Bypasses protect_slice when current task is waiting on a futex |
 
-The EMA signal drives scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree, so they are picked sooner at each scheduling point.
+The EMA signal drives scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree, so they are picked sooner at each scheduling point.  When a task calls `futex_wait()`, its slice protection is bypassed so interactive wakeups can preempt immediately at the next scheduling point.
 
 ### EMA consumption formula
 
@@ -106,7 +107,7 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
 | `slice` | Per-task time slice — shrinks as EMA grows (active throttle) |
 
-**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, receiving a time slice of $slice = share \times (100 - 63 \times 3/4) / 100 \approx 0.53 \times share$. After 256 ticks, $ema$ converges close to $B_{\max}$ and the slice reaches its 500 µs minimum — but EMA never reaches BUDGET_MAX, the true Limitless.
+**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, receiving a time slice of $slice = share \times (100 - 63 \times 3/4) / 100 \approx 0.53 \times share$. After 256 ticks, $ema$ converges close to $B_{\max}$ and the slice reaches its 400 µs minimum — but EMA never reaches BUDGET_MAX, the true Limitless.
 
 ## Tunables
 

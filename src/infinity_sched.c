@@ -12,8 +12,8 @@
  *
  * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
  * deadlines, EMA-modulated RT queue placement via
- * infinity_rt_effective_prio(), and a reduced SLICE_MIN of 200us for
- * faster scheduling points.
+ * infinity_rt_effective_prio(), a futex-waiting bypass in pick_eevdf(),
+ * and a 400us SLICE_MIN for safety with spinlock workloads.
  *
  * The EMA converges asymptotically toward BUDGET_MAX when running and
  * toward 0 when sleeping — the true Limitless.  No clamps, no external

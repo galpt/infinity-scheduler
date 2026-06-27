@@ -681,7 +681,7 @@ index 000000000..2ecbb39b4
 + *   EMA ~= 0             (slept long):  ~50% reduction
 + *   EMA ~= BUDGET_MAX    (brief sleep):   ~0% reduction
 + *
-+ * This is distinct from BORE's unconditional vslice >>= 1 on wakeup.
++ * The scaling here is continuous, not a fixed halving.
 + * The scaling here is continuous, not a fixed halving.
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
