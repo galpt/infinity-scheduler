@@ -1,31 +1,12 @@
-From 90c757eaf959cd0224f473d4ccd5db271a299e8c Mon Sep 17 00:00:00 2001
+From 538d6719a9474359d9c74c3d477c44b88fc3c941 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 07:42:17 +0700
+Date: Sat, 27 Jun 2026 08:44:49 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
  + RT hooks
 
-Fair (fair.c):
-  - update_deadline(): infinity_slice() for EMA-modulated per-task slice
-  - update_curr(): infinity_consume() for EMA tracking
-  - place_entity(): infinity_wakeup_scale() reduces vslice for low-EMA
-    wakeups, placing deadlines earlier in the tree
-  - pick_eevdf(): bypass protect_slice when the current task has
-    futex_waiting set (i.e. it called futex_wait() and should yield)
-
-RT (rt.c):
-  - enqueue_task_rt(): infinity_rt_consume() for RT EMA tracking
-  - dequeue_task_rt(): infinity_rt_wakeup() for RT EMA decay
-  - requeue_rt_entity(): infinity_rt_effective_prio() modulates
-    queue placement by EMA consumption
-
-Futex (kernel/futex/waitwake.c):
-  - futex_do_wait(): set/clear infinity.futex_waiting around schedule()
-
-INFINITY_SLICE_MIN_NS: 400000 (400us) for spinlock safety.
-
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |   7 +
+ include/linux/sched.h         |   8 +
  include/uapi/linux/sched.h    |   1 +
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
@@ -35,15 +16,15 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  26 ++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 537 insertions(+), 7 deletions(-)
+ 10 files changed, 538 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba5c..51413f02e 100644
+index ee06cba5c..6aece34a6 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,12 @@ struct kmap_ctrl {
+@@ -817,6 +817,13 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -51,12 +32,13 @@ index ee06cba5c..51413f02e 100644
 +	u64		ema;
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
++	bool		futex_waiting;
 +};
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +877,7 @@ struct task_struct {
+@@ -871,6 +878,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
