@@ -1,4 +1,4 @@
-From c16fa7856f8cea7335639ae1f119832ec717613d Mon Sep 17 00:00:00 2001
+From 1c06cb6132203dcf211a1e8b4944d54f1769eb18 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -12,11 +12,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  64 ++++++-
- kernel/sched/infinity_sched.c | 305 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 308 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  39 ++++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 555 insertions(+), 8 deletions(-)
+ 10 files changed, 558 insertions(+), 8 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -241,10 +241,10 @@ index 5b7523242..92098e6ae 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..bd7144155
+index 000000000..22e18b0dc
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,308 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -260,7 +260,7 @@ index 000000000..bd7144155
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
 + * deadlines, EMA-modulated RT queue placement via
 + * infinity_rt_effective_prio(), a futex-waiting bypass in pick_eevdf(),
-+ * and a 400us SLICE_MIN for safety with spinlock workloads.
++ * continuous EMA decay for micro-sleeps, and a 400us SLICE_MIN.
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
@@ -465,20 +465,23 @@ index 000000000..bd7144155
 +
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
-+	u64 ticks = sleep_ns / (INFINITY_FP_ONE * 1000);
-+	int i;
++	/*
++	 * Continuous EMA decay proportional to sleep duration.
++	 * Uses fine-grained scaling instead of per-tick loop so that
++	 * sub-256us micro-sleeps (common in barrier-synchronized
++	 * workloads like y-cruncher) register proportional decay.
++	 */
++	u64 dec;
 +
-+	if (ticks == 0)
++	if (sleep_ns == 0)
 +		return;
 +
-+	/* Cap iterations to prevent unbounded loops */
-+	if (ticks > 256)
-+		ticks = 256;
++	/* decay = min(sleep_ns * alpha / 1us, FP_ONE) */
++	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000ULL;
++	if (dec > INFINITY_FP_ONE)
++		dec = INFINITY_FP_ONE;
 +
-+	/* Decay EMA toward 0 for each tick slept */
-+	for (i = 0; i < ticks; i++)
-+		ctx->ema = ctx->ema - (ctx->ema * INFINITY_EMA_ALPHA /
-+					INFINITY_FP_ONE);
++	ctx->ema = ctx->ema - (ctx->ema * dec / INFINITY_FP_ONE);
 +}
 +
 +/* ------------------------------------------------------------------ */

@@ -1,4 +1,4 @@
-From dad08875283958dcaffbffff6c44e27ef8ac22af Mon Sep 17 00:00:00 2001
+From f45344c7127ba121d2b6b3cc835b4f4e83d59f81 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:20:07 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -259,7 +259,7 @@ index 3ebec186f..2913a10c2 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..2c41289da
+index 000000000..22e18b0dc
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,308 @@
@@ -278,7 +278,7 @@ index 000000000..2c41289da
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
 + * deadlines, EMA-modulated RT queue placement via
 + * infinity_rt_effective_prio(), a futex-waiting bypass in pick_eevdf(),
-+ * and a 400us SLICE_MIN for safety with spinlock workloads.
++ * continuous EMA decay for micro-sleeps, and a 400us SLICE_MIN.
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
