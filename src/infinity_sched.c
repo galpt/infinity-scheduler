@@ -235,8 +235,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/* Fixed-point upscaling protects sub-62us micro-sleeps from truncation */
-	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 1000000ULL);
+	/* Fixed-point division against a 1ms time constant */
+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA, 1000000ULL);
 	if (dec > INFINITY_FP_ONE)
 		dec = INFINITY_FP_ONE;
 
