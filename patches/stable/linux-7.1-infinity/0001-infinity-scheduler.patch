@@ -1,4 +1,4 @@
-From 87d854c1c9cd283dd36c65a54753abe50e264d6e Mon Sep 17 00:00:00 2001
+From 90c757eaf959cd0224f473d4ccd5db271a299e8c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 07:42:17 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -32,10 +32,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  61 ++++++-
  kernel/sched/infinity_sched.c | 305 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 128 ++++++++++++++
+ kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  26 ++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 536 insertions(+), 7 deletions(-)
+ 10 files changed, 537 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -248,7 +248,7 @@ index 3ebec186f..c22a68a30 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..04dbaa7ff
+index 000000000..bd7144155
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,305 @@
@@ -266,8 +266,8 @@ index 000000000..04dbaa7ff
 + *
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
 + * deadlines, EMA-modulated RT queue placement via
-+ * infinity_rt_effective_prio(), and a reduced SLICE_MIN of 200us for
-+ * faster scheduling points.
++ * infinity_rt_effective_prio(), a futex-waiting bypass in pick_eevdf(),
++ * and a 400us SLICE_MIN for safety with spinlock workloads.
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
@@ -559,10 +559,10 @@ index 000000000..04dbaa7ff
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..2ecbb39b4
+index 000000000..4e8ff09e7
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,129 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -577,6 +577,7 @@ index 000000000..2ecbb39b4
 + *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
 + *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
 + *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
++ *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice (v3)
 + *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
 + *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
 + *   __enqueue_rt_entity()   ──call──► infinity_rt_effective_prio() — RT queue placement (v3)
@@ -681,7 +682,7 @@ index 000000000..2ecbb39b4
 + *   EMA ~= 0             (slept long):  ~50% reduction
 + *   EMA ~= BUDGET_MAX    (brief sleep):   ~0% reduction
 + *
-+ * The scaling here is continuous, not a fixed halving.
++ * This is distinct from a fixed vslice >>= 1 on wakeup.
 + * The scaling here is continuous, not a fixed halving.
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
