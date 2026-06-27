@@ -1,4 +1,4 @@
-From 382611bf81278373b96a4962f66b0c3dc2c87e6e Mon Sep 17 00:00:00 2001
+From a53251f825de4a65a19d2d8e8cd69ce239b1d90c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:23:38 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -14,9 +14,9 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  73 +++++++-
  kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  46 +++++
+ kernel/sched/rt.c             |  51 ++++++
  kernel/sched/syscalls.c       |   8 +
- 10 files changed, 598 insertions(+), 7 deletions(-)
+ 10 files changed, 603 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -717,7 +717,7 @@ index 000000000..fa7843156
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..548b730f2 100644
+index 0cbee0318..5763b9b64 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -756,7 +756,7 @@ index 0cbee0318..548b730f2 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1478,44 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1478,49 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -782,19 +782,24 @@ index 0cbee0318..548b730f2 100644
 +			int old_prio = p->prio;
 +			int qprio = infinity_rt_effective_prio(
 +					p->normal_prio, &p->infinity);
-+			if (qprio != old_prio) {
-+				queue = array->queue + qprio;
-+				/* Move first, then audit the bitmap */
-+				if (head)
-+					list_move(&rt_se->run_list, queue);
-+				else
-+					list_move_tail(&rt_se->run_list, queue);
-+				if (list_empty(array->queue + old_prio))
-+					__clear_bit(old_prio,
++			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
++				int old_prio = p->prio;
++				int qprio = infinity_rt_effective_prio(
++						p->normal_prio, &p->infinity);
++				if (qprio != old_prio) {
++					queue = array->queue + qprio;
++					/* Move first, then audit the bitmap */
++					if (head)
++						list_move(&rt_se->run_list, queue);
++					else
++						list_move_tail(&rt_se->run_list, queue);
++					if (list_empty(array->queue + old_prio))
++						__clear_bit(old_prio,
 +						    array->bitmap);
-+				__set_bit(qprio, array->bitmap);
-+				p->prio = qprio;
-+				return;
++					__set_bit(qprio, array->bitmap);
++					p->prio = qprio;
++					return;
++				}
 +			}
 +		}
 +

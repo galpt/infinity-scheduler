@@ -1,4 +1,4 @@
-From 9606b742253c4f9e7526a3227840662193b83d85 Mon Sep 17 00:00:00 2001
+From 4af5b3e7598e5babedf949e0153d9c373b7765ed Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:20:07 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -40,9 +40,9 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  73 +++++++-
  kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  38 ++++
+ kernel/sched/rt.c             |  49 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 573 insertions(+), 6 deletions(-)
+ 10 files changed, 584 insertions(+), 6 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -723,7 +723,7 @@ index 000000000..fa7843156
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..8a604acde 100644
+index 4ee8faf01..20b660e1e 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -762,7 +762,7 @@ index 4ee8faf01..8a604acde 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1483,36 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1483,47 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -778,21 +778,32 @@ index 4ee8faf01..8a604acde 100644
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
-+			int old_prio = p->prio;
-+			int qprio = infinity_rt_effective_prio(
-+					p->normal_prio, &p->infinity);
-+			if (qprio != old_prio) {
-+				queue = array->queue + qprio;
-+				/* Move first, then audit the bitmap */
-+				if (head)
-+					list_move(&rt_se->run_list, queue);
-+				else
-+					list_move_tail(&rt_se->run_list, queue);
-+				if (list_empty(array->queue + old_prio))
-+					__clear_bit(old_prio, array->bitmap);
-+				__set_bit(qprio, array->bitmap);
-+				p->prio = qprio;
-+				return;
++			/*
++			 * Restrict priority modulation to the root task group.
++			 * Nested systemd cgroups have parent group entities that
++			 * read rt_rq->highest_prio.curr from child runqueues.
++			 * Mutating p->prio on a child task without updating the
++			 * parent tracking state desynchronizes the cgroup
++			 * hierarchy, causing pick_next_rt_entity() to dereference
++			 * an empty list on a stale bitmap bit.
++			 */
++			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
++				int old_prio = p->prio;
++				int qprio = infinity_rt_effective_prio(
++						p->normal_prio, &p->infinity);
++				if (qprio != old_prio) {
++					queue = array->queue + qprio;
++					if (head)
++						list_move(&rt_se->run_list, queue);
++					else
++						list_move_tail(&rt_se->run_list, queue);
++					if (list_empty(array->queue + old_prio))
++						__clear_bit(old_prio,
++							    array->bitmap);
++					__set_bit(qprio, array->bitmap);
++					p->prio = qprio;
++					return;
++				}
 +			}
 +		}
 +
