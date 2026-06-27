@@ -177,16 +177,24 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 		slice = slice * (100ULL - pct * 3ULL / 4ULL) / 100ULL;
 	}
 
-	if (slice < INFINITY_SLICE_MIN_NS)
-		slice = INFINITY_SLICE_MIN_NS;
-	if (slice > INFINITY_BUDGET_MAX_NS)
-		slice = INFINITY_BUDGET_MAX_NS;
-
+	/* Apply SMT scaling before the safety floor, otherwise a 400us
+	 * minimum slice would be divided to 25us on an SMT-16 core. */
 	if (on_smt_secondary) {
 		unsigned long div = READ_ONCE(infinity_tune_smt_divisor);
 		if (div > 1)
 			slice = div64_u64(slice, div);
 	}
+
+	/* Safety bounds — always last.  Note that the carriage ceiling
+	 * (INFINITY_CARRIAGE_NS_MAX = 100ms) is intentionally wider than
+	 * the slice cap (2ms) so that multi-task fairness scales correctly;
+	 * carriage_ns *only* affects the per-task share divided by nr_runnable,
+	 * and the 2ms budget cap prevents any single task from exceeding
+	 * the design target regardless of the sysctl setting. */
+	if (slice < INFINITY_SLICE_MIN_NS)
+		slice = INFINITY_SLICE_MIN_NS;
+	if (slice > INFINITY_BUDGET_MAX_NS)
+		slice = INFINITY_BUDGET_MAX_NS;
 
 	return slice;
 }
@@ -229,8 +237,10 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/* decay = min(sleep_ns * alpha / 1ms, FP_ONE) */
-	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000000ULL;
+	/* Scale up by FP_ONE before dividing to preserve precision
+	 * for micro-sleeps shorter than 62.5us. */
+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE,
+		       1000000ULL);
 	if (dec > INFINITY_FP_ONE)
 		dec = INFINITY_FP_ONE;
 

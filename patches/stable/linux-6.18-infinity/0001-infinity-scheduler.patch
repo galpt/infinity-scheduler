@@ -1,4 +1,4 @@
-From f064e9b26220c0cbc6356bd13f72fcb068127332 Mon Sep 17 00:00:00 2001
+From c8c45c68c2003c07ea236b9ba94241d85d6231ab Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -12,11 +12,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  64 ++++++-
- kernel/sched/infinity_sched.c | 308 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 318 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  45 ++++-
+ kernel/sched/rt.c             |  46 ++++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 564 insertions(+), 8 deletions(-)
+ 10 files changed, 575 insertions(+), 8 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -241,10 +241,10 @@ index 5b7523242..92098e6ae 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..fb093f36f
+index 000000000..e4ae4a141
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,318 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -424,16 +424,24 @@ index 000000000..fb093f36f
 +		slice = slice * (100ULL - pct * 3ULL / 4ULL) / 100ULL;
 +	}
 +
-+	if (slice < INFINITY_SLICE_MIN_NS)
-+		slice = INFINITY_SLICE_MIN_NS;
-+	if (slice > INFINITY_BUDGET_MAX_NS)
-+		slice = INFINITY_BUDGET_MAX_NS;
-+
++	/* Apply SMT scaling before the safety floor, otherwise a 400us
++	 * minimum slice would be divided to 25us on an SMT-16 core. */
 +	if (on_smt_secondary) {
 +		unsigned long div = READ_ONCE(infinity_tune_smt_divisor);
 +		if (div > 1)
 +			slice = div64_u64(slice, div);
 +	}
++
++	/* Safety bounds — always last.  Note that the carriage ceiling
++	 * (INFINITY_CARRIAGE_NS_MAX = 100ms) is intentionally wider than
++	 * the slice cap (2ms) so that multi-task fairness scales correctly;
++	 * carriage_ns *only* affects the per-task share divided by nr_runnable,
++	 * and the 2ms budget cap prevents any single task from exceeding
++	 * the design target regardless of the sysctl setting. */
++	if (slice < INFINITY_SLICE_MIN_NS)
++		slice = INFINITY_SLICE_MIN_NS;
++	if (slice > INFINITY_BUDGET_MAX_NS)
++		slice = INFINITY_BUDGET_MAX_NS;
 +
 +	return slice;
 +}
@@ -476,8 +484,10 @@ index 000000000..fb093f36f
 +	if (sleep_ns == 0)
 +		return;
 +
-+	/* decay = min(sleep_ns * alpha / 1ms, FP_ONE) */
-+	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000000ULL;
++	/* Scale up by FP_ONE before dividing to preserve precision
++	 * for micro-sleeps shorter than 62.5us. */
++	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE,
++		       1000000ULL);
 +	if (dec > INFINITY_FP_ONE)
 +		dec = INFINITY_FP_ONE;
 +
@@ -689,7 +699,7 @@ index 000000000..4e8ff09e7
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..51cc06dfb 100644
+index 7936d4333..26850a8fe 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -722,7 +732,7 @@ index 7936d4333..51cc06dfb 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1476,43 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1476,44 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -759,6 +769,7 @@ index 7936d4333..51cc06dfb 100644
 +					__clear_bit(old_prio,
 +						    array->bitmap);
 +				__set_bit(qprio, array->bitmap);
++				rt_se->prio = qprio;
 +				return;
 +			}
 +		}
