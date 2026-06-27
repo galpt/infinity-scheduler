@@ -1,4 +1,4 @@
-From 91142483d95b7d432dd2ed7417201c9660c9bf20 Mon Sep 17 00:00:00 2001
+From 76d3698279b2677af1f9e898236137ea59d54927 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -11,12 +11,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  73 +++++++-
+ kernel/sched/fair.c           |  76 +++++++-
  kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  51 ++++++
+ kernel/sched/rt.c             |  53 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 587 insertions(+), 7 deletions(-)
+ 10 files changed, 592 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -109,7 +109,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..acc88cdbb 100644
+index 5b7523242..81447cbc9 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -142,7 +142,7 @@ index 5b7523242..acc88cdbb 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1047,9 +1059,28 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1047,9 +1059,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -161,8 +161,11 @@ index 5b7523242..acc88cdbb 100644
 +#ifdef CONFIG_SCHED_SMT
 +			{
 +				int cpu = cpu_of(rq_of(cfs_rq));
-+				is_smt = cpu != cpumask_first(
-+					topology_sibling_cpumask(cpu));
++				const struct cpumask *sibling_mask =
++					topology_sibling_cpumask(cpu);
++				if (sibling_mask && !cpumask_empty(sibling_mask))
++					is_smt = cpu != cpumask_first(
++						sibling_mask);
 +			}
 +#endif
 +			se->slice = infinity_slice(cfs_rq->nr_queued, is_smt,
@@ -174,7 +177,7 @@ index 5b7523242..acc88cdbb 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1224,6 +1255,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1224,6 +1258,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -185,7 +188,7 @@ index 5b7523242..acc88cdbb 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  	update_min_vruntime(cfs_rq);
-@@ -5223,6 +5258,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5223,6 +5261,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -200,7 +203,7 @@ index 5b7523242..acc88cdbb 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5566,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5569,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
  
  	se = pick_eevdf(cfs_rq);
@@ -212,7 +215,7 @@ index 5b7523242..acc88cdbb 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6967,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6970,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -227,7 +230,7 @@ index 5b7523242..acc88cdbb 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7216,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7219,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -236,7 +239,7 @@ index 5b7523242..acc88cdbb 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13137,6 +13195,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13198,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -705,7 +708,7 @@ index 000000000..fa7843156
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..526bcf3f1 100644
+index 7936d4333..09e72845a 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -725,16 +728,18 @@ index 7936d4333..526bcf3f1 100644
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1435,6 +1438,8 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1435,6 +1438,10 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	if (flags & ENQUEUE_WAKEUP)
  		rt_se->timeout = 0;
  
-+	p->prio = p->normal_prio;
++	/* Only restore if demoted by Infinity; PI-boosted tasks (prio < normal_prio) are preserved */
++	if (p->prio > p->normal_prio)
++		p->prio = p->normal_prio;
 +
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1454,6 +1459,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1461,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -744,7 +749,7 @@ index 7936d4333..526bcf3f1 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1478,49 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1480,49 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
