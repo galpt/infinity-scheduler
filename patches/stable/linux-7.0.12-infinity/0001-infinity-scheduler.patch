@@ -1,4 +1,4 @@
-From 4f430cc0243bf416a079b8048081439124e43a42 Mon Sep 17 00:00:00 2001
+From 7010048ee0fc9ecbafa00b5374a8718fcdcd5b78 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:23:38 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -14,9 +14,9 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  64 ++++++-
  kernel/sched/infinity_sched.c | 308 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  39 ++++-
+ kernel/sched/rt.c             |  45 ++++-
  kernel/sched/syscalls.c       |   8 +
- 10 files changed, 574 insertions(+), 8 deletions(-)
+ 10 files changed, 580 insertions(+), 8 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -253,7 +253,7 @@ index 3bce48ad0..b177bee93 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..22e18b0dc
+index 000000000..fb093f36f
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,308 @@
@@ -488,8 +488,8 @@ index 000000000..22e18b0dc
 +	if (sleep_ns == 0)
 +		return;
 +
-+	/* decay = min(sleep_ns * alpha / 1us, FP_ONE) */
-+	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000ULL;
++	/* decay = min(sleep_ns * alpha / 1ms, FP_ONE) */
++	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000000ULL;
 +	if (dec > INFINITY_FP_ONE)
 +		dec = INFINITY_FP_ONE;
 +
@@ -701,7 +701,7 @@ index 000000000..4e8ff09e7
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..c6d44dcce 100644
+index 0cbee0318..59d040c5a 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -734,7 +734,7 @@ index 0cbee0318..c6d44dcce 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1476,37 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1476,43 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -762,10 +762,16 @@ index 0cbee0318..c6d44dcce 100644
 +					old_prio, &p->infinity);
 +			if (qprio != old_prio) {
 +				queue = array->queue + qprio;
++				/* Move first, then audit the bitmap */
++				if (head)
++					list_move(&rt_se->run_list, queue);
++				else
++					list_move_tail(&rt_se->run_list, queue);
 +				if (list_empty(array->queue + old_prio))
 +					__clear_bit(old_prio,
 +						    array->bitmap);
 +				__set_bit(qprio, array->bitmap);
++				return;
 +			}
 +		}
 +

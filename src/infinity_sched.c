@@ -229,8 +229,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/* decay = min(sleep_ns * alpha / 1us, FP_ONE) */
-	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000ULL;
+	/* decay = min(sleep_ns * alpha / 1ms, FP_ONE) */
+	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000000ULL;
 	if (dec > INFINITY_FP_ONE)
 		dec = INFINITY_FP_ONE;
 
