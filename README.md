@@ -2,6 +2,9 @@
 
 A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
 
+> [!TIP]
+> The [v3 branch](https://github.com/galpt/infinity-scheduler/tree/v3) builds on this with futex-waiting bypass in `pick_eevdf()` for faster wakeup preemption, EMA-modulated wakeup vslice for shorter interactive-task deadlines, and RT queue placement modulation. It supports 6.18, 7.0.12, and 7.1.
+
 ## Project structure
 
 ```
