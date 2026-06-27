@@ -221,6 +221,36 @@ Scheduler-specific metrics in their respective units for Category 2.
 | schbench avg RPS | 1916.23 | 1836.00 | 1916.73 | 1667.90 | ↑ higher is better |
 | cyclictest max latency | 360.00 µs | 1191.00 µs | 438.00 µs | 499.00 µs | ↓ lower is better |
 
+## Raw Results (v3)
+
+Infinity Scheduler v3 only. Cross-scheduler comparison was not repeated (see note above). y-cruncher pi 1b was intentionally skipped.
+
+### Category 1 — Throughput & Compilation
+
+| Benchmark | Infinity v3 |
+|-----------|-------------|
+| stress-ng cpu-cache-mem | 15.04 |
+| y-cruncher pi 1b | skipped |
+| perf sched msg fork thread | 11.553 |
+| perf memcpy | 10.41 |
+| namd 92K atoms | 52.69 |
+| calculating prime numbers | 13.081 |
+| argon2 hashing | 7.82 |
+| ffmpeg compilation | 67.52 |
+| xz compression | 54.87 |
+| kernel defconfig | 134.94 |
+| blender render | 102.62 |
+| x265 encoding | 23.82 |
+| **Total time (s)** | **494.36** |
+
+### Category 2 — Scheduler Latency
+
+| Metric | Infinity v3 | Direction |
+|--------|-------------|-----------|
+| schbench P99 latency | 239.00 µs | ↓ lower is better |
+| schbench avg RPS | 1915.03 | ↑ higher is better |
+| cyclictest max latency | 462.00 µs | ↓ lower is better |
+
 ## Visualizations
 
 The `categorized_comparison_All.png` chart in each `results-all/` directory shows two sections per kernel:
