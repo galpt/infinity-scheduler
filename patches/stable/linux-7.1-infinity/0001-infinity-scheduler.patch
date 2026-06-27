@@ -1,8 +1,34 @@
-From 538d6719a9474359d9c74c3d477c44b88fc3c941 Mon Sep 17 00:00:00 2001
+From dad08875283958dcaffbffff6c44e27ef8ac22af Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 08:44:49 +0700
+Date: Sat, 27 Jun 2026 13:20:07 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
- + RT hooks
+ + RT hooks + stability fixes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fix 1 — RT bitmap sync (kernel/sched/rt.c):
+  Infinity_rt_effective_prio() changes the queue placement but never
+  updated the RT bitmap.  After moving a task to a new priority queue,
+  the old queue's bit remained set in array->bitmap.  On the next
+  pick_next_rt_entity(), the scheduler read the stale bitmap, found
+  the old queue's bit set, and dereferenced the empty list head —
+  wild pointer, hard lockup.
+  Fix: __clear_bit(old_prio) if queue emptied, __set_bit(qprio).
+
+Fix 2 — pick_next_entity NULL guard (kernel/sched/fair.c):
+  When the futex-waiting bypass falls through and pick_eevdf() finds
+  no eligible task, it returns NULL.  The NULL propagated through
+  pick_next_entity() -> pick_next_task_fair(), causing the scheduler
+  to select the idle thread while tasks are still queued.
+  Fix: fall back to __pick_first_entity() before returning NULL.
+
+Fix 3 — micro-sleep EMA decay (infinity_sched.c):
+  infinity_wakeup() used a per-tick decay loop with 256us granularity.
+  y-cruncher threads synchronize with 5-50us sleeps — shorter than
+  one tick.  ticks = 0, decay never fired, EMA pinned to 100%, slice
+  crushed to floor, preemption storm.
+  Fix: continuous decay proportional to sleep_ns, no loop.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -11,12 +37,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  61 ++++++-
- kernel/sched/infinity_sched.c | 305 ++++++++++++++++++++++++++++++++++
+ kernel/sched/fair.c           |  64 ++++++-
+ kernel/sched/infinity_sched.c | 308 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  26 ++-
+ kernel/sched/rt.c             |  33 +++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 538 insertions(+), 7 deletions(-)
+ 10 files changed, 551 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -101,7 +127,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec186f..c22a68a30 100644
+index 3ebec186f..2913a10c2 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -184,16 +210,19 @@ index 3ebec186f..c22a68a30 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5783,6 +5818,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5783,6 +5818,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
-+	if (!se)
-+		return NULL;
++	if (!se) {
++		se = __pick_first_entity(cfs_rq);
++		if (!se)
++			return NULL;
++	}
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7235,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7198,6 +7238,13 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -207,7 +236,7 @@ index 3ebec186f..c22a68a30 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7474,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7430,6 +7477,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -216,7 +245,7 @@ index 3ebec186f..c22a68a30 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13759,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,6 +13762,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -230,10 +259,10 @@ index 3ebec186f..c22a68a30 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..bd7144155
+index 000000000..2c41289da
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,308 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -454,20 +483,23 @@ index 000000000..bd7144155
 +
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
-+	u64 ticks = sleep_ns / (INFINITY_FP_ONE * 1000);
-+	int i;
++	/*
++	 * Continuous EMA decay proportional to sleep duration.
++	 * Uses fine-grained scaling instead of per-tick loop so that
++	 * sub-256us micro-sleeps (common in barrier-synchronized
++	 * workloads like y-cruncher) register proportional decay.
++	 */
++	u64 dec;
 +
-+	if (ticks == 0)
++	if (sleep_ns == 0)
 +		return;
 +
-+	/* Cap iterations to prevent unbounded loops */
-+	if (ticks > 256)
-+		ticks = 256;
++	/* decay = min(sleep_ns * alpha / 1us, FP_ONE) */
++	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000ULL;
++	if (dec > INFINITY_FP_ONE)
++		dec = INFINITY_FP_ONE;
 +
-+	/* Decay EMA toward 0 for each tick slept */
-+	for (i = 0; i < ticks; i++)
-+		ctx->ema = ctx->ema - (ctx->ema * INFINITY_EMA_ALPHA /
-+					INFINITY_FP_ONE);
++	ctx->ema = ctx->ema - (ctx->ema * dec / INFINITY_FP_ONE);
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -675,7 +707,7 @@ index 000000000..4e8ff09e7
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..c311cf116 100644
+index 4ee8faf01..0168885cf 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -708,7 +740,7 @@ index 4ee8faf01..c311cf116 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1481,24 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1481,31 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -724,10 +756,17 @@ index 4ee8faf01..c311cf116 100644
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
++			int old_prio = rt_se_prio(rt_se);
 +			int qprio = infinity_rt_effective_prio(
-+					rt_se_prio(rt_se), &p->infinity);
-+			if (qprio != rt_se_prio(rt_se))
++					old_prio, &p->infinity);
++			if (qprio != old_prio) {
 +				queue = array->queue + qprio;
++				/* Sync bitmap: clear old queue if empty,
++				 * set new queue bit */
++				if (list_empty(array->queue + old_prio))
++					__clear_bit(old_prio, array->bitmap);
++				__set_bit(qprio, array->bitmap);
++			}
 +		}
 +
  		if (head)

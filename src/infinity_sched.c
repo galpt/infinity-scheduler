@@ -218,20 +218,23 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 {
-	u64 ticks = sleep_ns / (INFINITY_FP_ONE * 1000);
-	int i;
+	/*
+	 * Continuous EMA decay proportional to sleep duration.
+	 * Uses fine-grained scaling instead of per-tick loop so that
+	 * sub-256us micro-sleeps (common in barrier-synchronized
+	 * workloads like y-cruncher) register proportional decay.
+	 */
+	u64 dec;
 
-	if (ticks == 0)
+	if (sleep_ns == 0)
 		return;
 
-	/* Cap iterations to prevent unbounded loops */
-	if (ticks > 256)
-		ticks = 256;
+	/* decay = min(sleep_ns * alpha / 1us, FP_ONE) */
+	dec = (sleep_ns * INFINITY_EMA_ALPHA) / 1000ULL;
+	if (dec > INFINITY_FP_ONE)
+		dec = INFINITY_FP_ONE;
 
-	/* Decay EMA toward 0 for each tick slept */
-	for (i = 0; i < ticks; i++)
-		ctx->ema = ctx->ema - (ctx->ema * INFINITY_EMA_ALPHA /
-					INFINITY_FP_ONE);
+	ctx->ema = ctx->ema - (ctx->ema * dec / INFINITY_FP_ONE);
 }
 
 /* ------------------------------------------------------------------ */
