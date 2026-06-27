@@ -1,4 +1,4 @@
-From 834578a32d473f1d779ad2894a7d319ea3f6c66e Mon Sep 17 00:00:00 2001
+From e33e6442a932c58aa21378033295d3bf4988af2d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -250,7 +250,7 @@ index 5b7523242..acc88cdbb 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..c4f145f53
+index 000000000..3bbf0e687
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,315 @@
@@ -492,7 +492,7 @@ index 000000000..c4f145f53
 +		return;
 +
 +	/* Fixed-point division against a 1ms time constant */
-+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 1000000ULL);
++	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 20000000ULL);
 +	if (dec > INFINITY_FP_ONE)
 +		dec = INFINITY_FP_ONE;
 +
