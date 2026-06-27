@@ -1,4 +1,4 @@
-From 2acb660aed171e359bd8e9e978ee035b5cb00599 Mon Sep 17 00:00:00 2001
+From 834578a32d473f1d779ad2894a7d319ea3f6c66e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -11,12 +11,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  65 ++++++-
+ kernel/sched/fair.c           |  73 +++++++-
  kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  47 +++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 575 insertions(+), 7 deletions(-)
+ 10 files changed, 583 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -109,7 +109,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..33f31fc31 100644
+index 5b7523242..acc88cdbb 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -142,7 +142,7 @@ index 5b7523242..33f31fc31 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1047,9 +1059,20 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1047,9 +1059,28 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -157,7 +157,15 @@ index 5b7523242..33f31fc31 100644
 +	if (!se->custom_slice) {
 +		if (entity_is_task(se)) {
 +			struct task_struct *p__ = task_of(se);
-+			se->slice = infinity_slice(cfs_rq->nr_queued, false,
++			bool is_smt = false;
++#ifdef CONFIG_SCHED_SMT
++			{
++				int cpu = cpu_of(rq_of(cfs_rq));
++				is_smt = cpu != cpumask_first(
++					topology_sibling_cpumask(cpu));
++			}
++#endif
++			se->slice = infinity_slice(cfs_rq->nr_queued, is_smt,
 +						   p__->infinity.ema);
 +		} else {
 +			se->slice = sysctl_sched_base_slice;
@@ -166,7 +174,7 @@ index 5b7523242..33f31fc31 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1224,6 +1247,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1224,6 +1255,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -177,7 +185,7 @@ index 5b7523242..33f31fc31 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  	update_min_vruntime(cfs_rq);
-@@ -5223,6 +5250,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5223,6 +5258,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -192,7 +200,7 @@ index 5b7523242..33f31fc31 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5558,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5566,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
  
  	se = pick_eevdf(cfs_rq);
@@ -204,7 +212,7 @@ index 5b7523242..33f31fc31 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6959,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6967,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -219,7 +227,7 @@ index 5b7523242..33f31fc31 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7208,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7216,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -228,7 +236,7 @@ index 5b7523242..33f31fc31 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13137,6 +13187,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13195,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -242,7 +250,7 @@ index 5b7523242..33f31fc31 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..c07521f92
+index 000000000..c4f145f53
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,315 @@
@@ -484,7 +492,7 @@ index 000000000..c07521f92
 +		return;
 +
 +	/* Fixed-point division against a 1ms time constant */
-+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA, 1000000ULL);
++	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 1000000ULL);
 +	if (dec > INFINITY_FP_ONE)
 +		dec = INFINITY_FP_ONE;
 +
