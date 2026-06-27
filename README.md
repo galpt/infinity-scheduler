@@ -3,7 +3,7 @@
 A fair-share CPU scheduler with accelerating budget consumption — the more a task runs, the faster its budget depletes. Interactive tasks reset this effect on wakeup. Built into CFS/EEVDF, no BPF or sched-ext dependency.
 
 > [!TIP]
-> Skip the `main`, `v2`, and `v2-rt` branches. The [v3 branch](https://github.com/galpt/infinity-scheduler/tree/v3) is the active development branch with a more refined implementation — stable under heavy workloads, GPG-signed commits, and fully functional for daily use on 6.18, 7.0.12, and 7.1 kernels.
+> Skip the `main`, `v2`, and `v2-rt` branches. The [v3 branch](https://github.com/galpt/infinity-scheduler/tree/v3) is the active development branch with a more refined implementation — stable under heavy workloads, and fully functional for daily use on 6.18, 7.0.12, and 7.1 kernels.
 
 ## Project structure
 
