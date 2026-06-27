@@ -206,18 +206,16 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
 	/*
-	 * EMA step: converge toward BUDGET_MAX while running.
-	 *
-	 * Each call advances the EMA by α/256 of the remaining distance
-	 * to BUDGET_MAX.  The δ parameter is not used in the step —
-	 * the EMA converges by a fixed fraction per invocation, not per
-	 * unit of wall time.  This is correct because update_curr() is
-	 * the natural scheduling-frequency anchor: it fires at least
-	 * once per tick on every running task.
+	 * Scale the EMA step proportionally to actual runtime.
+	 * A task that runs for a full tick advances by α/256 of the
+	 * remaining distance to BUDGET_MAX; a partial tick advances
+	 * proportionally less.  This prevents context-switch frequency
+	 * from biasing the EMA.
 	 */
-	ctx->ema = ctx->ema + (INFINITY_BUDGET_MAX_NS - ctx->ema) *
-		   INFINITY_EMA_ALPHA / INFINITY_FP_ONE;
-	(void)delta_ns;
+	u64 step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
+			   INFINITY_EMA_ALPHA,
+			   INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+	ctx->ema += step;
 }
 
 /* ------------------------------------------------------------------ */
@@ -237,10 +235,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/* Scale up by FP_ONE before dividing to preserve precision
-	 * for micro-sleeps shorter than 62.5us. */
-	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE,
-		       1000000ULL);
+	/* Decay proportional to sleep_ns; 16ms of sleep = full decay */
+	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA, 1000000ULL);
 	if (dec > INFINITY_FP_ONE)
 		dec = INFINITY_FP_ONE;
 
@@ -313,6 +309,6 @@ u8 infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx)
 {
 	u64 decay = div64_u64(ctx->rt_ema * INFINITY_RT_PRIO_RANGE,
 			      INFINITY_RT_BUDGET_NS);
-	s16 adj = (s16)base_prio - (s16)decay;
-	return (u8)max((int)adj, INFINITY_RT_PRIO_FLOOR);
+	s16 adj = (s16)base_prio + (s16)decay;
+	return (u8)min((int)adj, INFINITY_RT_PRIO_FLOOR);
 }
