@@ -58,8 +58,8 @@
 /* Hard constants (not user-tunable)                                   */
 /* ------------------------------------------------------------------ */
 
-/** Minimum slice floor (200us). */
-#define INFINITY_SLICE_MIN_NS		200000ULL
+/** Minimum slice floor (400us). */
+#define INFINITY_SLICE_MIN_NS		400000ULL
 
 /** Maximum budget (2ms). */
 #define INFINITY_BUDGET_MAX_NS		2000000ULL
