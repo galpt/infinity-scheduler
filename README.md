@@ -123,6 +123,9 @@ This behavior is the mathematical consequence of the v3 design. It is not a bug 
 
 > Infinity v3 trades raw synthetic throughput for real-world system responsiveness.
 
+> [!IMPORTANT]
+> The trade-off described above is intentional. Infinity v3 is designed to keep the system responsive under heavy compute loads by capping scheduling windows to 400 µs. This guarantees that interactive tasks (mouse input, audio, display compositor) never wait more than 400 µs to be scheduled — even under full AVX-512 saturation.
+
 While the y-cruncher benchmark completes faster on EEVDF, BORE, or BMQ, those schedulers achieve it by allowing heavy compute threads to run uninterrupted for 4–6 ms windows. During those windows, interactive tasks (mouse input, display compositor, audio server) must wait in line. Infinity v3 caps the window to 400 µs, forcing frequent scheduler check-ins. This means a high-priority interactive task never waits more than 400 µs to be scheduled — the desktop remains completely fluid even under full AVX-512 saturation.
 
 ```
@@ -133,13 +136,13 @@ Infinity Scheduler v3:
 [ Math (400µs) ][ Mouse ]...[ Math (400µs) ]         → slower benchmark, fluid UI
 ```
 
-Cross-scheduler comparison for v3 was not repeated because the BORE, BMQ, and tuned EEVDF results from the v2-rt benchmarks are representative of their behavior. These schedulers are mature and stable — running them again would produce near-identical results, and the focus of v3 is the Infinity scheduler's own evolution.
+> [!NOTE]
+> Cross-scheduler comparison for v3 was not repeated because the BORE, BMQ, and tuned EEVDF results from the v2-rt benchmarks are representative of their behavior. These schedulers are mature and stable — running them again would produce near-identical results, and the focus of v3 is the Infinity scheduler's own evolution.
 
-## Caveats
-
-The benchmark results in this archive cover throughput, compilation, rendering, and latency tests. These are primarily compute-bound and fixed-duration workloads that converge toward steady-state CPU consumption. The Infinity scheduler's EMA mechanism is designed to show its strength in mixed-interactive scenarios — wakeup storms, fork bursts, gaming, and real-time multimedia — where tasks with different sleep/wake patterns compete for the same core. The benchmark results may not fully capture these benefits.
-
-The Infinity scheduler is under active development. The source code (~430 lines for the core algorithm) is concise enough to review in full for anyone evaluating it for their use case.
+> [!WARNING]
+> The benchmark results in this archive cover throughput, compilation, rendering, and latency tests. These are primarily compute-bound and fixed-duration workloads that converge toward steady-state CPU consumption. The Infinity scheduler's EMA mechanism is designed to show its strength in mixed-interactive scenarios — wakeup storms, fork bursts, gaming, and real-time multimedia — where tasks with different sleep/wake patterns compete for the same core. The benchmark results may not fully capture these benefits.
+>
+> The Infinity scheduler is under active development. The source code (~430 lines for the core algorithm) is concise enough to review in full for anyone evaluating it for their use case.
 
 ## Hardware (v2-rt benchmarks)
 
@@ -150,6 +153,7 @@ The Infinity scheduler is under active development. The source code (~430 lines 
 | GPU | Radeon Graphics (integrated) |
 | Storage | NVMe SSD |
 
+> [!NOTE]
 > The v3 benchmark used the same hardware.
 
 ## Kernels Tested (v2-rt)
