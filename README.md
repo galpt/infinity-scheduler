@@ -80,7 +80,7 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `update_curr()` | EMA budget consumption via `infinity_consume()` — the core formula |
 | `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
 | `dequeue_task_fair()` (sleep) | Records sleep timestamp for wakeup decay |
-| `enqueue_task_rt()` (wakeup) | EMA climb via `infinity_rt_consume()` — RT priority modulation |
+| `update_curr_rt()` (tick) | EMA climb via `infinity_rt_consume()` — RT priority modulation |
 | `dequeue_task_rt()` (block/sleep) | EMA decay via `infinity_rt_wakeup()` |
 | `__enqueue_rt_entity()` (v3) | EMA-modulated RT queue placement via `infinity_rt_effective_prio()` |
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
