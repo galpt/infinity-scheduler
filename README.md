@@ -119,14 +119,7 @@ The `y-cruncher pi 1b` benchmark is a pure compute workload that spawns tightly 
 
 3. **Frequent preemption creates overhead.** Dozens of tightly synchronized threads are forced to undergo preemption checks every 400 µs. The resulting context-switching overhead extends the total completion time significantly.
 
-This behavior is the mathematical consequence of the v3 design. It is not a bug — it reflects a deliberate trade-off:
-
-> Infinity v3 trades raw synthetic throughput for real-world system responsiveness.
-
-> [!IMPORTANT]
-> The trade-off described above is intentional. Infinity v3 is designed to keep the system responsive under heavy compute loads by capping scheduling windows to 400 µs. This guarantees that interactive tasks (mouse input, audio, display compositor) never wait more than 400 µs to be scheduled — even under full AVX-512 saturation.
-
-While the y-cruncher benchmark completes faster on EEVDF, BORE, or BMQ, those schedulers achieve it by allowing heavy compute threads to run uninterrupted for 4–6 ms windows. During those windows, interactive tasks (mouse input, display compositor, audio server) must wait in line. Infinity v3 caps the window to 400 µs, forcing frequent scheduler check-ins. This means a high-priority interactive task never waits more than 400 µs to be scheduled — the desktop remains completely fluid even under full AVX-512 saturation.
+This behavior is a deliberate trade-off: Infinity v3 caps scheduling windows to 400 µs, guaranteeing that interactive tasks (mouse input, audio, display compositor, etc.) never wait more than 400 µs to be scheduled — even under full AVX-512 saturation. Where EEVDF, BORE, or BMQ let compute threads run for 4–6 ms windows (fast benchmark, stuttering UI), Infinity v3 forces frequent check-ins (slower benchmark, fluid UI).
 
 ```
 Throughput-oriented schedulers (EEVDF, BORE, BMQ):
