@@ -1,4 +1,4 @@
-From 4cf36b1a2bb4bc7e7f0afbc474318c00964f1cb6 Mon Sep 17 00:00:00 2001
+From 4a1a0e4ad480cd53fef939625c57c991c6e87221 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -47,14 +47,14 @@ index b469878de..8b8906986 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 359a14cc7..daab028c6 100644
+index 359a14cc7..5d98fda68 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
 @@ -131,6 +131,7 @@ struct clone_args {
  #define SCHED_FLAG_DL_OVERRUN		0x04
  #define SCHED_FLAG_KEEP_POLICY		0x08
  #define SCHED_FLAG_KEEP_PARAMS		0x10
-+#define SCHED_FLAG_NO_INFINITY_RT	0x1000
++#define SCHED_FLAG_NO_INFINITY_RT	0x100
  #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
  #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
  
