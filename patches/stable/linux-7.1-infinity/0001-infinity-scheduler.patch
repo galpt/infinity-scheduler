@@ -1,4 +1,4 @@
-From 91e55687b7dd3ac3c764918ea1a79631f70fa2b4 Mon Sep 17 00:00:00 2001
+From 98941661edeba73ae109b93b15e34b5e0e038fbc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:20:07 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -33,7 +33,7 @@ Fix 3 — micro-sleep EMA decay (infinity_sched.c):
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  include/linux/sched.h         |   8 +
- include/uapi/linux/sched.h    |   1 +
+ include/uapi/linux/sched.h    |   4 +-
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
@@ -42,7 +42,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  51 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 589 insertions(+), 6 deletions(-)
+ 10 files changed, 591 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -73,7 +73,7 @@ index ee06cba5c..6aece34a6 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 33a462428..a305ab5f7 100644
+index 33a462428..1aad61dbe 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
 @@ -141,6 +141,7 @@ struct clone_args {
@@ -84,6 +84,16 @@ index 33a462428..a305ab5f7 100644
  #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
  #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
  
+@@ -154,7 +155,8 @@ struct clone_args {
+ 			 SCHED_FLAG_RECLAIM		| \
+ 			 SCHED_FLAG_DL_OVERRUN		| \
+ 			 SCHED_FLAG_KEEP_ALL		| \
+-			 SCHED_FLAG_UTIL_CLAMP)
++			 SCHED_FLAG_UTIL_CLAMP		| \
++			 SCHED_FLAG_NO_INFINITY_RT)
+ 
+ /* Only for sched_getattr() own flag param, if task is SCHED_DEADLINE */
+ #define SCHED_GETATTR_FLAG_DL_DYNAMIC	0x01
 diff --git a/init/init_task.c b/init/init_task.c
 index b5f48ebdc..ddd905698 100644
 --- a/init/init_task.c
