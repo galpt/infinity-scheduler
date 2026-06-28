@@ -1,4 +1,4 @@
-From 76d3698279b2677af1f9e898236137ea59d54927 Mon Sep 17 00:00:00 2001
+From 4cf36b1a2bb4bc7e7f0afbc474318c00964f1cb6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -7,16 +7,16 @@ Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  include/linux/sched.h         |   8 +
- include/uapi/linux/sched.h    |   3 +-
+ include/uapi/linux/sched.h    |   4 +-
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  76 +++++++-
  kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  53 ++++++
+ kernel/sched/rt.c             |  50 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 592 insertions(+), 7 deletions(-)
+ 10 files changed, 590 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -47,23 +47,24 @@ index b469878de..8b8906986 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 359a14cc7..072528722 100644
+index 359a14cc7..daab028c6 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
 @@ -131,6 +131,7 @@ struct clone_args {
  #define SCHED_FLAG_DL_OVERRUN		0x04
  #define SCHED_FLAG_KEEP_POLICY		0x08
  #define SCHED_FLAG_KEEP_PARAMS		0x10
-+#define SCHED_FLAG_NO_INFINITY_RT	0x10
++#define SCHED_FLAG_NO_INFINITY_RT	0x1000
  #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
  #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
  
-@@ -144,6 +145,6 @@ struct clone_args {
+@@ -144,6 +145,7 @@ struct clone_args {
  			 SCHED_FLAG_RECLAIM		| \
  			 SCHED_FLAG_DL_OVERRUN		| \
  			 SCHED_FLAG_KEEP_ALL		| \
 -			 SCHED_FLAG_UTIL_CLAMP)
-+			 SCHED_FLAG_UTIL_CLAMP	| \n			 SCHED_FLAG_NO_INFINITY_RT)
++			 SCHED_FLAG_UTIL_CLAMP	| \
++			 SCHED_FLAG_NO_INFINITY_RT)
  
  #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
@@ -708,7 +709,7 @@ index 000000000..fa7843156
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..09e72845a 100644
+index 7936d4333..49ef7026d 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -749,7 +750,7 @@ index 7936d4333..09e72845a 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1480,49 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1480,46 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -772,9 +773,6 @@ index 7936d4333..09e72845a 100644
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
-+			int old_prio = p->prio;
-+			int qprio = infinity_rt_effective_prio(
-+					p->normal_prio, &p->infinity);
 +			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
 +				int old_prio = p->prio;
 +				int qprio = infinity_rt_effective_prio(
