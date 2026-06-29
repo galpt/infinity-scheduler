@@ -105,7 +105,7 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | Symbol | Meaning |
 |---|---|
 | `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
-| $\alpha = 16$ | Decay factor (used with $\text{FP\_ONE} = 256$, effective $16/256 = 1/16$) |
+| $\alpha = 16$ | Decay factor (with $FP=256$, effective $16/256 = 1/16$) |
 | $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
 | `slice` | Per-task time slice — shrinks as EMA grows (active throttle) |
 
