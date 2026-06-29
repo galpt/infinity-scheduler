@@ -235,7 +235,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/* Fixed-point division against a 1ms time constant */
+	/* dec = min(sleep_ns * alpha * FP_ONE / 20ms, FP_ONE); full decay at 1.25ms */
 	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 20000000ULL);
 	if (dec > INFINITY_FP_ONE)
 		dec = INFINITY_FP_ONE;
