@@ -98,7 +98,8 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | Operation | Formula | Description |
 |---|---|---|
 | While running | $ema \mathrel{+}= (B_{\max} - ema) \times \alpha / 256$ | EMA climbs toward `BUDGET_MAX` |
-| While sleeping | $ema \mathrel{-}= ema \times \alpha / 256$ | EMA decays toward 0 (catch-up on wakeup) |
+| While sleeping | $ema \mathrel{-}= (ema \times dec) / 256$ | Continuous decay proportional to sleep duration |
+| Decay factor | $dec = \min(sleep_{ns} \times \alpha \times 256 / 20\text{ms},\ 256)$ | FP_ONE-scaled, sub-62.5µs micro-sleeps register |
 | Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
 
 | Symbol | Meaning |
