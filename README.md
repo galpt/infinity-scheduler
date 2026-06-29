@@ -2,6 +2,10 @@
 
 A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.  The v3 branch adds EMA-modulated wakeup vslice for shorter interactive-task deadlines, futex-waiting bypass for faster wakeup preemption, RT queue placement modulation, and continuous EMA decay for micro-sleep workloads.
 
+<p align="center">
+  <img src="assets/infinity_v3_arch.png" alt="Infinity v3 Scheduler Architecture" width="800"/>
+</p>
+
 ## Project structure
 
 ```
