@@ -6,9 +6,15 @@
  *
  * Exponential Moving Average based fair scheduling:
  *
- *   While running:  ema = ema + (BUDGET_MAX - ema) * α / 256
- *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
+ *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * 256)
+ *   While sleeping:  dec = min(sleep_ns * α * 256 / 20ms, 256);  ema -= ema * dec / 256
  *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
+ *
+ * The consume step is proportional to actual runtime δ (not a fixed per-tick
+ * step), so the convergence rate tracks wall-clock execution rather than
+ * scheduler invocation frequency.  The decay uses FP_ONE-scaled division so
+ * that sub-62.5µs micro-sleeps register proportional decay instead of
+ * truncating to zero.
  *
  * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
  * deadlines, EMA-modulated RT queue placement via

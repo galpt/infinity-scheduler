@@ -1,4 +1,4 @@
-From fe234e9e1e24d2730adac82340823cd1a9f50684 Mon Sep 17 00:00:00 2001
+From 8a31ba0e2a83cb3fdeef03e93e9c171a00d8f32e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:26:36 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -12,11 +12,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  76 +++++++-
- kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 321 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  50 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 590 insertions(+), 7 deletions(-)
+ 10 files changed, 596 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -47,7 +47,7 @@ index b469878de..8b8906986 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 359a14cc7..5d98fda68 100644
+index 359a14cc7..baa07e92e 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
 @@ -131,6 +131,7 @@ struct clone_args {
@@ -63,7 +63,7 @@ index 359a14cc7..5d98fda68 100644
  			 SCHED_FLAG_DL_OVERRUN		| \
  			 SCHED_FLAG_KEEP_ALL		| \
 -			 SCHED_FLAG_UTIL_CLAMP)
-+			 SCHED_FLAG_UTIL_CLAMP	| \
++			 SCHED_FLAG_UTIL_CLAMP		| \
 +			 SCHED_FLAG_NO_INFINITY_RT)
  
  #endif /* _UAPI_LINUX_SCHED_H */
@@ -254,10 +254,10 @@ index 5b7523242..81447cbc9 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..9dd21f258
+index 000000000..4b671e084
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,321 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -266,9 +266,15 @@ index 000000000..9dd21f258
 + *
 + * Exponential Moving Average based fair scheduling:
 + *
-+ *   While running:  ema = ema + (BUDGET_MAX - ema) * α / 256
-+ *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
++ *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * 256)
++ *   While sleeping:  dec = min(sleep_ns * α * 256 / 20ms, 256);  ema -= ema * dec / 256
 + *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
++ *
++ * The consume step is proportional to actual runtime δ (not a fixed per-tick
++ * step), so the convergence rate tracks wall-clock execution rather than
++ * scheduler invocation frequency.  The decay uses FP_ONE-scaled division so
++ * that sub-62.5µs micro-sleeps register proportional decay instead of
++ * truncating to zero.
 + *
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
 + * deadlines, EMA-modulated RT queue placement via

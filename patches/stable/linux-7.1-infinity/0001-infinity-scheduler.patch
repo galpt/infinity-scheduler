@@ -1,4 +1,4 @@
-From 53d857586b715380575733fcf76226a60bd8f219 Mon Sep 17 00:00:00 2001
+From 9cd60f498303e90ffbe581749c4dbcfe04a9b4fd Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:20:07 +0700
 Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
@@ -38,11 +38,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  76 +++++++-
- kernel/sched/infinity_sched.c | 315 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 321 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
  kernel/sched/rt.c             |  51 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 591 insertions(+), 7 deletions(-)
+ 10 files changed, 597 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -281,10 +281,10 @@ index 3ebec186f..e4d556007 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..9dd21f258
+index 000000000..4b671e084
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,321 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -293,9 +293,15 @@ index 000000000..9dd21f258
 + *
 + * Exponential Moving Average based fair scheduling:
 + *
-+ *   While running:  ema = ema + (BUDGET_MAX - ema) * α / 256
-+ *   While sleeping: ema = ema - ema * α / 256  (via catch-up on wakeup)
++ *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * 256)
++ *   While sleeping:  dec = min(sleep_ns * α * 256 / 20ms, 256);  ema -= ema * dec / 256
 + *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
++ *
++ * The consume step is proportional to actual runtime δ (not a fixed per-tick
++ * step), so the convergence rate tracks wall-clock execution rather than
++ * scheduler invocation frequency.  The decay uses FP_ONE-scaled division so
++ * that sub-62.5µs micro-sleeps register proportional decay instead of
++ * truncating to zero.
 + *
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
 + * deadlines, EMA-modulated RT queue placement via
