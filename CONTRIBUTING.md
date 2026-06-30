@@ -1,9 +1,8 @@
 # Contributing
 
-Thank you for your interest in infinity-scheduler. This project ports a
-fair-share scheduler with accelerating budget consumption into the kernel's
-CFS/EEVDF path. Because the patches modify core scheduler code and must
-compile across multiple kernel versions, contributions need verification.
+Thank you for your interest in infinity-scheduler. Because the patches modify
+core scheduler code and must compile across multiple kernel versions,
+contributions need verification.
 
 ## How to contribute
 
