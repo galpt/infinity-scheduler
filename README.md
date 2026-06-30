@@ -121,14 +121,6 @@ The `y-cruncher pi 1b` benchmark is a pure compute workload that spawns tightly 
 
 This behavior is a deliberate trade-off: Infinity v3 caps scheduling windows to 400 µs, guaranteeing that interactive tasks (mouse input, audio, display compositor, etc.) never wait more than 400 µs to be scheduled — even under full AVX-512 saturation. Where EEVDF, BORE, or BMQ let compute threads run for 4–6 ms windows (fast benchmark, stuttering UI), Infinity v3 forces frequent check-ins (slower benchmark, fluid UI).
 
-```
-Throughput-oriented schedulers (EEVDF, BORE, BMQ):
-[─── Heavy math task (4000µs) ───][ Mouse (10µs) ]  → fast benchmark, stuttering UI
-
-Infinity Scheduler v3:
-[ Math (400µs) ][ Mouse ]...[ Math (400µs) ]         → slower benchmark, fluid UI
-```
-
 > [!NOTE]
 > Cross-scheduler comparison for v3 was not repeated because the BORE, BMQ, and tuned EEVDF results from the v2-rt benchmarks are representative of their behavior. These schedulers are mature and stable — running them again would produce near-identical results, and the focus of v3 is the Infinity scheduler's own evolution.
 
