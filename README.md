@@ -13,6 +13,10 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > edge over sustained CPU-bound tasks. RT tasks now use the same time-based
 > decay formula instead of event-rate-dependent fixed steps.
 
+<p align="center">
+  <img src="assets/infinity_v4_compress.png" alt="Infinity v4 Scheduler Architecture" width="800"/>
+</p>
+
 ## Quick start
 
 ```bash
@@ -42,6 +46,7 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: carriage=
 
 ```
 .
+├── assets/                 Architecture diagram
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/stable/         0001-infinity-scheduler.patch for each kernel version
 ├── tools/                  Install script, build helpers, patch fixers
