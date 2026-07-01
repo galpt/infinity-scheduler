@@ -2,7 +2,16 @@
 
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget; CPU-bound tasks converge toward a minimum. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
 
-v4 completes the transition to a fully continuous, threshold-free design: symmetric time constant for EMA climb and decay (EMA = duty cycle at equilibrium), asymptotic vslice on wakeup (approaches zero for instant scheduling), time-proportional RT decay, and a two-pole EMA correction that distinguishes oscillating interactive workloads from sustained CPU-bound tasks.
+> [!TIP]
+> **TL;DR — v4 is about making the EMA fully continuous (no hard resets, no caps).**
+>
+> Climb and decay now share the same time constant (τ = 32ms), so EMA naturally
+> settles at your task's duty cycle — a game that uses 30% CPU stabilises at 30%
+> EMA and gets exactly the priority it needs, no tuning required. Wakeup vslice
+> approaches zero as EMA drops (instant scheduling on wakeup), and a two-pole
+> correction gives oscillating workloads (games, interactive apps) a systematic
+> edge over sustained CPU-bound tasks. RT tasks now use the same time-based
+> decay formula instead of event-rate-dependent fixed steps.
 
 <p align="center">
   <img src="assets/infinity_v3_arch.png" alt="Infinity v3 Scheduler Architecture" width="800"/>
