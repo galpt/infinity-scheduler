@@ -101,8 +101,6 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `place_entity()` | Asymptotic wakeup vslice via `infinity_wakeup_scale()` — approaches zero at EMA→0 |
 | `pick_eevdf()` | Bypasses protect_slice when current task is waiting on a futex |
 
-The EMA signal drives both scheduling decisions and CPU allocation.  Higher EMA → shorter slice (active throttle via `infinity_slice()`) and faster vruntime advance (allocation scaling via `infinity_vruntime_scale()`), so CPU-bound tasks receive progressively less CPU time.  Low-EMA (interactive) wakeups receive asymptotic vslices that approach zero as EMA→0, placing their deadlines the earliest in the EEVDF tree.  A two-pole correction (effective EMA = raw EMA − dEMA/2) distinguishes oscillating interactive workloads from sustained CPU-bound tasks, giving a systematic boost to interactive tasks during their compute phase.  When a task calls `futex_wait()`, its slice protection is bypassed so interactive wakeups can preempt immediately at the next scheduling point.
-
 ### Formula reference
 
 The EMA is a fully continuous system — both climb and decay use the same time constant, making EMA = duty cycle at equilibrium:
