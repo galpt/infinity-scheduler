@@ -1,6 +1,8 @@
-# infinity-scheduler
+# infinity-scheduler (v4)
 
-A fair-share CPU scheduler where the more a task runs, the faster its budget runs out — interactive tasks that sleep frequently naturally keep their budget. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.  The v3 branch adds EMA-modulated wakeup vslice for shorter interactive-task deadlines, futex-waiting bypass for faster wakeup preemption, RT queue placement modulation, and continuous EMA decay for micro-sleep workloads.
+A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget; CPU-bound tasks converge toward a minimum. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
+
+v4 completes the transition to a fully continuous, threshold-free design: symmetric time constant for EMA climb and decay (EMA = duty cycle at equilibrium), asymptotic vslice on wakeup (approaches zero for instant scheduling), time-proportional RT decay, and a two-pole EMA correction that distinguishes oscillating interactive workloads from sustained CPU-bound tasks.
 
 <p align="center">
   <img src="assets/infinity_v3_arch.png" alt="Infinity v3 Scheduler Architecture" width="800"/>
@@ -77,40 +79,41 @@ EEVDF and RT functions modified by the Infinity scheduler:
 
 | Function | Infinity replacement |
 |---|---|
-| `update_deadline()` | Fair-share slice via `infinity_slice()` |
+| `update_deadline()` | Fair-share slice via `infinity_slice()` — uses effective EMA with two-pole correction |
 | `update_curr()` | EMA budget consumption via `infinity_consume()` + vruntime allocation scaling via `infinity_vruntime_scale()` |
-| `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
+| `enqueue_task_fair()` (wakeup) | EMA decay via `infinity_wakeup()` — symmetric τ with climb, no hard reset |
 | `dequeue_task_fair()` (sleep) | Records sleep timestamp for wakeup decay |
 | `update_curr_rt()` (tick) | EMA climb via `infinity_rt_consume()` — RT priority modulation |
-| `dequeue_task_rt()` (block/sleep) | EMA decay via `infinity_rt_wakeup()` |
-| `__enqueue_rt_entity()` (v3) | EMA-modulated RT queue placement via `infinity_rt_effective_prio()` |
+| `enqueue_task_rt()` (wakeup) | Time-proportional RT EMA decay via `infinity_rt_wakeup()` |
+| `dequeue_task_rt()` (block/sleep) | Records sleep timestamp for wakeup decay |
+| `__enqueue_rt_entity()` | EMA-modulated RT queue placement via `infinity_rt_effective_prio()` |
 | `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
 | `pick_next_entity()` | NULL guard prevents dereference crash |
-| `place_entity()` (v3) | EMA-modulated wakeup vslice via `infinity_wakeup_scale()` |
-| `pick_eevdf()` (v3) | Bypasses protect_slice when current task is waiting on a futex |
+| `place_entity()` | Asymptotic wakeup vslice via `infinity_wakeup_scale()` — approaches zero at EMA→0 |
+| `pick_eevdf()` | Bypasses protect_slice when current task is waiting on a futex |
 
-The EMA signal drives both scheduling decisions and CPU allocation.  Higher EMA → shorter slice (active throttle via `infinity_slice()`) and faster vruntime advance (allocation scaling via `infinity_vruntime_scale()`), so CPU-bound tasks receive progressively less CPU time.  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree, so they are picked sooner at each scheduling point.  When a task calls `futex_wait()`, its slice protection is bypassed so interactive wakeups can preempt immediately at the next scheduling point.
+The EMA signal drives both scheduling decisions and CPU allocation.  Higher EMA → shorter slice (active throttle via `infinity_slice()`) and faster vruntime advance (allocation scaling via `infinity_vruntime_scale()`), so CPU-bound tasks receive progressively less CPU time.  Low-EMA (interactive) wakeups receive asymptotic vslices that approach zero as EMA→0, placing their deadlines the earliest in the EEVDF tree.  A two-pole correction (effective EMA = raw EMA − dEMA/2) distinguishes oscillating interactive workloads from sustained CPU-bound tasks, giving a systematic boost to interactive tasks during their compute phase.  When a task calls `futex_wait()`, its slice protection is bypassed so interactive wakeups can preempt immediately at the next scheduling point.
 
-### EMA consumption formula
+### Formula reference
 
-The EMA replaces the old accumulator + clamp approach with a smooth asymptotic convergence:
+The EMA is a fully continuous system — both climb and decay use the same time constant, making EMA = duty cycle at equilibrium:
 
 | Operation | Formula | Description |
 |---|---|---|
-| While running | $ema \mathrel{+}= (B_{\max} - ema) \times \delta \times \alpha / (B_{\max} \times 256)$ | Proportional to actual runtime $\delta$ |
-| While sleeping | $ema \mathrel{-}= (ema \times dec) / 256$ | Continuous decay proportional to sleep duration |
-| Decay factor | $dec = \min(sleep_{ns} \times \alpha \times 256 / 20\text{ms},\ 256)$ | FP_ONE-scaled, sub-62.5µs micro-sleeps register |
+| Climb (running) | $ema \mathrel{+}= (B_{\max} - ema) \times \delta \times \alpha / (B_{\max} \times FP)$ | Proportional to actual runtime $\delta$ |
+| Decay (sleeping) | $ema \mathrel{-}= ema \times s \times \alpha / (B_{\max} \times FP)$ | Symmetric τ = $B_{\max} \times FP / \alpha$ (32ms), clamp to $ema$ prevents underflow |
+| Effective EMA | $ema_{eff} = ema - \Delta ema / 2$ | Two-pole correction: subtracts half the rate of change |
+| Vruntime scale | $vdelta' = vdelta \times 100 / (100 - pct \times 3 / 4)$ | Higher EMA → faster vruntime → less CPU allocation |
 | Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
-| Vruntime scale | $vdelta = vdelta \times 100 / (100 - pct \times 3 / 4)$ | Higher EMA → faster vruntime → less CPU allocation |
+| Wakeup vslice | $vslice' = vslice \times ema / B_{\max} + 1$ | Asymptotic: approaches 0 as EMA → 0, no cap |
 
 | Symbol | Meaning |
 |---|---|
 | `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
 | $\alpha = 16$ | Decay factor (with $FP=256$, effective $16/256 = 1/16$) |
-| $B_{\max}$ | Maximum budget (2ms) — the EMA never exceeds this bound |
-| `slice` | Per-task time slice — shrinks as EMA grows (active throttle) |
-
-**Example:** A task that runs continuously: after 16 ticks (~64ms), $ema \approx 0.63 \times B_{\max}$, receiving a time slice of $slice = share \times (100 - 63 \times 3/4) / 100 \approx 0.53 \times share$. After 256 ticks, $ema$ converges close to $B_{\max}$ and the slice reaches its 400 µs minimum — but EMA never reaches BUDGET_MAX, the true Limitless.
+| $B_{\max} = 2\text{ms}$ | Maximum budget — the EMA never exceeds this bound |
+| $\tau = 32\text{ms}$ | Time constant — same for climb and decay (symmetric) |
+| $ema_{eff}$ | Effective EMA after two-pole correction — gives oscillating tasks a systematic boost |
 
 ## Tunables
 

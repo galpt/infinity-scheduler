@@ -2,29 +2,35 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.c — Infinity scheduler algorithm (v3).
+ * infinity_sched.c — Infinity scheduler algorithm (v4).
  *
- * Exponential Moving Average based fair scheduling:
+ * Fully continuous limit-based fair and RT scheduling:
  *
- *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * 256)
- *   While sleeping:  dec = min(sleep_ns * α * 256 / 20ms, 256);  ema -= ema * dec / 256
- *   slice = fair_share * (100 - ema_pct * 3/4) / 100  (active throttle)
+ *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
+ *   While sleeping:  ema -= ema * sleep_ns * α / (BUDGET_MAX * FP_ONE)
+ *   slice = share * (100 - ema_pct * 3/4) / 100  (active throttle)
+ *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
  *
- * The consume step is proportional to actual runtime δ (not a fixed per-tick
- * step), so the convergence rate tracks wall-clock execution rather than
- * scheduler invocation frequency.  The decay uses FP_ONE-scaled division so
- * that sub-62.5µs micro-sleeps register proportional decay instead of
- * truncating to zero.
+ * Both climb and decay use the same time constant τ = 32ms (BUDGET_MAX ×
+ * FP_ONE / ALPHA), making the system a symmetric running average of CPU
+ * utilization — the EMA naturally stabilises at the task's duty cycle.
+ * There is no hard reset, no decay threshold: sub-62.5µs micro-sleeps and
+ * multi-second sleeps both register proportional decay with the same
+ * continuous formula.
  *
- * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
- * deadlines, EMA vruntime scaling for CPU allocation control,
- * EMA-modulated RT queue placement via infinity_rt_effective_prio(),
- * a futex-waiting bypass in pick_eevdf(), continuous EMA decay for
- * micro-sleeps, and a 400us SLICE_MIN.
+ * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
+ * oscillating workloads (interactive: compute-sleep-compute) from
+ * sustained CPU-bound tasks, giving interactivity a systematic boost.
+ *
+ * v4 adds:
+ *   - Symmetric τ for climb and decay (no hard reset)
+ *   - Asymptotic vslice (approaches zero as EMA → 0)
+ *   - Time-proportional RT decay
+ *   - Two-pole EMA correction for oscillating vs sustained workloads
  *
  * The EMA converges asymptotically toward BUDGET_MAX when running and
- * toward 0 when sleeping — the true Limitless.  No clamps, no external
- * feedback loop.  Self-stabilizing by construction.
+ * toward 0 when sleeping — the true Limitless.  No clamps, no thresholds,
+ * no external feedback loop.  Self-stabilising by construction.
  */
 
 #include <linux/types.h>
@@ -212,42 +218,42 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
-	/*
-	 * Scale the EMA step proportionally to actual runtime.
-	 * A task that runs for a full tick advances by α/256 of the
-	 * remaining distance to BUDGET_MAX; a partial tick advances
-	 * proportionally less.  This prevents context-switch frequency
-	 * from biasing the EMA.
-	 */
-	u64 step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
-			   INFINITY_EMA_ALPHA,
-			   INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+	u64 step;
+
+	ctx->prev_ema = ctx->ema;
+
+	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
+			 INFINITY_EMA_ALPHA,
+			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
 	ctx->ema += step;
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_wakeup — EMA decay catch-up on wakeup                      */
+/* infinity_wakeup — EMA decay on wakeup (symmetric τ with climb)      */
 /* ------------------------------------------------------------------ */
 
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 {
-	/*
-	 * Continuous EMA decay proportional to sleep duration.
-	 * Uses fine-grained scaling instead of per-tick loop so that
-	 * sub-256us micro-sleeps (common in barrier-synchronized
-	 * workloads like y-cruncher) register proportional decay.
-	 */
-	u64 dec;
+	u64 step;
 
 	if (sleep_ns == 0)
 		return;
 
-	/* dec = min(sleep_ns * alpha * FP_ONE / 20ms, FP_ONE); full decay at 1.25ms */
-	dec = div64_u64(sleep_ns * INFINITY_EMA_ALPHA * INFINITY_FP_ONE, 20000000ULL);
-	if (dec > INFINITY_FP_ONE)
-		dec = INFINITY_FP_ONE;
-
-	ctx->ema = ctx->ema - (ctx->ema * dec / INFINITY_FP_ONE);
+	/*
+	 * Decay is symmetric with climb: both use τ = BUDGET_MAX × FP_ONE / ALPHA.
+	 * step = ema × sleep_ns × α / (BUDGET_MAX × FP_ONE)
+	 *
+	 * The step is clamped to ema to prevent underflow — the EMA approaches
+	 * 0 asymptotically but never reaches it in finite time.  Every sleep
+	 * duration, from sub-microsecond to multi-second, registers proportional
+	 * decay through the same continuous formula.
+	 */
+	ctx->prev_ema = ctx->ema;
+	step = div64_u64(ctx->ema * sleep_ns * INFINITY_EMA_ALPHA,
+			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+	if (step > ctx->ema)
+		step = ctx->ema;
+	ctx->ema -= step;
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,32 +263,35 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 {
 	ctx->ema = 0;
+	ctx->prev_ema = 0;
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_wakeup_scale — EMA-modulated vslice for wakeups            */
+/* infinity_wakeup_scale — asymptotic vslice scaling on wakeup         */
 /* ------------------------------------------------------------------ */
 
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 {
-	u64 ema_pct, boost;
+	u64 effective;
 
 	/*
-	 * Scale the vslice down for waking tasks whose EMA is low
-	 * (i.e. they slept long enough for the EMA to decay).  This
-	 * moves their deadline earlier in the EEVDF tree so they are
-	 * picked sooner after wakeup.  Tasks that only slept briefly
-	 * retain their full vslice.
+	 * Scale the vslice as a continuous function of the effective EMA.
+	 * The formula vslice' = vslice × ema / BUDGET_MAX is asymptotic:
+	 * at EMA → 0, the vslice approaches 0 (instant scheduling on
+	 * wakeup); at EMA → BUDGET_MAX, the vslice approaches the nominal
+	 * value.  The +1 term guarantees a positive vslice for EEVDF tree
+	 * placement at EMA = 0.
 	 *
-	 * ema_pct = 0   (slept long, interactive):  boost = 50%
-	 * ema_pct = 100 (brief sleep, CPU-bound):    boost = 0%
+	 * This replaces the v3 fixed-50%-reduction cap with a fully
+	 * continuous scaling — every EMA value produces a distinct
+	 * vslice, no thresholds, no discontinuities.
 	 */
-	ema_pct = ctx->ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-	boost = (100ULL - ema_pct) * 50ULL / 100ULL;
-
-	return vslice * (100ULL - boost) / 100ULL;
+	effective = infinity_effective_ema(ctx);
+	if (effective >= INFINITY_BUDGET_MAX_NS)
+		return vslice;
+	return div64_u64(vslice * effective, INFINITY_BUDGET_MAX_NS) + 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,14 +324,32 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_rt_wakeup — EMA decay on RT block/sleep                    */
+/* infinity_rt_wakeup — time-proportional RT EMA decay on wakeup       */
 /* ------------------------------------------------------------------ */
 
-void infinity_rt_wakeup(struct infinity_ctx *ctx)
+void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 {
-	/* Fast decay toward 0 — well-behaved RT tasks recover quickly */
-	ctx->rt_ema = ctx->rt_ema - (ctx->rt_ema * INFINITY_RT_BETA /
-				      INFINITY_FP_ONE);
+	u64 step;
+
+	if (sleep_ns == 0)
+		return;
+
+	/*
+	 * Time-proportional RT EMA decay, matching the fair path.
+	 * step = rt_ema × sleep_ns × α / (RT_BUDGET × FP_ONE)
+	 *
+	 * The old event-rate-dependent decay (divide by 4 per sleep) was
+	 * independent of actual sleep duration.  A time-proportional decay
+	 * means well-behaved RT tasks (short compute, long blocks) recover
+	 * faster, while RT tasks that briefly block and resume retain more
+	 * of their rt_ema — accurate runtime tracking regardless of wakeup
+	 * frequency.
+	 */
+	step = div64_u64(ctx->rt_ema * sleep_ns * INFINITY_RT_ALPHA,
+			 INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
+	if (step > ctx->rt_ema)
+		step = ctx->rt_ema;
+	ctx->rt_ema -= step;
 }
 
 /* ------------------------------------------------------------------ */

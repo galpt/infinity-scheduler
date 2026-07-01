@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.h — Infinity scheduler API (v3).
+ * infinity_sched.h — Infinity scheduler API (v4).
  *
  * Architecture:
  *
@@ -13,13 +13,14 @@
  *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
- *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice (v3)
- *   enqueue_task_rt()       ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
- *   dequeue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA decay on block
- *   __enqueue_rt_entity()   ──call──► infinity_rt_effective_prio() — RT queue placement (v3)
+ *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice
+ *   update_curr_rt()        ──call──► infinity_rt_consume()   — RT EMA climb (priority modulation)
+ *   enqueue_task_rt()       ──call──► infinity_rt_wakeup()    — RT EMA time-proportional decay
+ *   dequeue_task_rt()       ──call──► (records last_sleep_ns) — sleep tracking for RT
+ *   __enqueue_rt_entity()   ──call──► infinity_rt_effective_prio() — RT queue placement
  *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
  *   init/init_task.c        ──init──► infinity.{}             — static init
- *   place_entity()          ──call──► infinity_wakeup_scale() — EMA-modulated wakeup vslice (v3)
+ *   place_entity()          ──call──► infinity_wakeup_scale() — asymptotic vslice on wakeup
  *
  * Tunables (sysctl kernel.infinity_*):
  *   infinity_carriage_ns   — base fair-share window (default 2ms)
@@ -28,7 +29,12 @@
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
- * Higher EMA → shorter time slice (active throttle via infinity_slice()).
+ * Higher EMA → shorter time slice and faster vruntime advance.
+ * v4 adds a fully continuous limit-based design: symmetric time constant
+ * for climb and decay (no hard resets), asymptotic vslice on wakeup,
+ * time-proportional RT decay, and a two-pole EMA correction that
+ * distinguishes oscillating (interactive) from sustained (CPU-bound)
+ * workloads.
  */
 
 #ifndef __INFINITY_SCHED_H
@@ -66,12 +72,29 @@
 /** Maximum budget (2ms). */
 #define INFINITY_BUDGET_MAX_NS		2000000ULL
 
-/** EMA alpha: 1/16 of convergence per tick. */
+/** EMA time constant numerator: τ = BUDGET_MAX × FP_ONE / ALPHA (32ms). */
 #define INFINITY_EMA_ALPHA		16
 
 /** Fixed-point shift for fractional precision (8 bits). */
 #define INFINITY_FP_SHIFT		8
 #define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
+
+/**
+ * Effective EMA with two-pole correction.
+ *
+ * Subtracts half the rate-of-change from the raw EMA, so oscillating
+ * workloads (interactive tasks with alternating compute/sleep) receive
+ * a systematic boost over sustained CPU-bound tasks.  A CPU-bound task
+ * at steady state (dEMA ≈ 0) gets no correction — full penalty applies.
+ */
+static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
+{
+	s64 d = (s64)ctx->ema - (s64)ctx->prev_ema;
+	s64 effective = (s64)ctx->ema - (d >> 1);
+	if (effective < 0)
+		return 0;
+	return (u64)effective;
+}
 
 /* ------------------------------------------------------------------ */
 /* RT EMA constants                                                    */
@@ -109,17 +132,16 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 
 /*
- * infinity_wakeup_scale — reduce vslice for low-EMA wakeups
+ * infinity_wakeup_scale — scale vslice asymptotically on wakeup
  *
  * Called from place_entity() to shorten the vslice of a waking task
- * whose EMA is low (interactive behaviour).  The reduction is
- * proportional to the sleep depth encoded in the EMA:
+ * as a continuous function of its effective EMA.  The vslice
+ * approaches zero as EMA → 0 (instant scheduling on wakeup) and
+ * approaches the nominal vslice as EMA → BUDGET_MAX.
  *
- *   EMA ~= 0             (slept long):  ~50% reduction
- *   EMA ~= BUDGET_MAX    (brief sleep):   ~0% reduction
- *
- * This is distinct from a fixed vslice >>= 1 on wakeup.
- * The scaling here is continuous, not a fixed halving.
+ * This is the continuous-limit version of the v3 fixed-50%-reduction
+ * approach — there is no cap, no threshold, no discrete reduction.
+ * The +1 term guarantees a positive vslice for EEVDF tree placement.
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
@@ -137,7 +159,7 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
-void infinity_rt_wakeup(struct infinity_ctx *ctx);
+void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
 
 #endif /* __INFINITY_SCHED_H */
