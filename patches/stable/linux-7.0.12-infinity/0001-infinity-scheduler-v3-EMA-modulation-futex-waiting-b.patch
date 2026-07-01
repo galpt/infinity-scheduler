@@ -1,8 +1,8 @@
 From 998c62f33818568d384ea0ea4c3e5c75d9a3b4a3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 27 Jun 2026 13:23:38 +0700
-Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
- + RT hooks + stability fixes
+Subject: [PATCH 1/2] infinity-scheduler v3: EMA modulation + futex-waiting
+ bypass + RT hooks + stability fixes
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -819,5 +819,5 @@ index cadb0e9fe..65662a8b5 100644
  		retval = uclamp_validate(p, attr);
  		if (retval)
 -- 
-2.54.0
+2.55.0
 

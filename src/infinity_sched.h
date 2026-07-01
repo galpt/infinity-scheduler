@@ -10,6 +10,7 @@
  *   ────────────────────────────────   ─────────────────────────────────────
  *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
  *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
+ *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
  *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
  *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice (v3)
@@ -121,6 +122,19 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  * The scaling here is continuous, not a fixed halving.
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
+
+/*
+ * infinity_vruntime_scale — scale vruntime advancement by EMA
+ *
+ * Called from update_curr() to advance vruntime faster for CPU-bound
+ * tasks (high EMA).  The scaling factor mirrors infinity_slice(): a
+ * task that receives a 25% slice at EMA=100% has its vruntime advanced
+ * 4x faster, reducing its effective CPU allocation by the same ratio.
+ *
+ *   EMA ~= 0             (interactive):   ~1x (normal)
+ *   EMA ~= BUDGET_MAX    (CPU-bound):     ~4x
+ */
+u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx);

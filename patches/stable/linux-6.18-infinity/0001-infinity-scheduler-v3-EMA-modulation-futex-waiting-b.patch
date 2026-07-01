@@ -1,34 +1,8 @@
-From 9cd60f498303e90ffbe581749c4dbcfe04a9b4fd Mon Sep 17 00:00:00 2001
+From 8a31ba0e2a83cb3fdeef03e93e9c171a00d8f32e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 13:20:07 +0700
-Subject: [PATCH] infinity-scheduler v3: EMA modulation + futex-waiting bypass
- + RT hooks + stability fixes
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
-
-Fix 1 — RT bitmap sync (kernel/sched/rt.c):
-  Infinity_rt_effective_prio() changes the queue placement but never
-  updated the RT bitmap.  After moving a task to a new priority queue,
-  the old queue's bit remained set in array->bitmap.  On the next
-  pick_next_rt_entity(), the scheduler read the stale bitmap, found
-  the old queue's bit set, and dereferenced the empty list head —
-  wild pointer, hard lockup.
-  Fix: __clear_bit(old_prio) if queue emptied, __set_bit(qprio).
-
-Fix 2 — pick_next_entity NULL guard (kernel/sched/fair.c):
-  When the futex-waiting bypass falls through and pick_eevdf() finds
-  no eligible task, it returns NULL.  The NULL propagated through
-  pick_next_entity() -> pick_next_task_fair(), causing the scheduler
-  to select the idle thread while tasks are still queued.
-  Fix: fall back to __pick_first_entity() before returning NULL.
-
-Fix 3 — micro-sleep EMA decay (infinity_sched.c):
-  infinity_wakeup() used a per-tick decay loop with 256us granularity.
-  y-cruncher threads synchronize with 5-50us sleeps — shorter than
-  one tick.  ticks = 0, decay never fired, EMA pinned to 100%, slice
-  crushed to floor, preemption storm.
-  Fix: continuous decay proportional to sleep_ns, no loop.
+Date: Sat, 27 Jun 2026 13:26:36 +0700
+Subject: [PATCH 1/2] infinity-scheduler v3: EMA modulation + futex-waiting
+ bypass + RT hooks + stability fixes
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -40,17 +14,17 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  76 +++++++-
  kernel/sched/infinity_sched.c | 321 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  51 ++++++
+ kernel/sched/rt.c             |  50 ++++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 597 insertions(+), 7 deletions(-)
+ 10 files changed, 596 insertions(+), 7 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba5c..6aece34a6 100644
+index b469878de..8b8906986 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,13 @@ struct kmap_ctrl {
+@@ -816,6 +816,13 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -64,7 +38,7 @@ index ee06cba5c..6aece34a6 100644
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +878,7 @@ struct task_struct {
+@@ -870,6 +877,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -73,10 +47,10 @@ index ee06cba5c..6aece34a6 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 33a462428..1aad61dbe 100644
+index 359a14cc7..baa07e92e 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
-@@ -141,6 +141,7 @@ struct clone_args {
+@@ -131,6 +131,7 @@ struct clone_args {
  #define SCHED_FLAG_DL_OVERRUN		0x04
  #define SCHED_FLAG_KEEP_POLICY		0x08
  #define SCHED_FLAG_KEEP_PARAMS		0x10
@@ -84,7 +58,7 @@ index 33a462428..1aad61dbe 100644
  #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
  #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
  
-@@ -154,7 +155,8 @@ struct clone_args {
+@@ -144,6 +145,7 @@ struct clone_args {
  			 SCHED_FLAG_RECLAIM		| \
  			 SCHED_FLAG_DL_OVERRUN		| \
  			 SCHED_FLAG_KEEP_ALL		| \
@@ -92,13 +66,12 @@ index 33a462428..1aad61dbe 100644
 +			 SCHED_FLAG_UTIL_CLAMP		| \
 +			 SCHED_FLAG_NO_INFINITY_RT)
  
- /* Only for sched_getattr() own flag param, if task is SCHED_DEADLINE */
- #define SCHED_GETATTR_FLAG_DL_DYNAMIC	0x01
+ #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
-index b5f48ebdc..ddd905698 100644
+index a55e21892..16ddef7d6 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -122,6 +122,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -111,7 +84,7 @@ index b5f48ebdc..ddd905698 100644
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
 diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index ceed9d879..b768e0cbc 100644
+index e2bbe5509..56d0258d4 100644
 --- a/kernel/futex/waitwake.c
 +++ b/kernel/futex/waitwake.c
 @@ -354,8 +354,11 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
@@ -128,16 +101,16 @@ index ceed9d879..b768e0cbc 100644
  	__set_current_state(TASK_RUNNING);
  }
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
-index b1f1a3670..9bea3857e 100644
+index 8ae86371d..601556b31 100644
 --- a/kernel/sched/Makefile
 +++ b/kernel/sched/Makefile
-@@ -40,3 +40,4 @@ obj-y += core.o
+@@ -37,3 +37,4 @@ obj-y += core.o
  obj-y += fair.o
  obj-y += build_policy.o
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec186f..e4d556007 100644
+index 5b7523242..81447cbc9 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -148,7 +121,7 @@ index 3ebec186f..e4d556007 100644
  
  /*
   * The initial- and re-scaling of tunables is configurable
-@@ -1160,8 +1161,19 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
+@@ -958,8 +959,19 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
  	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
  		curr = NULL;
  
@@ -170,7 +143,7 @@ index 3ebec186f..e4d556007 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1244,9 +1256,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1047,9 +1059,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -205,7 +178,7 @@ index 3ebec186f..e4d556007 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1424,6 +1458,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1224,6 +1258,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -215,8 +188,8 @@ index 3ebec186f..e4d556007 100644
 +
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
- 
-@@ -5507,6 +5545,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	update_min_vruntime(cfs_rq);
+@@ -5223,6 +5261,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -231,10 +204,10 @@ index 3ebec186f..e4d556007 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5783,6 +5829,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
- 	struct sched_entity *se;
+@@ -5523,6 +5569,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+ 	}
  
- 	se = pick_eevdf(cfs_rq, protect);
+ 	se = pick_eevdf(cfs_rq);
 +	if (!se) {
 +		se = __pick_first_entity(cfs_rq);
 +		if (!se)
@@ -243,7 +216,7 @@ index 3ebec186f..e4d556007 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7249,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6970,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -258,7 +231,7 @@ index 3ebec186f..e4d556007 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7489,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7219,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -267,7 +240,7 @@ index 3ebec186f..e4d556007 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13774,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13198,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -742,7 +715,7 @@ index 000000000..fa7843156
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..9f34896d1 100644
+index 7936d4333..49ef7026d 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -762,7 +735,7 @@ index 4ee8faf01..9f34896d1 100644
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1440,6 +1443,10 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1435,6 +1438,10 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	if (flags & ENQUEUE_WAKEUP)
  		rt_se->timeout = 0;
  
@@ -773,7 +746,7 @@ index 4ee8faf01..9f34896d1 100644
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1459,6 +1466,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1461,9 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -783,44 +756,43 @@ index 4ee8faf01..9f34896d1 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1485,47 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1480,46 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
 +		/*
 +		 * Modulate queue placement by EMA consumption for RT tasks.
-+		 * A task that has consumed significant RT runtime (high rt_ema)
-+		 * is placed in a lower-priority queue so that well-behaved RT
-+		 * tasks (low rt_ema) run first.  The task's actual priority is
-+		 * unchanged; only its queue position is modulated.
++		 * A task that has consumed significant RT runtime (high
++		 * rt_ema) is placed in a lower-priority queue so that
++		 * well-behaved RT tasks (low rt_ema) run first.  The
++		 * task's actual priority is unchanged; only its queue
++		 * position is modulated.
 +		 *
-+		 * For RT group scheduling, skip group entities since they
-+		 * represent a CPU reservation, not an individual task.
++		 * The bitmap is kept in sync: if the old queue empties
++		 * after the move, its bit is cleared; the new queue's
++		 * bit is always set.  This prevents pick_next_rt_entity()
++		 * from dereferencing an empty list through a stale bit.
++		 *
++		 * For RT group scheduling, skip group entities since
++		 * they represent a CPU reservation, not an individual
++		 * task.
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
-+			/*
-+			 * Restrict priority modulation to the root task group.
-+			 * Nested systemd cgroups have parent group entities that
-+			 * read rt_rq->highest_prio.curr from child runqueues.
-+			 * Mutating p->prio on a child task without updating the
-+			 * parent tracking state desynchronizes the cgroup
-+			 * hierarchy, causing pick_next_rt_entity() to dereference
-+			 * an empty list on a stale bitmap bit.
-+			 */
 +			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
 +				int old_prio = p->prio;
 +				int qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
 +				if (qprio != old_prio) {
 +					queue = array->queue + qprio;
++					/* Move first, then audit the bitmap */
 +					if (head)
 +						list_move(&rt_se->run_list, queue);
 +					else
 +						list_move_tail(&rt_se->run_list, queue);
 +					if (list_empty(array->queue + old_prio))
 +						__clear_bit(old_prio,
-+							    array->bitmap);
++						    array->bitmap);
 +					__set_bit(qprio, array->bitmap);
 +					p->prio = qprio;
 +					return;
@@ -832,10 +804,10 @@ index 4ee8faf01..9f34896d1 100644
  			list_move(&rt_se->run_list, queue);
  		else
 diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
-index b215b0ead..90d1e26ac 100644
+index 77ae87f36..18dd18daf 100644
 --- a/kernel/sched/syscalls.c
 +++ b/kernel/sched/syscalls.c
-@@ -546,6 +546,10 @@ int __sched_setscheduler(struct task_struct *p,
+@@ -566,6 +566,10 @@ int __sched_setscheduler(struct task_struct *p,
  	}
  
  	/* Update task specific "requested" clamps */
@@ -847,5 +819,5 @@ index b215b0ead..90d1e26ac 100644
  		retval = uclamp_validate(p, attr);
  		if (retval)
 -- 
-2.54.0
+2.55.0
 

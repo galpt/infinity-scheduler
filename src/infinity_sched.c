@@ -285,6 +285,22 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 }
 
 /* ------------------------------------------------------------------ */
+/* infinity_vruntime_scale — EMA vruntime advancement scaling          */
+/* ------------------------------------------------------------------ */
+
+u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
+{
+	if (ema) {
+		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
+		u64 denom = 100ULL - pct * 3ULL / 4ULL;
+
+		if (denom < 100ULL)
+			vdelta = div64_u64(vdelta * 100ULL, denom);
+	}
+	return vdelta;
+}
+
+/* ------------------------------------------------------------------ */
 /* infinity_rt_consume — EMA climb on RT wakeup                        */
 /* ------------------------------------------------------------------ */
 

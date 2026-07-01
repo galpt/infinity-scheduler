@@ -15,15 +15,18 @@ A fair-share CPU scheduler where the more a task runs, the faster its budget run
 │   ├── infinity_sched.h                    Public API: constants, sysctl declarations, function declarations
 │   └── infinity_sched.c                    Algorithm: fair-share slice, EMA consumption, wakeup decay, fork init
 │
-├── patches/
-│   ├── stable/
-│   │   ├── linux-7.0.12-infinity/          Kernel 7.0.12
-│   │   │   └── 0001-*.patch
-│   │   ├── linux-6.18-infinity/            Kernel 6.18 LTS
-│   │   │   └── 0001-*.patch
-│   │   ├── linux-7.1-infinity/             Kernel 7.1
-│   │   │   └── 0001-*.patch
-│   │   └── ...                             Future kernel versions
+ ├── patches/
+ │   ├── stable/
+ │   │   ├── linux-7.0.12-infinity/          Kernel 7.0.12
+ │   │   │   ├── 0001-*.patch                Infinity v3 baseline
+ │   │   │   └── 0002-*.patch                EMA vruntime scaling
+ │   │   ├── linux-6.18-infinity/            Kernel 6.18 LTS
+ │   │   │   ├── 0001-*.patch                Infinity v3 baseline
+ │   │   │   └── 0002-*.patch                EMA vruntime scaling
+ │   │   ├── linux-7.1-infinity/             Kernel 7.1
+ │   │   │   ├── 0001-*.patch                Infinity v3 baseline
+ │   │   │   └── 0002-*.patch                EMA vruntime scaling
+ │   │   └── ...                             Future kernel versions
 │
 ├── tools/
 │   ├── install-infinity-scheduler.sh        ★ One-command install
@@ -78,7 +81,7 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | Function | Infinity replacement |
 |---|---|
 | `update_deadline()` | Fair-share slice via `infinity_slice()` |
-| `update_curr()` | EMA budget consumption via `infinity_consume()` — the core formula |
+| `update_curr()` | EMA budget consumption via `infinity_consume()` + vruntime allocation scaling via `infinity_vruntime_scale()` |
 | `enqueue_task_fair()` (wakeup) | EMA decay catch-up via `infinity_wakeup()` |
 | `dequeue_task_fair()` (sleep) | Records sleep timestamp for wakeup decay |
 | `update_curr_rt()` (tick) | EMA climb via `infinity_rt_consume()` — RT priority modulation |
@@ -89,7 +92,7 @@ EEVDF and RT functions modified by the Infinity scheduler:
 | `place_entity()` (v3) | EMA-modulated wakeup vslice via `infinity_wakeup_scale()` |
 | `pick_eevdf()` (v3) | Bypasses protect_slice when current task is waiting on a futex |
 
-The EMA signal drives scheduling decisions.  Higher EMA → shorter slice (active throttle via `infinity_slice()`).  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree, so they are picked sooner at each scheduling point.  When a task calls `futex_wait()`, its slice protection is bypassed so interactive wakeups can preempt immediately at the next scheduling point.
+The EMA signal drives both scheduling decisions and CPU allocation.  Higher EMA → shorter slice (active throttle via `infinity_slice()`) and faster vruntime advance (allocation scaling via `infinity_vruntime_scale()`), so CPU-bound tasks receive progressively less CPU time.  Low-EMA (interactive) wakeups receive shortened vslices that place their deadlines earlier in the EEVDF tree, so they are picked sooner at each scheduling point.  When a task calls `futex_wait()`, its slice protection is bypassed so interactive wakeups can preempt immediately at the next scheduling point.
 
 ### EMA consumption formula
 
@@ -101,6 +104,7 @@ The EMA replaces the old accumulator + clamp approach with a smooth asymptotic c
 | While sleeping | $ema \mathrel{-}= (ema \times dec) / 256$ | Continuous decay proportional to sleep duration |
 | Decay factor | $dec = \min(sleep_{ns} \times \alpha \times 256 / 20\text{ms},\ 256)$ | FP_ONE-scaled, sub-62.5µs micro-sleeps register |
 | Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
+| Vruntime scale | $vdelta = vdelta \times 100 / (100 - pct \times 3 / 4)$ | Higher EMA → faster vruntime → less CPU allocation |
 
 | Symbol | Meaning |
 |---|---|
