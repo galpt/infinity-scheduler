@@ -64,7 +64,7 @@ No auto-tuning sysctl is needed — the EMA is self-stabilizing by construction.
 
 ```bash
 sudo sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
-sudo sysctl kernel.infinity_reset=1                  # Reset to defaults
+sudo sysctl kernel.infinity_reset=1                 # reset to defaults
 ```
 
 ## Feature comparison
