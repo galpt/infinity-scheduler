@@ -18,14 +18,11 @@ A fair-share CPU scheduler where the more a task runs, the faster its budget run
  ├── patches/
  │   ├── stable/
  │   │   ├── linux-7.0.12-infinity/          Kernel 7.0.12
- │   │   │   ├── 0001-*.patch                Infinity v3 baseline
- │   │   │   └── 0002-*.patch                EMA vruntime scaling
+ │   │   │   └── 0001-infinity-scheduler.patch
  │   │   ├── linux-6.18-infinity/            Kernel 6.18 LTS
- │   │   │   ├── 0001-*.patch                Infinity v3 baseline
- │   │   │   └── 0002-*.patch                EMA vruntime scaling
+ │   │   │   └── 0001-infinity-scheduler.patch
  │   │   ├── linux-7.1-infinity/             Kernel 7.1
- │   │   │   ├── 0001-*.patch                Infinity v3 baseline
- │   │   │   └── 0002-*.patch                EMA vruntime scaling
+ │   │   │   └── 0001-infinity-scheduler.patch
  │   │   └── ...                             Future kernel versions
 │
 ├── tools/

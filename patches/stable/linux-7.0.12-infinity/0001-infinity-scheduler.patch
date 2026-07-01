@@ -1,8 +1,34 @@
-From 998c62f33818568d384ea0ea4c3e5c75d9a3b4a3 Mon Sep 17 00:00:00 2001
+From d43caf36d67fe637699c68cb3a145ba2b499d8c3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 27 Jun 2026 13:23:38 +0700
-Subject: [PATCH 1/2] infinity-scheduler v3: EMA modulation + futex-waiting
- bypass + RT hooks + stability fixes
+Date: Wed, 1 Jul 2026 22:22:30 +0700
+Subject: [PATCH] infinity-scheduler v3: EMA modulation, futex-waiting bypass,
+ RT hooks, vruntime scaling
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Infinity scheduler v3: a fair-share CPU scheduler based on exponential
+moving average (EMA) tracking.
+
+Fair scheduling (SCHED_OTHER):
+  - infinity_slice(): modulate time slice by EMA — CPU-bound tasks
+    (high EMA) get shorter slices, interactive tasks retain full share
+  - infinity_consume(): EMA climbs proportionally to actual runtime
+  - infinity_wakeup(): EMA decays proportionally to sleep duration,
+    with FP_ONE-scaled division for sub-62.5us micro-sleeps
+  - infinity_wakeup_scale(): reduce wakeup vslice for low-EMA tasks,
+    placing their deadlines earlier in the EEVDF tree
+  - infinity_vruntime_scale(): scale vruntime advancement by EMA —
+    CPU-bound tasks advance vruntime faster, reducing effective CPU
+    allocation and matching the budget-model behavior of scx_flow
+  - infinity_fork_init(): initialize EMA at fork
+  - pick_eevdf(): futex-waiting bypass for safe protect_slice override
+
+RT scheduling (SCHED_FIFO/SCHED_RR):
+  - infinity_rt_consume(): EMA climb proportional to RT runtime
+  - infinity_rt_wakeup(): EMA decay on RT block/sleep
+  - infinity_rt_effective_prio(): modulate RT queue priority by EMA,
+    gated on root_task_group to prevent cgroup hierarchy corruption
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -11,12 +37,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   5 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  76 +++++++-
- kernel/sched/infinity_sched.c | 321 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 129 ++++++++++++++
- kernel/sched/rt.c             |  50 ++++++
+ kernel/sched/fair.c           |  82 ++++++++-
+ kernel/sched/infinity_sched.c | 338 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 143 ++++++++++++++
+ kernel/sched/rt.c             |  50 +++++
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 596 insertions(+), 7 deletions(-)
+ 10 files changed, 632 insertions(+), 8 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -110,7 +136,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..ce93aae37 100644
+index 3bce48ad0..20eef462b 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -178,18 +204,24 @@ index 3bce48ad0..ce93aae37 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1298,6 +1332,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1298,7 +1332,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
+-	curr->vruntime += calc_delta_fair(delta_exec, curr);
 +	/* Infinity: EMA budget consumption */
 +	if (entity_is_task(curr)) { struct task_struct *p__ = task_of(curr);
 +		infinity_consume(&p__->infinity, delta_exec); }
 +
- 	curr->vruntime += calc_delta_fair(delta_exec, curr);
++	curr->vruntime += infinity_vruntime_scale(
++		calc_delta_fair(delta_exec, curr),
++		entity_is_task(curr)
++			? task_of(curr)->infinity.ema
++			: 0);
  	resched = update_deadline(cfs_rq, curr);
  
-@@ -5258,6 +5296,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	if (entity_is_task(curr)) {
+@@ -5258,6 +5300,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -204,7 +236,7 @@ index 3bce48ad0..ce93aae37 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5540,6 +5586,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5540,6 +5590,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
@@ -216,7 +248,7 @@ index 3bce48ad0..ce93aae37 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6937,6 +6988,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6937,6 +6992,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -231,7 +263,7 @@ index 3bce48ad0..ce93aae37 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7172,6 +7231,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7172,6 +7235,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -240,7 +272,7 @@ index 3bce48ad0..ce93aae37 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13459,6 +13520,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13459,6 +13524,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -254,10 +286,10 @@ index 3bce48ad0..ce93aae37 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..4b671e084
+index 000000000..14bfb3518
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,321 @@
+@@ -0,0 +1,338 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -277,9 +309,10 @@ index 000000000..4b671e084
 + * truncating to zero.
 + *
 + * v3 adds EMA-modulated wakeup vslice for shorter interactive-task
-+ * deadlines, EMA-modulated RT queue placement via
-+ * infinity_rt_effective_prio(), a futex-waiting bypass in pick_eevdf(),
-+ * continuous EMA decay for micro-sleeps, and a 400us SLICE_MIN.
++ * deadlines, EMA vruntime scaling for CPU allocation control,
++ * EMA-modulated RT queue placement via infinity_rt_effective_prio(),
++ * a futex-waiting bypass in pick_eevdf(), continuous EMA decay for
++ * micro-sleeps, and a 400us SLICE_MIN.
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no external
@@ -545,6 +578,22 @@ index 000000000..4b671e084
 +}
 +
 +/* ------------------------------------------------------------------ */
++/* infinity_vruntime_scale — EMA vruntime advancement scaling          */
++/* ------------------------------------------------------------------ */
++
++u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
++{
++	if (ema) {
++		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
++		u64 denom = 100ULL - pct * 3ULL / 4ULL;
++
++		if (denom < 100ULL)
++			vdelta = div64_u64(vdelta * 100ULL, denom);
++	}
++	return vdelta;
++}
++
++/* ------------------------------------------------------------------ */
 +/* infinity_rt_consume — EMA climb on RT wakeup                        */
 +/* ------------------------------------------------------------------ */
 +
@@ -581,10 +630,10 @@ index 000000000..4b671e084
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..fa7843156
+index 000000000..8186bbdc7
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,143 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -597,6 +646,7 @@ index 000000000..fa7843156
 + *   ────────────────────────────────   ─────────────────────────────────────
 + *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
 + *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
++ *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
 + *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
 + *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
 + *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice (v3)
@@ -708,6 +758,19 @@ index 000000000..fa7843156
 + * The scaling here is continuous, not a fixed halving.
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
++
++/*
++ * infinity_vruntime_scale — scale vruntime advancement by EMA
++ *
++ * Called from update_curr() to advance vruntime faster for CPU-bound
++ * tasks (high EMA).  The scaling factor mirrors infinity_slice(): a
++ * task that receives a 25% slice at EMA=100% has its vruntime advanced
++ * 4x faster, reducing its effective CPU allocation by the same ratio.
++ *
++ *   EMA ~= 0             (interactive):   ~1x (normal)
++ *   EMA ~= BUDGET_MAX    (CPU-bound):     ~4x
++ */
++u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx);
