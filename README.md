@@ -13,50 +13,11 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > edge over sustained CPU-bound tasks. RT tasks now use the same time-based
 > decay formula instead of event-rate-dependent fixed steps.
 
-<p align="center">
-  <img src="assets/infinity_v3_arch.png" alt="Infinity v3 Scheduler Architecture" width="800"/>
-</p>
-
-## Project structure
-
-```
-.
-│
-├── src/                                     ★ Reference implementation (kernel/sched/infinity_sched.[ch])
-│   ├── infinity_sched.h                    Public API: constants, sysctl declarations, function declarations
-│   └── infinity_sched.c                    Algorithm: fair-share slice, EMA consumption, wakeup decay, fork init
-│
- ├── patches/
- │   ├── stable/
- │   │   ├── linux-7.0.12-infinity/          Kernel 7.0.12
- │   │   │   └── 0001-infinity-scheduler.patch
- │   │   ├── linux-6.18-infinity/            Kernel 6.18 LTS
- │   │   │   └── 0001-infinity-scheduler.patch
- │   │   ├── linux-7.1-infinity/             Kernel 7.1
- │   │   │   └── 0001-infinity-scheduler.patch
- │   │   └── ...                             Future kernel versions
-│
-├── tools/
-│   ├── install-infinity-scheduler.sh        ★ One-command install
-│   ├── build-kernel.sh                     Standalone kernel build helper
-│   ├── adapt-patches.py                    Auto-adapt patches for other kernel versions
-│   ├── fix-patch-format.py                 Patch sanitization
-│   └── fix-patch-counts.py                 Hunk count adjustment
-│
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── README.md
-└── LICENSE
-```
-
-> [!NOTE]
-> Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
-
 ## Quick start
 
 ```bash
-# 1. Clone the v3 branch
-git clone -b v3 https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the v4 branch
+git clone -b v4 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -67,66 +28,30 @@ reboot
 ```
 
 > [!TIP]
-> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity scheduler boot entries, kernel images, and initramfs — the default kernel and its boot entries are never touched.
-
-### Verify it's running
+> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity
+> scheduler boot entries — the default kernel is never touched.
 
 ```bash
-# The kernel version ends with -infinity
-uname -r                                           # → 7.0.12-infinity
-
-# The running flag is set
-sysctl kernel.infinity_running                     # → kernel.infinity_running = 1
-
-# The boot log confirms activation (requires sudo)
-sudo dmesg | grep Infinity                         # → Infinity scheduler active: carriage=...
+# Verify it's running
+uname -r                              # → 7.0.12-infinity
+sysctl kernel.infinity_running        # → kernel.infinity_running = 1
+sudo dmesg | grep Infinity            # → Infinity scheduler active: carriage=...
 ```
 
-## How it works
+## Project structure
 
-EEVDF and RT functions modified by the Infinity scheduler:
+```
+.
+├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
+├── patches/stable/         0001-infinity-scheduler.patch for each kernel version
+├── tools/                  Install script, build helpers, patch fixers
+├── CONTRIBUTING.md
+└── LICENSE
+```
 
-| Function | Infinity replacement |
-|---|---|
-| `update_deadline()` | Fair-share slice via `infinity_slice()` — uses effective EMA with two-pole correction |
-| `update_curr()` | EMA budget consumption via `infinity_consume()` + vruntime allocation scaling via `infinity_vruntime_scale()` |
-| `enqueue_task_fair()` (wakeup) | EMA decay via `infinity_wakeup()` — symmetric τ with climb, no hard reset |
-| `dequeue_task_fair()` (sleep) | Records sleep timestamp for wakeup decay |
-| `update_curr_rt()` (tick) | EMA climb via `infinity_rt_consume()` — RT priority modulation |
-| `enqueue_task_rt()` (wakeup) | Time-proportional RT EMA decay via `infinity_rt_wakeup()` |
-| `dequeue_task_rt()` (block/sleep) | Records sleep timestamp for wakeup decay |
-| `__enqueue_rt_entity()` | EMA-modulated RT queue placement via `infinity_rt_effective_prio()` |
-| `task_fork_fair()` | Initializes budget and EMA via `infinity_fork_init()` |
-| `pick_next_entity()` | NULL guard prevents dereference crash |
-| `place_entity()` | Asymptotic wakeup vslice via `infinity_wakeup_scale()` — approaches zero at EMA→0 |
-| `pick_eevdf()` | Bypasses protect_slice when current task is waiting on a futex |
-
-### Formula reference
-
-The EMA is a fully continuous system — both climb and decay use the same time constant, making EMA = duty cycle at equilibrium:
-
-| Operation | Formula | Description |
-|---|---|---|
-| Climb (running) | $ema \mathrel{+}= (B_{\max} - ema) \times \delta \times \alpha / (B_{\max} \times FP)$ | Proportional to actual runtime $\delta$ |
-| Decay (sleeping) | $ema \mathrel{-}= ema \times s \times \alpha / (B_{\max} \times FP)$ | Symmetric τ = $B_{\max} \times FP / \alpha$ (32ms), clamp to $ema$ prevents underflow |
-| Effective EMA | $ema_{eff} = ema - \Delta ema / 2$ | Two-pole correction: subtracts half the rate of change |
-| Vruntime scale | $vdelta' = vdelta \times 100 / (100 - pct \times 3 / 4)$ | Higher EMA → faster vruntime → less CPU allocation |
-| Slice | $slice = share \times (100 - pct \times 3 / 4) / 100$ | Higher EMA → shorter slice (active throttle) |
-| Wakeup vslice | $vslice' = vslice \times ema / B_{\max} + 1$ | Asymptotic: approaches 0 as EMA → 0, no cap |
-
-| Symbol | Meaning |
-|---|---|
-| `ema` | Exponential moving average — tracks recent runtime history (approaches `BUDGET_MAX` while running, `0` while sleeping) |
-| $\alpha = 16$ | Decay factor (with $FP=256$, effective $16/256 = 1/16$) |
-| $B_{\max} = 2\text{ms}$ | Maximum budget — the EMA never exceeds this bound |
-| $\tau = 32\text{ms}$ | Time constant — same for climb and decay (symmetric) |
-| $ema_{eff}$ | Effective EMA after two-pole correction — gives oscillating tasks a systematic boost |
+Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 
 ## Tunables
-
-The scheduler exposes sysctl parameters under `kernel.infinity_*` for live tuning.
-All values are clamped at write time to safe ranges — the scheduler can never
-enter an invalid state regardless of input.
 
 | Parameter | Default | Range | Description |
 |---|---|---|---|
@@ -135,17 +60,11 @@ enter an invalid state regardless of input.
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_reset` | — | — | Write `1` to reset all tunables to defaults |
 
-The EMA formula is self-stabilizing by construction — no auto-tuning sysctl is needed.
-To set values manually:
+No auto-tuning sysctl is needed — the EMA is self-stabilizing by construction.
 
 ```bash
 sudo sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
-```
-
-To reset all tunables to their kernel defaults:
-
-```bash
-sudo sysctl kernel.infinity_reset=1
+sudo sysctl kernel.infinity_reset=1                  # Reset to defaults
 ```
 
 ## Feature comparison
@@ -156,14 +75,9 @@ sudo sysctl kernel.infinity_reset=1
 | Budget model | Linear consumption | **EMA (Limitless)** |
 | SMT halving | No | Yes |
 | NULL guard | N/A (BPF) | Yes |
-| Wakeup deadline boost | N/A | **EMA vslice scaling (v3)** |
-| Work stealing | Yes (BPF) | No |
+| Wakeup deadline boost | N/A | **Asymptotic vslice** |
+| Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
 | RT-stall immunity | No | Yes |
-
-EMA budget tracking converges asymptotically without clamps — the Limitless
-property holds mathematically.  No external feedback loop, no refill divisor,
-no interactive floor constants, no sleep cap, no tunable knobs beyond two
-safe-clamped tunable sysctls (plus one read-only flag and one reset trigger).
 
 ## License
 
