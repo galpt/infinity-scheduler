@@ -270,25 +270,34 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 {
 	u64 ema;
+	unsigned int tags;
 
 	if (!p)
 		return vdelta;
 
-	/* Subsystem tag bypass: hardware-verified interactive tasks
-	 * (input, graphics, audio) always run at nominal vruntime
-	 * regardless of EMA.  The 50ms expiry prevents stale elevation. */
-	if (infinity_tag_active(p))
+	tags = infinity_tag_active(p);
+
+	/* INPUT and AUDIO tasks use negligible CPU — full bypass at 1×. */
+	if (tags & (INFTY_TAG_INPUT | INFTY_TAG_AUDIO))
 		return vdelta;
 
 	ema = infinity_effective_ema(&p->infinity);
 	if (ema) {
 		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-		/*
-		 * Bounded slope: × 8/10, max 5× at EMA=100%.
-		 * denom = 100 - pct × 8/10, always ≥ 20.
-		 */
-		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
+		u64 denom;
+
+		if (tags & INFTY_TAG_GRAPHICS) {
+			/* GRAPHICS: gentler slope (× 5/10, max 2×).
+			 * Render threads can use significant CPU per frame;
+			 * a full bypass would defeat EMA throttling entirely.
+			 * This keeps the game responsive without starving
+			 * background tasks. */
+			denom = 100ULL - pct * 5ULL / 10ULL;
+		} else {
+			/* Untagged: full slope (× 8/10, max 5× at EMA=100%). */
+			denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
 				      INFINITY_VRUNTIME_SLOPE_DEN;
+		}
 
 		if (denom < 100ULL)
 			vdelta = div64_u64(vdelta * 100ULL, denom);

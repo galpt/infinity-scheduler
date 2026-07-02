@@ -1,7 +1,7 @@
-From d56e8af2507cf8a8ba91d9023d932883eeab2ebf Mon Sep 17 00:00:00 2001
+From 9c736ad77a9e15fb3a00a5407fa423f0722098d6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 20:10:43 +0700
-Subject: [PATCH] infinity-scheduler cumulative
+Date: Thu, 2 Jul 2026 20:23:35 +0700
+Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -12,13 +12,13 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   8 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  85 ++++++++-
- kernel/sched/infinity_sched.c | 345 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 196 +++++++++++++++++++
+ kernel/sched/fair.c           |  85 +++++++-
+ kernel/sched/infinity_sched.c | 354 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 200 +++++++++++++++++++
  kernel/sched/rt.c             |  62 +++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   5 +-
- 13 files changed, 727 insertions(+), 14 deletions(-)
+ 13 files changed, 740 insertions(+), 14 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -316,10 +316,10 @@ index 3bce48ad0..96863e87e 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..99a807c37
+index 000000000..b9e1e9dc8
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,345 @@
+@@ -0,0 +1,354 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -592,25 +592,34 @@ index 000000000..99a807c37
 +u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 +{
 +	u64 ema;
++	unsigned int tags;
 +
 +	if (!p)
 +		return vdelta;
 +
-+	/* Subsystem tag bypass: hardware-verified interactive tasks
-+	 * (input, graphics, audio) always run at nominal vruntime
-+	 * regardless of EMA.  The 50ms expiry prevents stale elevation. */
-+	if (infinity_tag_active(p))
++	tags = infinity_tag_active(p);
++
++	/* INPUT and AUDIO tasks use negligible CPU — full bypass at 1×. */
++	if (tags & (INFTY_TAG_INPUT | INFTY_TAG_AUDIO))
 +		return vdelta;
 +
 +	ema = infinity_effective_ema(&p->infinity);
 +	if (ema) {
 +		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-+		/*
-+		 * Bounded slope: × 8/10, max 5× at EMA=100%.
-+		 * denom = 100 - pct × 8/10, always ≥ 20.
-+		 */
-+		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
++		u64 denom;
++
++		if (tags & INFTY_TAG_GRAPHICS) {
++			/* GRAPHICS: gentler slope (× 5/10, max 2×).
++			 * Render threads can use significant CPU per frame;
++			 * a full bypass would defeat EMA throttling entirely.
++			 * This keeps the game responsive without starving
++			 * background tasks. */
++			denom = 100ULL - pct * 5ULL / 10ULL;
++		} else {
++			/* Untagged: full slope (× 8/10, max 5× at EMA=100%). */
++			denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
 +				      INFINITY_VRUNTIME_SLOPE_DEN;
++		}
 +
 +		if (denom < 100ULL)
 +			vdelta = div64_u64(vdelta * 100ULL, denom);
@@ -667,10 +676,10 @@ index 000000000..99a807c37
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..2f9ca667a
+index 000000000..e9db2e604
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,200 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -828,23 +837,27 @@ index 000000000..2f9ca667a
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 +
 +/**
-+ * infinity_tag_active — check if a task has a fresh subsystem tag
++ * infinity_tag_active — return active subsystem tags (or 0 if expired)
 + *
-+ * Returns true if the task carries an active INPUT, GRAPHICS, or AUDIO
-+ * tag that was set within the 50ms expiry window.  Tags are set by
-+ * hardware-driven kernel paths (evdev, dma-fence, ALSA) at the moment
-+ * of a real hardware event — not by user-space, so there is no gaming
-+ * vector.
++ * Returns the bitmask of active INPUT, GRAPHICS, AUDIO tags, or 0 if
++ * the task has no tags or the 50ms expiry window has passed.  Tags are
++ * set by hardware-driven kernel paths only — no user-space access.
++ *
++ * INPUT and AUDIO tasks use negligible CPU, so they get a full bypass
++ * (1× vruntime).  GRAPHICS tasks (render threads) can use significant
++ * CPU per frame, so they get a gentler slope (max 2× instead of 5×).
 + */
-+static inline bool infinity_tag_active(struct task_struct *p)
++static inline unsigned int infinity_tag_active(struct task_struct *p)
 +{
-+	if (!p->infinity.subsystem_tags)
-+		return false;
++	unsigned int tags = p->infinity.subsystem_tags;
++
++	if (!tags)
++		return 0;
 +	if (ktime_get_ns() - p->infinity.tag_timestamp > 50000000ULL) {
 +		p->infinity.subsystem_tags = 0;
-+		return false;
++		return 0;
 +	}
-+	return true;
++	return tags;
 +}
 +
 +/*

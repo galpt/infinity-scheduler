@@ -155,23 +155,27 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
 /**
- * infinity_tag_active — check if a task has a fresh subsystem tag
+ * infinity_tag_active — return active subsystem tags (or 0 if expired)
  *
- * Returns true if the task carries an active INPUT, GRAPHICS, or AUDIO
- * tag that was set within the 50ms expiry window.  Tags are set by
- * hardware-driven kernel paths (evdev, dma-fence, ALSA) at the moment
- * of a real hardware event — not by user-space, so there is no gaming
- * vector.
+ * Returns the bitmask of active INPUT, GRAPHICS, AUDIO tags, or 0 if
+ * the task has no tags or the 50ms expiry window has passed.  Tags are
+ * set by hardware-driven kernel paths only — no user-space access.
+ *
+ * INPUT and AUDIO tasks use negligible CPU, so they get a full bypass
+ * (1× vruntime).  GRAPHICS tasks (render threads) can use significant
+ * CPU per frame, so they get a gentler slope (max 2× instead of 5×).
  */
-static inline bool infinity_tag_active(struct task_struct *p)
+static inline unsigned int infinity_tag_active(struct task_struct *p)
 {
-	if (!p->infinity.subsystem_tags)
-		return false;
+	unsigned int tags = p->infinity.subsystem_tags;
+
+	if (!tags)
+		return 0;
 	if (ktime_get_ns() - p->infinity.tag_timestamp > 50000000ULL) {
 		p->infinity.subsystem_tags = 0;
-		return false;
+		return 0;
 	}
-	return true;
+	return tags;
 }
 
 /*
