@@ -1,6 +1,6 @@
-From 64ddb94edf1f9ac7012bbdc904d97c24608b9015 Mon Sep 17 00:00:00 2001
+From 10374cfa6a3bdc9b3ced60c840cf51e62da5dfda Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 01:37:25 +0700
+Date: Fri, 3 Jul 2026 01:55:24 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -14,11 +14,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  77 +++++++-
  kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 205 ++++++++++++++++++++
- kernel/sched/rt.c             |  78 +++++++-
+ kernel/sched/infinity_sched.h | 213 ++++++++++++++++++++
+ kernel/sched/rt.c             |  90 ++++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   9 +-
- 13 files changed, 776 insertions(+), 11 deletions(-)
+ 13 files changed, 796 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -692,10 +692,10 @@ index 000000000..c57c53ba7
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..49ce2c219
+index 000000000..0a2eea3c4
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,213 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -824,8 +824,16 @@ index 000000000..49ce2c219
 +/** RT alpha: same time constant as fair path. */
 +#define INFINITY_RT_ALPHA		4
 +
-+/** Max priority decay. */
-+#define INFINITY_RT_PRIO_RANGE		30
++/**
++ * Bounded priority decay window.
++ *
++ * A wider window (30) would allow a misbehaving RT audio or compositor
++ * thread to demote far below its dependent supervisor, creating a
++ * priority inversion deadlock.  Compressing to 8 provides meaningful
++ * separation (a priority-45 task can drop to at most 53) without
++ * letting the gap cross typical dependency boundaries.
++ */
++#define INFINITY_RT_PRIO_RANGE		8
 +
 +/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 +#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
@@ -902,7 +910,7 @@ index 000000000..49ce2c219
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..6f097cf8d 100644
+index 4ee8faf01..ab56ad920 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -957,7 +965,7 @@ index 4ee8faf01..6f097cf8d 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1495,62 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1495,74 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -985,11 +993,18 @@ index 4ee8faf01..6f097cf8d 100644
 +				if (qprio != old_prio) {
 +					struct rq *rq = rq_of_rt_rq(rt_rq);
 +					bool is_curr = (p == rq->curr);
++					bool is_migratory = (p->nr_cpus_allowed > 1);
 +
-+					/* Rebalance Safety: A running task is never on
-+					 * the pushable plist.  Only dequeue it if it
-+					 * is not the current task. */
-+					if (!is_curr)
++					/*
++					 * Rebalance Safety: Only touch the pushable
++					 * plist if the task is non-running AND
++					 * allowed to migrate across multiple cores.
++					 * A running task was already removed by
++					 * set_next_task_rt(); a pinned task
++					 * (nr_cpus_allowed == 1) must never be
++					 * added to the pushable list.
++					 */
++					if (!is_curr && is_migratory)
 +						dequeue_pushable_task(rq, p);
 +
 +					queue = array->queue + qprio;
@@ -1005,10 +1020,15 @@ index 4ee8faf01..6f097cf8d 100644
 +					inc_rt_prio(rt_rq, qprio);
 +					p->prio = qprio;
 +
-+					/* Rebalance Safety: Re-index into the
-+					 * pushable plist with the new priority key,
-+					 * but only if the task is not running. */
-+					if (!is_curr)
++					/*
++					 * Rebalance Safety: Maintain strict plist
++					 * compliance for single-core pinned tasks.
++					 * If the current running task was demoted,
++					 * force an immediate reschedule check so
++					 * higher-priority waiting tasks can
++					 * preempt it.
++					 */
++					if (!is_curr && is_migratory)
 +						enqueue_pushable_task(rq, p);
 +					else if (qprio > old_prio)
 +						resched_curr(rq);

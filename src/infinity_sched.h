@@ -126,8 +126,16 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 /** RT alpha: same time constant as fair path. */
 #define INFINITY_RT_ALPHA		4
 
-/** Max priority decay. */
-#define INFINITY_RT_PRIO_RANGE		30
+/**
+ * Bounded priority decay window.
+ *
+ * A wider window (30) would allow a misbehaving RT audio or compositor
+ * thread to demote far below its dependent supervisor, creating a
+ * priority inversion deadlock.  Compressing to 8 provides meaningful
+ * separation (a priority-45 task can drop to at most 53) without
+ * letting the gap cross typical dependency boundaries.
+ */
+#define INFINITY_RT_PRIO_RANGE		8
 
 /** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 #define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
