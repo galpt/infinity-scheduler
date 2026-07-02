@@ -1,6 +1,6 @@
-From 95ee4ff15e79d1f75fa68e14f741847701332eee Mon Sep 17 00:00:00 2001
+From ec6ec568c40c3a3f25fde6b1029d527999d4e01f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 00:14:04 +0700
+Date: Fri, 3 Jul 2026 01:24:00 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -15,10 +15,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  79 +++++++-
  kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 205 ++++++++++++++++++++
- kernel/sched/rt.c             |  62 +++++-
+ kernel/sched/rt.c             |  63 +++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   6 +-
- 13 files changed, 746 insertions(+), 11 deletions(-)
+ 13 files changed, 747 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -897,7 +897,7 @@ index 000000000..49ce2c219
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..800aad226 100644
+index 7936d4333..d49bcc240 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -952,7 +952,7 @@ index 7936d4333..800aad226 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1490,46 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1490,47 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -981,15 +981,16 @@ index 7936d4333..800aad226 100644
 +						p->normal_prio, &p->infinity);
 +				if (qprio != old_prio) {
 +					queue = array->queue + qprio;
-+					/* Move first, then audit the bitmap */
 +					if (head)
 +						list_move(&rt_se->run_list, queue);
 +					else
 +						list_move_tail(&rt_se->run_list, queue);
 +					if (list_empty(array->queue + old_prio))
 +						__clear_bit(old_prio,
-+						    array->bitmap);
++							    array->bitmap);
 +					__set_bit(qprio, array->bitmap);
++					dec_rt_prio(rt_rq, old_prio);
++					inc_rt_prio(rt_rq, qprio);
 +					p->prio = qprio;
 +					return;
 +				}
