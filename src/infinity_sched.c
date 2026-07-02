@@ -127,7 +127,8 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 
 	/*
 	 * EMA modulation: higher EMA → shorter slice.
-	 * Uses a steeper slope (× 9/10) for up to 10× reduction at EMA=100%.
+	 * Uses slope × 8/10, reducing the slice to 20% of the fair
+	 * share at EMA=100% (vs 25% with the original × 3/4).
 	 */
 	if (ema > 0) {
 		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;

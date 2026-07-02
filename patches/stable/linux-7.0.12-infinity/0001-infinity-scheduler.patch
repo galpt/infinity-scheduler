@@ -1,6 +1,6 @@
-From 9c736ad77a9e15fb3a00a5407fa423f0722098d6 Mon Sep 17 00:00:00 2001
+From 1d068a92bd5b658c78ef279ba557044f5251c81b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 20:23:35 +0700
+Date: Thu, 2 Jul 2026 21:37:29 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -13,12 +13,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  85 +++++++-
- kernel/sched/infinity_sched.c | 354 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 200 +++++++++++++++++++
  kernel/sched/rt.c             |  62 +++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   5 +-
- 13 files changed, 740 insertions(+), 14 deletions(-)
+ 13 files changed, 741 insertions(+), 14 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -316,10 +316,10 @@ index 3bce48ad0..96863e87e 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..b9e1e9dc8
+index 000000000..56c29489c
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,354 @@
+@@ -0,0 +1,355 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -449,7 +449,8 @@ index 000000000..b9e1e9dc8
 +
 +	/*
 +	 * EMA modulation: higher EMA → shorter slice.
-+	 * Uses a steeper slope (× 9/10) for up to 10× reduction at EMA=100%.
++	 * Uses slope × 8/10, reducing the slice to 20% of the fair
++	 * share at EMA=100% (vs 25% with the original × 3/4).
 +	 */
 +	if (ema > 0) {
 +		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
