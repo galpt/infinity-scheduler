@@ -238,6 +238,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->prev_ema = 0;
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
+	ctx->rt_last_sleep_ns = 0;
 }
 
 /* ------------------------------------------------------------------ */

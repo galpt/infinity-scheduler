@@ -1,6 +1,6 @@
-From 2c2f447c3ed383dc4089a2bb02683a15f8807045 Mon Sep 17 00:00:00 2001
+From 7f33d2a1908a2837e29d385b0b99f24e729800a0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 19:18:42 +0700
+Date: Thu, 2 Jul 2026 19:29:00 +0700
 Subject: [PATCH] infinity-scheduler v4+dev: full cumulative patch
 
 All changes from v4 baseline through dev-branch refinements:
@@ -11,32 +11,31 @@ All changes from v4 baseline through dev-branch refinements:
 - Two-pole EMA correction (neutral at wakeup, active during compute)
 - Tick-independent deadline tracking via kernel hrtick_start
 - Overflow-safe sleep decay (128-bit intermediate, 40s cap)
-- Time-proportional RT decay
-- RT queue placement modulation
-- Futex-waiting bypass in pick_eevdf
+- Time-proportional RT decay, dedicated rt_last_sleep_ns field
+- RT queue placement modulation, futex-waiting bypass
 - Carriage_ns auto-scaled from CPU count (no sysctl)
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |   9 +
+ include/linux/sched.h         |  10 +
  include/uapi/linux/sched.h    |   4 +-
- init/init_task.c              |   5 +
+ init/init_task.c              |   6 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  83 ++++++++-
- kernel/sched/infinity_sched.c | 330 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 331 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 172 ++++++++++++++++++
  kernel/sched/rt.c             |  63 ++++++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 667 insertions(+), 9 deletions(-)
+ 10 files changed, 670 insertions(+), 9 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba5c..8ff198e52 100644
+index ee06cba5c..0dfe87bef 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,14 @@ struct kmap_ctrl {
+@@ -817,6 +817,15 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -45,13 +44,14 @@ index ee06cba5c..8ff198e52 100644
 +	u64		prev_ema;
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
++	u64		rt_last_sleep_ns;
 +	bool		futex_waiting;
 +};
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +879,7 @@ struct task_struct {
+@@ -871,6 +880,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -82,10 +82,10 @@ index 33a462428..1aad61dbe 100644
  /* Only for sched_getattr() own flag param, if task is SCHED_DEADLINE */
  #define SCHED_GETATTR_FLAG_DL_DYNAMIC	0x01
 diff --git a/init/init_task.c b/init/init_task.c
-index b5f48ebdc..ddd905698 100644
+index b5f48ebdc..99ec58c95 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -93,6 +93,7 @@ index b5f48ebdc..ddd905698 100644
 +				.ema		= 0,
 +				.rt_ema		= 0,
 +				.last_sleep_ns	= 0,
++				.rt_last_sleep_ns = 0,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -275,10 +276,10 @@ index 3ebec186f..33ab06185 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..16c1b8f07
+index 000000000..60f194dd7
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,331 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -519,6 +520,7 @@ index 000000000..16c1b8f07
 +	ctx->prev_ema = 0;
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
++	ctx->rt_last_sleep_ns = 0;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -788,7 +790,7 @@ index 000000000..5ab56b8ab
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..c08ff3367 100644
+index 4ee8faf01..c4cbcb562 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -817,11 +819,11 @@ index 4ee8faf01..c08ff3367 100644
  		rt_se->timeout = 0;
  
 +		/* Infinity: time-proportional RT EMA decay on wakeup */
-+		if (p->infinity.last_sleep_ns) {
++		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
-+			if (now > p->infinity.last_sleep_ns)
++			if (now > p->infinity.rt_last_sleep_ns)
 +				infinity_rt_wakeup(&p->infinity,
-+					now - p->infinity.last_sleep_ns);
++					now - p->infinity.rt_last_sleep_ns);
 +		}
 +	}
 +
@@ -838,7 +840,7 @@ index 4ee8faf01..c08ff3367 100644
  
 +	/* Infinity: record sleep timestamp for time-proportional RT decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
-+		p->infinity.last_sleep_ns = rq_clock(rq);
++		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
  

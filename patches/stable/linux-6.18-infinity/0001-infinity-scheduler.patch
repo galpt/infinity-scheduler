@@ -1,29 +1,29 @@
-From 7da6090e9e55837ab8388b462179d73aa39768e9 Mon Sep 17 00:00:00 2001
+From a0f1f30a84dc80312cf089bf43dbf7a14b077fc3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 19:18:50 +0700
+Date: Thu, 2 Jul 2026 19:29:09 +0700
 Subject: [PATCH] infinity-scheduler v4+dev (6.18)
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |   9 +
+ include/linux/sched.h         |  10 +
  include/uapi/linux/sched.h    |   4 +-
- init/init_task.c              |   5 +
+ init/init_task.c              |   6 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  85 ++++++++-
- kernel/sched/infinity_sched.c | 330 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 331 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 172 ++++++++++++++++++
  kernel/sched/rt.c             |  62 ++++++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 668 insertions(+), 9 deletions(-)
+ 10 files changed, 671 insertions(+), 9 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878de..3fefc69a3 100644
+index b469878de..b44586b4d 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -816,6 +816,14 @@ struct kmap_ctrl {
+@@ -816,6 +816,15 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -32,13 +32,14 @@ index b469878de..3fefc69a3 100644
 +	u64		prev_ema;
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
++	u64		rt_last_sleep_ns;
 +	bool		futex_waiting;
 +};
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -870,6 +878,7 @@ struct task_struct {
+@@ -870,6 +879,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -68,10 +69,10 @@ index 359a14cc7..baa07e92e 100644
  
  #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
-index a55e21892..16ddef7d6 100644
+index a55e21892..da3f449cd 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -122,6 +122,11 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -122,6 +122,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -79,6 +80,7 @@ index a55e21892..16ddef7d6 100644
 +				.ema		= 0,
 +				.rt_ema		= 0,
 +				.last_sleep_ns	= 0,
++				.rt_last_sleep_ns = 0,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -270,10 +272,10 @@ index 5b7523242..14342653d 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..16c1b8f07
+index 000000000..60f194dd7
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,331 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -514,6 +516,7 @@ index 000000000..16c1b8f07
 +	ctx->prev_ema = 0;
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
++	ctx->rt_last_sleep_ns = 0;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -783,7 +786,7 @@ index 000000000..5ab56b8ab
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..9b46f3849 100644
+index 7936d4333..800aad226 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -812,11 +815,11 @@ index 7936d4333..9b46f3849 100644
  		rt_se->timeout = 0;
  
 +		/* Infinity: time-proportional RT EMA decay on wakeup */
-+		if (p->infinity.last_sleep_ns) {
++		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
-+			if (now > p->infinity.last_sleep_ns)
++			if (now > p->infinity.rt_last_sleep_ns)
 +				infinity_rt_wakeup(&p->infinity,
-+					now - p->infinity.last_sleep_ns);
++					now - p->infinity.rt_last_sleep_ns);
 +		}
 +	}
 +
@@ -833,7 +836,7 @@ index 7936d4333..9b46f3849 100644
  
 +	/* Infinity: record sleep timestamp for time-proportional RT decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
-+		p->infinity.last_sleep_ns = rq_clock(rq);
++		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
  
