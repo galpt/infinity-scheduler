@@ -1,6 +1,6 @@
-From 660ad38f961e043f62431eeaf7260e9cd50f5aaf Mon Sep 17 00:00:00 2001
+From 87d21a434e03c36697f21d8d90b787b398ac5f29 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 21:37:29 +0700
+Date: Thu, 2 Jul 2026 22:22:24 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -12,13 +12,13 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   8 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  83 +++++++-
+ kernel/sched/fair.c           |  80 +++++++-
  kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 200 +++++++++++++++++++
  kernel/sched/rt.c             |  62 +++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   5 +-
- 13 files changed, 742 insertions(+), 11 deletions(-)
+ 13 files changed, 739 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -156,7 +156,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..cee3b2f55 100644
+index 5b7523242..3b72e6feb 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -255,19 +255,16 @@ index 5b7523242..cee3b2f55 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5572,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5572,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
  
  	se = pick_eevdf(cfs_rq);
-+	if (!se) {
-+		se = __pick_first_entity(cfs_rq);
-+		if (!se)
-+			return NULL;
-+	}
++	if (!se)
++		return NULL;
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6973,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6970,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -282,7 +279,7 @@ index 5b7523242..cee3b2f55 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7222,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7219,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -291,7 +288,7 @@ index 5b7523242..cee3b2f55 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7172,6 +7236,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7172,6 +7233,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -300,7 +297,7 @@ index 5b7523242..cee3b2f55 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -13137,6 +13203,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13200,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
