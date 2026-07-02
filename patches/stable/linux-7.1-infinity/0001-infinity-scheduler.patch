@@ -1,6 +1,6 @@
-From e28b145c31d938f87eb43703c7bb8ec01d24f5be Mon Sep 17 00:00:00 2001
+From 8a95353d164817c0ec156b9475abeab428af5eba Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 23:06:13 +0700
+Date: Thu, 2 Jul 2026 23:22:41 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -315,7 +315,7 @@ index 3ebec186f..ce1e55069 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..56c29489c
+index 000000000..c57c53ba7
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,355 @@
@@ -333,7 +333,7 @@ index 000000000..56c29489c
 + *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
 + *
 + * Key differences from v4:
-+ *   - Deadline tracking via hrtick_start (tick-independent, lock-safe)
++ *   - Deadline precision handled natively via core scheduler hrtick_update (tick-independent, lock-safe)
 + *   - 50% of fair share minimum slice (proportional, not absolute)
 + *   - Carriage_ns auto-scaled from CPU count (no sysctl needed)
 + *   - Faster decay τ (4× faster than climb, 24ms vs 96ms)

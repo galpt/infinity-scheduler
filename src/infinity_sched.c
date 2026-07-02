@@ -12,7 +12,7 @@
  *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
  *
  * Key differences from v4:
- *   - Deadline tracking via hrtick_start (tick-independent, lock-safe)
+ *   - Deadline precision handled natively via core scheduler hrtick_update (tick-independent, lock-safe)
  *   - 50% of fair share minimum slice (proportional, not absolute)
  *   - Carriage_ns auto-scaled from CPU count (no sysctl needed)
  *   - Faster decay τ (4× faster than climb, 24ms vs 96ms)
