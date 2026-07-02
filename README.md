@@ -25,16 +25,16 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n0 → BUDGET_MAX\nτ_climb 96ms\nτ_decay 24ms"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 96ms\nτ_decay 24ms"]
         class GAUGE fair
 
-        GAUGE --> TWOPOLE["two-pole correction\neffective = ema − Δema/2\nneutral at wakeup"]
+        GAUGE --> TWOPOLE["two-pole correction\n \neffective = ema − Δema/2\nneutral at wakeup"]
         class TWOPOLE algo
 
-        TWOPOLE --> SLICE["infinity_slice()\nEMA↑ → slice↓\nmin 50% of share"]
+        TWOPOLE --> SLICE["infinity_slice()\n \nEMA↑ → slice↓\nmin 50% of share"]
         class SLICE algo
 
-        TWOPOLE --> VRT["infinity_vruntime_scale()\n×8/10 slope, max 5×"]
+        TWOPOLE --> VRT["infinity_vruntime_scale()\n \n×8/10 slope, max 5×"]
         class VRT algo
 
         subgraph TAGS["Subsystem tags (50ms expiry)"]
@@ -50,10 +50,10 @@ flowchart TB
         VRT --> UPD["update_curr()\nvruntime += scaled_delta"]
         class UPD fair
 
-        UPD --> HRTICK["hrtick_start(rq, slice_ns)\ntick-independent timer\nfires at exact slice expiry"]
+        UPD --> HRTICK["hrtick_start(rq, slice_ns)\n \ntick-independent timer\nfires at exact slice expiry"]
         class HRTICK algo
 
-        HRTICK --> PICK["pick_eevdf()\nEEVDF tree\nearliest deadline wins"]
+        HRTICK --> PICK["pick_eevdf()\n \nEEVDF tree\nearliest deadline wins"]
         class PICK algo
 
         PICK --> FUTEX["futex_waiting?\nbypass protect_slice"]
@@ -64,8 +64,8 @@ flowchart TB
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
-            WQ --> DECAY["infinity_wakeup()\nema = f(sleep_ns)\n40s cap, 128-bit safety"]
-            DECAY --> WUP["infinity_wakeup_scale()\nvslice' = vslice × ema / BUDGET_MAX\n→ 0 as ema → 0, no cap"]
+            WQ --> DECAY["infinity_wakeup()\n \nema = f(sleep_ns)\n40s cap, 128-bit safety"]
+            DECAY --> WUP["infinity_wakeup_scale()\n \nvslice' = vslice × ema / BUDGET_MAX\n→ 0 as ema → 0, no cap"]
             WUP --> PLACE["place_entity()\ndeadline = vruntime + vslice'"]
             PLACE --> PICK
         end
@@ -76,22 +76,22 @@ flowchart TB
     end
 
     subgraph RT["RT tasks (SCHED_FIFO/RR)"]
-        RT_T["RT task runs"] --> RT_C["infinity_rt_consume()\nEMA climbs with runtime"]
+        RT_T["RT task runs"] --> RT_C["infinity_rt_consume()\n \nEMA climbs with runtime"]
         class RT_C rtN
 
-        RT_C --> RT_D["infinity_rt_wakeup()\ntime-proportional decay\nsame τ as fair path\ndedicated rt_last_sleep_ns"]
+        RT_C --> RT_D["infinity_rt_wakeup()\n \ntime-proportional decay\nsame τ as fair path\ndedicated rt_last_sleep_ns"]
         class RT_D rtN
 
-        RT_D --> RT_P["infinity_rt_effective_prio()\nrt_ema↑ → priority↓\nmoved to lower RT queue"]
+        RT_D --> RT_P["infinity_rt_effective_prio()\n \nrt_ema↑ → priority↓\nmoved to lower RT queue"]
         class RT_P rtN
 
         RT_P --> RT_Q["RT queue placement\ngated to root_task_group"]
     end
 
     subgraph INFRA["Scheduler infrastructure"]
-        AC["carriage_ns\nauto-scaled from CPU count\n1 + ilog min(cpus, 8)"]
-        OF["sleep decay\nmul_u64_u64_div_u64\n128-bit overflow safety"]
-        TU["tunables\nsmt_divisor\nrunning (ro)"]
+        AC["carriage_ns\n \nauto-scaled from CPU count\n1 + ilog min(cpus, 8)"]
+        OF["sleep decay\n \nmul_u64_u64_div_u64\n128-bit overflow safety"]
+        TU["tunables\n \nsmt_divisor\nrunning (ro)"]
     end
     class AC,OF,TU infra
 ```
