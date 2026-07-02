@@ -14,7 +14,7 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > interactive recovery during brief sleeps.
 
 <p align="center">
-  <img src="assets/infinity_v4_compress.png" alt="Infinity v4 Scheduler Architecture" width="800"/>
+  <img src="assets/infinity_dev_branch_compress.png" alt="Infinity dev Scheduler Architecture" width="800"/>
 </p>
 
 ## Quick start
