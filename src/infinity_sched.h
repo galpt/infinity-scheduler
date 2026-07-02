@@ -47,7 +47,7 @@
 #define __INFINITY_SCHED_H
 
 #include <linux/sched.h>
-#include <linux/ktime.h>
+#include <linux/sched/clock.h>
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -176,7 +176,7 @@ static inline unsigned int infinity_tag_active(struct task_struct *p)
 
 	if (!tags)
 		return 0;
-	if (ktime_get_ns() - p->infinity.tag_timestamp > 50000000ULL) {
+	if (sched_clock() - p->infinity.tag_timestamp > 50000000ULL) {
 		p->infinity.subsystem_tags = 0;
 		return 0;
 	}

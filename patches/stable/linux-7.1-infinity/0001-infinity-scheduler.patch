@@ -1,12 +1,12 @@
-From 8a95353d164817c0ec156b9475abeab428af5eba Mon Sep 17 00:00:00 2001
+From ae273034a98d99ee66409846071d1906ea4ad078 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 23:22:41 +0700
+Date: Fri, 3 Jul 2026 00:14:04 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/dma-buf/dma-fence.c   |   9 +
- drivers/input/evdev.c         |   9 +-
+ drivers/dma-buf/dma-fence.c   |  10 +
+ drivers/input/evdev.c         |  10 +-
  include/linux/sched.h         |  21 ++
  include/uapi/linux/sched.h    |   4 +-
  init/init_task.c              |   8 +
@@ -17,16 +17,24 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/infinity_sched.h | 205 ++++++++++++++++++++
  kernel/sched/rt.c             |  63 +++++-
  kernel/sched/syscalls.c       |   4 +
- sound/core/pcm_native.c       |   8 +-
- 13 files changed, 758 insertions(+), 11 deletions(-)
+ sound/core/pcm_native.c       |   9 +-
+ 13 files changed, 761 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/drivers/dma-buf/dma-fence.c b/drivers/dma-buf/dma-fence.c
-index a2aa82f4e..9478403d0 100644
+index a2aa82f4e..42aa6e0a9 100644
 --- a/drivers/dma-buf/dma-fence.c
 +++ b/drivers/dma-buf/dma-fence.c
-@@ -792,6 +792,15 @@ dma_fence_default_wait_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
+@@ -15,6 +15,7 @@
+ #include <linux/atomic.h>
+ #include <linux/dma-fence.h>
+ #include <linux/sched/signal.h>
++#include <linux/sched/clock.h>
+ #include <linux/seq_file.h>
+ 
+ #define CREATE_TRACE_POINTS
+@@ -792,6 +793,15 @@ dma_fence_default_wait_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
  	struct default_wait_cb *wait =
  		container_of(cb, struct default_wait_cb, base);
  
@@ -36,17 +44,25 @@ index a2aa82f4e..9478403d0 100644
 +	 * or video app).  Tag expires after 50ms. */
 +	if (wait->task) {
 +		wait->task->infinity.subsystem_tags |= INFTY_TAG_GRAPHICS;
-+		wait->task->infinity.tag_timestamp = ktime_get_ns();
++		wait->task->infinity.tag_timestamp = sched_clock();
 +	}
 +
  	wake_up_state(wait->task, TASK_NORMAL);
  }
  
 diff --git a/drivers/input/evdev.c b/drivers/input/evdev.c
-index c7325226c..bfc9a6309 100644
+index c7325226c..b40771e5b 100644
 --- a/drivers/input/evdev.c
 +++ b/drivers/input/evdev.c
-@@ -589,8 +589,15 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
+@@ -14,6 +14,7 @@
+ 
+ #include <linux/poll.h>
+ #include <linux/sched.h>
++#include <linux/sched/clock.h>
+ #include <linux/slab.h>
+ #include <linux/vmalloc.h>
+ #include <linux/mm.h>
+@@ -589,8 +590,15 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
  			read += input_event_size();
  		}
  
@@ -676,7 +692,7 @@ index 000000000..c57c53ba7
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..b9606ab81
+index 000000000..49ce2c219
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,205 @@
@@ -729,7 +745,7 @@ index 000000000..b9606ab81
 +#define __INFINITY_SCHED_H
 +
 +#include <linux/sched.h>
-+#include <linux/ktime.h>
++#include <linux/sched/clock.h>
 +
 +/* ------------------------------------------------------------------ */
 +/* Constants                                                           */
@@ -858,7 +874,7 @@ index 000000000..b9606ab81
 +
 +	if (!tags)
 +		return 0;
-+	if (ktime_get_ns() - p->infinity.tag_timestamp > 50000000ULL) {
++	if (sched_clock() - p->infinity.tag_timestamp > 50000000ULL) {
 +		p->infinity.subsystem_tags = 0;
 +		return 0;
 +	}
@@ -1005,10 +1021,18 @@ index b215b0ead..90d1e26ac 100644
  		retval = uclamp_validate(p, attr);
  		if (retval)
 diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
-index 302643c1c..2d040441d 100644
+index 302643c1c..2e850fd99 100644
 --- a/sound/core/pcm_native.c
 +++ b/sound/core/pcm_native.c
-@@ -3575,8 +3575,14 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
+@@ -10,6 +10,7 @@
+ #include <linux/file.h>
+ #include <linux/slab.h>
+ #include <linux/sched/signal.h>
++#include <linux/sched/clock.h>
+ #include <linux/time.h>
+ #include <linux/pm_qos.h>
+ #include <linux/io.h>
+@@ -3575,8 +3576,14 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
  		return -EINVAL;
  	count = bytes_to_frames(runtime, count);
  	result = snd_pcm_lib_read(substream, buf, count);
