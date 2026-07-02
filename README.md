@@ -3,17 +3,13 @@
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget; CPU-bound tasks converge toward a minimum. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
 
 > [!TIP]
-> **TL;DR — dev makes Infinity tick-independent, more aggressive, and self-tuning.**
->
-> Deadlines expire in real-time via the kernel's hrtick infrastructure —
-> no longer dependent on the periodic tick. The vruntime scaling slope is × 8/10 (max 5×) — balanced
-> for both interactive boosts and application launch latency. Subsystem tags
-> (INPUT, GRAPHICS, AUDIO) let hardware drivers explicitly mark interactive
-> threads — bypassing EMA heuristics for verified real-time tasks. The slice minimum is
-> 50% of fair share (proportional, not a fixed 400µs floor) so the EMA always has
-> room to modulate. Carriage_ns auto-scales from CPU count — one less knob to
-> worry about. Decay is 4× faster than climb (τ = 24ms vs 96ms) for quicker
-> interactive recovery during brief sleeps.
+> **TL;DR — dev vs v4/v3**
+> - **Tickless**: deadlines fire in real-time via kernel hrtick, not ticks
+> - **EMA**: asymmetric τ (climb 96ms, decay 24ms), 50% min slice (no fixed floor)
+> - **Vruntime**: ×8/10 slope (max 5×) — balanced boost vs launch latency
+> - **Tags**: INPUT/GRAPHICS/AUDIO hardware tags bypass EMA heuristics
+> - **Auto-tune**: carriage_ns scales from CPU count, only 2 tunables left
+> - **Safe**: `mul_u64_u64_div_u64` 128-bit decay, 40s sleep cap, no lock inversion
 
 ```mermaid
 flowchart TB
