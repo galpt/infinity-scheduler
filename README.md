@@ -17,98 +17,159 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 
 ```mermaid
 flowchart TB
+    classDef fairStroke fill:#fff,stroke:#3b82f6,stroke-width:2
+    classDef algoNode fill:#eef2ff,stroke:#6366f1,stroke-width:2
+    classDef tagNode fill:#f0fdf4,stroke:#22c55e,stroke-width:2
+    classDef wakeNode fill:#f0fdfa,stroke:#14b8a6,stroke-width:2
+    classDef rtStroke fill:#fff,stroke:#f59e0b,stroke-width:2
+    classDef rtNode fill:#fffbeb,stroke:#d97706,stroke-width:2
+    classDef infraNode fill:#f8fafc,stroke:#94a3b8,stroke-width:2
+
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
         direction TB
-        TASK["Task wakes/sleeps"] --> GAUGE["EMA gauge
+
+        TASK["Task
+ \ 
+wakes / sleeps"] --> GAUGE["EMA gauge
+ \ 
 0 → BUDGET_MAX
-τ_climb 96ms | τ_decay 24ms"]
+ \ 
+τ_climb 96ms
+τ_decay 24ms"]
+        class GAUGE fairStroke
 
         GAUGE --> TWOPOLE["two-pole correction
+ \ 
 effective = ema − Δema/2
+ \ 
 neutral at wakeup"]
+        class TWOPOLE algoNode
 
         TWOPOLE --> SLICE["infinity_slice()
+ \ 
 EMA↑ → slice↓
+ \ 
 min 50% of share"]
+        class SLICE algoNode
 
         TWOPOLE --> VRT["infinity_vruntime_scale()
+ \ 
 ×8/10 slope, max 5×"]
+        class VRT algoNode
 
         subgraph TAGS["Subsystem tags (50ms expiry)"]
             INPUT["INPUT
+ \ 
 evdev_read()"]
             GRAPHICS["GRAPHICS
+ \ 
 dma_fence_signal()"]
             AUDIO["AUDIO
+ \ 
 snd_pcm_read()"]
         end
+        class INPUT,GRAPHICS,AUDIO tagNode
 
         TAGS -- "INPUT/AUDIO: 1× bypass" --> VRT
         TAGS -- "GRAPHICS: ×5/10 (max 2×)" --> VRT
 
         VRT --> UPD["update_curr()
+ \ 
 vruntime += scaled_delta"]
+        class UPD fairStroke
 
         UPD --> HRTICK["hrtick_start(rq, slice_ns)
+ \ 
 tick-independent timer
+ \ 
 fires at exact slice expiry"]
+        class HRTICK algoNode
 
         HRTICK --> PICK["pick_eevdf()
+ \ 
 EEVDF tree
+ \ 
 earliest deadline wins"]
+        class PICK algoNode
 
         PICK --> FUTEX["futex_waiting?
+ \ 
 bypass protect_slice"]
+        class FUTEX algoNode
 
         FUTEX --> RUN["Task runs
+ \ 
 until block or preempt"]
+        class RUN fairStroke
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
             WQ --> DECAY["infinity_wakeup()
+ \ 
 ema decays: step = f(sleep_ns)
+ \ 
 40s cap, 128-bit safety"]
-
             DECAY --> WUP["infinity_wakeup_scale()
+ \ 
 vslice' = vslice × ema / BUDGET_MAX
+ \ 
 → 0 as ema → 0, no cap"]
             WUP --> PLACE["place_entity()
+ \ 
 deadline = vruntime + vslice'"]
             PLACE --> PICK
         end
+        class DECAY,WUP,PLACE wakeNode
 
-        RUN -. "block/preempt" .-> WAKEUP
+        RUN -. "block / preempt" .-> WAKEUP
         RUN --> GAUGE
     end
+    class FAIR fairStroke
 
     subgraph RT["RT tasks (SCHED_FIFO/RR)"]
         direction TB
         RT_T["RT task runs"] --> RT_C["infinity_rt_consume()
+ \ 
 EMA climbs with runtime"]
-
         RT_C --> RT_D["infinity_rt_wakeup()
+ \ 
 time-proportional decay
+ \ 
 same τ as fair path
+ \ 
 dedicated rt_last_sleep_ns"]
-
         RT_D --> RT_P["infinity_rt_effective_prio()
+ \ 
 rt_ema↑ → priority↓
+ \ 
 moved to lower RT queue"]
-
         RT_P --> RT_Q["RT queue placement
+ \ 
 gated to root_task_group"]
     end
+    class RT_T,RT_Q rtStroke
+    class RT_C,RT_D,RT_P rtNode
+    class RT rtStroke
 
     subgraph INFRA["Scheduler infrastructure"]
         AC["carriage_ns
+ \ 
 auto-scaled from CPU count
+ \ 
 1 + ilog min(cpus, 8)"]
         OF["sleep decay
+ \ 
 mul_u64_u64_div_u64
+ \ 
 128-bit overflow safety"]
         TU["tunables
-smt_divisor | running (ro)"]
+ \ 
+smt_divisor
+ \ 
+running (ro)"]
     end
+    class AC,OF,TU infraNode
+    class INFRA infraNode
 ```
 
 ## Quick start
