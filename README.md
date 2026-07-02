@@ -19,17 +19,17 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 flowchart TB
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
         direction TB
-        TASK["Task wakes/sleeps"] --> EMA_GAUGE["EMA gauge
-0 ←──────────→ BUDGET_MAX
-τ_climb = 96ms | τ_decay = 24ms"]
+        TASK["Task wakes/sleeps"] --> GAUGE["EMA gauge
+0 → BUDGET_MAX
+τ_climb 96ms | τ_decay 24ms"]
 
-        EMA_GAUGE --> TWOPOLE["two-pole correction
-effective_ema = ema − Δema/2
-↑ neutral at wakeup, active during compute"]
+        GAUGE --> TWOPOLE["two-pole correction
+effective = ema − Δema/2
+neutral at wakeup"]
 
         TWOPOLE --> SLICE["infinity_slice()
 EMA↑ → slice↓
-min = share/2 (50%)"]
+min 50% of share"]
 
         TWOPOLE --> VRT["infinity_vruntime_scale()
 ×8/10 slope, max 5×"]
@@ -43,31 +43,34 @@ dma_fence_signal()"]
 snd_pcm_read()"]
         end
 
-        TAGS -- "INPUT/AUDIO: full 1× bypass" --> VRT
-        TAGS -- "GRAPHICS: ×5/10 slope (max 2×)" --> VRT
+        TAGS -- "INPUT/AUDIO: 1× bypass" --> VRT
+        TAGS -- "GRAPHICS: ×5/10 (max 2×)" --> VRT
 
-        VRT --> UPDATE_CURR["update_curr() → vruntime += scaled_delta"]
+        VRT --> UPD["update_curr()
+vruntime += scaled_delta"]
 
-        UPDATE_CURR --> HRTICK["hrtick_start(rq, slice_ns)
-↑ tick-independent deadline timer
+        UPD --> HRTICK["hrtick_start(rq, slice_ns)
+tick-independent timer
 fires at exact slice expiry"]
 
         HRTICK --> PICK["pick_eevdf()
-EEVDF tree selects earliest deadline"]
+EEVDF tree
+earliest deadline wins"]
 
         PICK --> FUTEX["futex_waiting?
 bypass protect_slice"]
 
-        FUTEX --> RUN["Task runs until block/preempt"]
+        FUTEX --> RUN["Task runs
+until block or preempt"]
 
         subgraph WAKEUP["Wakeup path"]
-            WAKEUP_EMPTY["enqueue_task_fair()"]
-            WAKEUP_EMPTY --> DECAY["infinity_wakeup()
-ema −= ema × sleep_ns × α × D / (BUDGET_MAX × FP_ONE)
-↑ 40s cap, mul_u64_u64_div_u64 safety"]
+            WQ["enqueue_task_fair()"]
+            WQ --> DECAY["infinity_wakeup()
+ema decays: step = f(sleep_ns)
+40s cap, 128-bit safety"]
 
             DECAY --> WUP["infinity_wakeup_scale()
-vslice' = vslice × ema / BUDGET_MAX + 1
+vslice' = vslice × ema / BUDGET_MAX
 → 0 as ema → 0, no cap"]
             WUP --> PLACE["place_entity()
 deadline = vruntime + vslice'"]
@@ -75,34 +78,35 @@ deadline = vruntime + vslice'"]
         end
 
         RUN -. "block/preempt" .-> WAKEUP
-        RUN --> EMA_GAUGE
+        RUN --> GAUGE
     end
 
     subgraph RT["RT tasks (SCHED_FIFO/RR)"]
         direction TB
-        RT_TASK["RT task runs"] --> RT_CONS["infinity_rt_consume()
-EMA climbs proportionally to runtime"]
+        RT_T["RT task runs"] --> RT_C["infinity_rt_consume()
+EMA climbs with runtime"]
 
-        RT_CONS --> RT_DECAY["infinity_rt_wakeup()
+        RT_C --> RT_D["infinity_rt_wakeup()
 time-proportional decay
-same τ formula as fair path
-dedicated rt_last_sleep_ns field"]
+same τ as fair path
+dedicated rt_last_sleep_ns"]
 
-        RT_DECAY --> RT_PRIO["infinity_rt_effective_prio()
+        RT_D --> RT_P["infinity_rt_effective_prio()
 rt_ema↑ → priority↓
 moved to lower RT queue"]
 
-        RT_PRIO --> RT_Q["RT queue placement
+        RT_P --> RT_Q["RT queue placement
 gated to root_task_group"]
     end
 
     subgraph INFRA["Scheduler infrastructure"]
-        AUTOCARR["carriage_ns auto-scaled
-from CPU count (1 + ilog min(cpus, 8))"]
-        OVERFLOW["sleep decay uses
+        AC["carriage_ns
+auto-scaled from CPU count
+1 + ilog min(cpus, 8)"]
+        OF["sleep decay
 mul_u64_u64_div_u64
 128-bit overflow safety"]
-        TUNE["Only two tunables:
+        TU["tunables
 smt_divisor | running (ro)"]
     end
 ```
