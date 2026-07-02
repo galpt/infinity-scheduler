@@ -1,17 +1,16 @@
-# infinity-scheduler (dev)
+# infinity-scheduler (dev-cherrypick)
 
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget; CPU-bound tasks converge toward a minimum. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
 
 > [!TIP]
-> **TL;DR — dev makes Infinity tick-independent, more aggressive, and self-tuning.**
+> **TL;DR — cherrypick base for incremental testing. Known-stable at this commit.**
 >
-> A per-task hrtimer fires at the exact deadline expiry — no longer dependent on
-> the periodic tick. The vruntime scaling slope is now × 9/10 (max 10× instead of
-> 4×) for a stronger allocation shift to interactive tasks. The slice minimum is
-> 50% of fair share (proportional, not a fixed 400µs floor) so the EMA always has
-> room to modulate. Carriage_ns auto-scales from CPU count — one less knob to
-> worry about. Decay is 4× faster than climb (τ = 24ms vs 96ms) for quicker
-> interactive recovery during brief sleeps.
+> Deadline tracking uses the kernel's hrtick infrastructure — no custom timer,
+> no tick dependency. The vruntime scaling slope is × 9/10 (max 10×) for a
+> stronger allocation shift to interactive tasks. The slice minimum is 50% of
+> fair share (proportional, not a fixed 400µs floor). Carriage_ns auto-scales
+> from CPU count — one less knob to worry about. Decay is 4× faster than climb
+> (τ = 24ms vs 96ms) for quicker interactive recovery during brief sleeps.
 
 <p align="center">
   <img src="assets/infinity_dev_branch_compress.png" alt="Infinity dev Scheduler Architecture" width="800"/>
@@ -20,8 +19,8 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 ## Quick start
 
 ```bash
-# 1. Clone the dev branch
-git clone -b dev https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the dev-cherrypick branch
+git clone -b dev-cherrypick https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
