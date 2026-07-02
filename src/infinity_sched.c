@@ -8,15 +8,15 @@
  *
  *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
  *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE)
- *   slice = share * (100 - ema_pct * 9/10) / 100  (active throttle, steep)
+ *   slice = share * (100 - ema_pct * 8/10) / 100  (active throttle)
  *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
  *
  * Key differences from v4:
- *   - Per-task hrtimer for deadline tracking (tick-independent)
+ *   - Deadline tracking via hrtick_start (tick-independent, lock-safe)
  *   - 50% of fair share minimum slice (proportional, not absolute)
  *   - Carriage_ns auto-scaled from CPU count (no sysctl needed)
  *   - Faster decay τ (4× faster than climb, 24ms vs 96ms)
- *   - Steeper vruntime scaling (× 9/10 slope, max 10× vs 4×)
+ *   - Bounded vruntime scaling (× 8/10 slope, max 5×)
  *
  * The EMA converges asymptotically toward BUDGET_MAX when running and
  * toward 0 when sleeping — the true Limitless.  No clamps, no thresholds,
@@ -198,14 +198,23 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	 * step = ema × sleep_ns × α × D / (BUDGET_MAX × FP_ONE)
 	 *       where D = INFINITY_EMA_DECAY_DIV = 4
 	 *
+	 * Sleep is capped at 40 seconds to prevent stale migration timestamps
+	 * from producing an artificially large numerator.  The calculation uses
+	 * mul_u64_u64_div_u64 for a 128-bit intermediate multiplication, which
+	 * guarantees no u64 overflow regardless of the input magnitudes.
+	 *
 	 * The proportional clamp (step > ema) prevents underflow — the
 	 * EMA approaches 0 asymptotically but never reaches it in finite
 	 * time.
 	 */
+	if (sleep_ns > 40000000000ULL)
+		sleep_ns = 40000000000ULL;
+
 	ctx->prev_ema = ctx->ema;
-	step = div64_u64(ctx->ema * sleep_ns * INFINITY_EMA_ALPHA *
-			 INFINITY_EMA_DECAY_DIV,
-			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+	step = mul_u64_u64_div_u64(ctx->ema,
+				 sleep_ns * INFINITY_EMA_ALPHA *
+				 INFINITY_EMA_DECAY_DIV,
+				 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
 	if (step > ctx->ema)
 		step = ctx->ema;
 	ctx->ema -= step;
@@ -252,9 +261,8 @@ u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
 	if (ema) {
 		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 		/*
-		 * Steeper slope: × 9/10 instead of × 3/4.
-		 * denom = 100 - pct × 9/10, always ≥ 10.
-		 * At pct=100: scale = 100/10 = 10× (vs 4×).
+		 * Bounded slope: × 8/10, max 5× at EMA=100%.
+		 * denom = 100 - pct × 8/10, always ≥ 20.
 		 */
 		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
 				      INFINITY_VRUNTIME_SLOPE_DEN;
@@ -288,9 +296,14 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	step = div64_u64(ctx->rt_ema * sleep_ns * INFINITY_RT_ALPHA *
-			 INFINITY_EMA_DECAY_DIV,
-			 INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
+	/* Same overflow mitigation as infinity_wakeup */
+	if (sleep_ns > 40000000000ULL)
+		sleep_ns = 40000000000ULL;
+
+	step = mul_u64_u64_div_u64(ctx->rt_ema,
+				 sleep_ns * INFINITY_RT_ALPHA *
+				 INFINITY_EMA_DECAY_DIV,
+				 INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 	if (step > ctx->rt_ema)
 		step = ctx->rt_ema;
 	ctx->rt_ema -= step;
