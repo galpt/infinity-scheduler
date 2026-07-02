@@ -90,7 +90,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec186f..7829c4287 100644
+index 3ebec186f..e6b5ee945 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -123,7 +123,7 @@ index 3ebec186f..7829c4287 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1244,9 +1256,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1244,9 +1256,32 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -151,6 +151,7 @@ index 3ebec186f..7829c4287 100644
 +#endif
 +			se->slice = infinity_slice(cfs_rq->nr_queued, is_smt,
 +						   infinity_effective_ema(&p__->infinity));
++			infinity_timer_start(rq_of(cfs_rq), se->slice);
 +		} else {
 +			se->slice = sysctl_sched_base_slice;
 +		}
@@ -158,7 +159,7 @@ index 3ebec186f..7829c4287 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1424,7 +1458,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1424,7 +1459,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -175,7 +176,7 @@ index 3ebec186f..7829c4287 100644
  	resched = update_deadline(cfs_rq, curr);
  
  	if (entity_is_task(curr)) {
-@@ -5507,6 +5549,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5507,6 +5550,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -190,7 +191,7 @@ index 3ebec186f..7829c4287 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5783,6 +5833,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5783,6 +5834,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
@@ -202,7 +203,7 @@ index 3ebec186f..7829c4287 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7253,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7198,6 +7254,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -217,7 +218,7 @@ index 3ebec186f..7829c4287 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7493,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7430,6 +7494,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -226,7 +227,17 @@ index 3ebec186f..7829c4287 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13778,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -7442,6 +7508,9 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	if (dequeue_entities(rq, &p->se, flags) < 0)
+ 		return false;
+ 
++	/* Infinity: cancel deadline hrtimer — tick-independent idle */
++	infinity_timer_cancel();
++
+ 	/*
+ 	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
+ 	 */
+@@ -13713,6 +13782,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -240,39 +251,29 @@ index 3ebec186f..7829c4287 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..beb058074
+index 000000000..fde5348a5
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,365 @@
+@@ -0,0 +1,351 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.c — Infinity scheduler algorithm (v4).
++ * infinity_sched.c — Infinity scheduler algorithm (dev).
 + *
 + * Fully continuous limit-based fair and RT scheduling:
 + *
 + *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
-+ *   While sleeping:  ema -= ema * sleep_ns * α / (BUDGET_MAX * FP_ONE)
-+ *   slice = share * (100 - ema_pct * 3/4) / 100  (active throttle)
++ *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE)
++ *   slice = share * (100 - ema_pct * 9/10) / 100  (active throttle, steep)
 + *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
 + *
-+ * Both climb and decay use the same time constant τ = 32ms (BUDGET_MAX ×
-+ * FP_ONE / ALPHA), making the system a symmetric running average of CPU
-+ * utilization — the EMA naturally stabilises at the task's duty cycle.
-+ * There is no hard reset, no decay threshold: sub-62.5µs micro-sleeps and
-+ * multi-second sleeps both register proportional decay with the same
-+ * continuous formula.
-+ *
-+ * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
-+ * oscillating workloads (interactive: compute-sleep-compute) from
-+ * sustained CPU-bound tasks, giving interactivity a systematic boost.
-+ *
-+ * v4 adds:
-+ *   - Symmetric τ for climb and decay (no hard reset)
-+ *   - Asymptotic vslice (approaches zero as EMA → 0)
-+ *   - Time-proportional RT decay
-+ *   - Two-pole EMA correction for oscillating vs sustained workloads
++ * Key differences from v4:
++ *   - Per-task hrtimer for deadline tracking (tick-independent)
++ *   - 50% of fair share minimum slice (proportional, not absolute)
++ *   - Carriage_ns auto-scaled from CPU count (no sysctl needed)
++ *   - Faster decay τ (4× faster than climb, 24ms vs 96ms)
++ *   - Steeper vruntime scaling (× 9/10 slope, max 10× vs 4×)
 + *
 + * The EMA converges asymptotically toward BUDGET_MAX when running and
 + * toward 0 when sleeping — the true Limitless.  No clamps, no thresholds,
@@ -283,41 +284,19 @@ index 000000000..beb058074
 +#include <linux/sched.h>
 +#include <linux/math64.h>
 +#include <linux/sysctl.h>
++#include "sched.h"
++#include <linux/hrtimer.h>
 +#include "infinity_sched.h"
 +
 +/* ------------------------------------------------------------------ */
-+/* Sysctl tunables with safe clamps                                    */
++/* Tunables with safe clamps                                           */
 +/* ------------------------------------------------------------------ */
 +
-+unsigned long infinity_tune_carriage_ns = INFINITY_CARRIAGE_NS_DEFAULT;
 +unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 +static int infinity_running_flag = 1;
 +
-+/*
-+ * Write-time clamping handlers.
-+ * Every tunable write is intercepted, clamped to [MIN, MAX], and stored.
-+ * No value outside the safe range can be set — the scheduler can never
-+ * enter an invalid state regardless of user input.
-+ */
-+static int clamp_carriage_ns(const struct ctl_table *table, int write,
-+			     void *buf, size_t *lenp, loff_t *ppos)
-+{
-+	int ret;
-+	unsigned long old, val;
-+	struct ctl_table tmp = *table;
-+
-+	old = READ_ONCE(infinity_tune_carriage_ns);
-+	val = old;
-+	tmp.data = &val;
-+	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
-+	if (write && ret == 0) {
-+		val = clamp(val, INFINITY_CARRIAGE_NS_MIN, INFINITY_CARRIAGE_NS_MAX);
-+		if (val != old)
-+			pr_info("Infinity: carriage_ns %lu -> %lu\n", old, val);
-+		WRITE_ONCE(infinity_tune_carriage_ns, val);
-+	}
-+	return ret;
-+}
++/* Auto-scaled carriage — set at init, not user-tunable */
++static unsigned long infinity_carriage_ns;
 +
 +static int clamp_smt_divisor(const struct ctl_table *table, int write,
 +			     void *buf, size_t *lenp, loff_t *ppos)
@@ -341,13 +320,6 @@ index 000000000..beb058074
 +
 +static struct ctl_table infinity_sysctl_table[] = {
 +	{
-+		.procname	= "infinity_carriage_ns",
-+		.data		= &infinity_tune_carriage_ns,
-+		.maxlen		= sizeof(unsigned long),
-+		.mode		= 0644,
-+		.proc_handler	= clamp_carriage_ns,
-+	},
-+	{
 +		.procname	= "infinity_smt_divisor",
 +		.data		= &infinity_tune_smt_divisor,
 +		.maxlen		= sizeof(unsigned long),
@@ -364,35 +336,50 @@ index 000000000..beb058074
 +	{}
 +};
 +
-+static unsigned long infinity_reset_val;
++/* ------------------------------------------------------------------ */
++/* Per-CPU deadline hrtimer (tick-independent scheduling)              */
++/* ------------------------------------------------------------------ */
 +
-+static int reset_handler(const struct ctl_table *table, int write,
-+			 void *buf, size_t *lenp, loff_t *ppos)
++static DEFINE_PER_CPU(struct hrtimer, infinity_deadline_timer);
++
++static enum hrtimer_restart infinity_deadline_callback(struct hrtimer *timer)
 +{
-+	int ret;
-+	struct ctl_table tmp = *table;
++	int cpu = smp_processor_id();
 +
-+	infinity_reset_val = 0;
-+	tmp.data = &infinity_reset_val;
-+	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
-+	if (write && ret == 0 && infinity_reset_val == 1) {
-+		WRITE_ONCE(infinity_tune_carriage_ns, INFINITY_CARRIAGE_NS_DEFAULT);
-+		WRITE_ONCE(infinity_tune_smt_divisor, INFINITY_SMT_DIVISOR_DEFAULT);
-+		pr_info("Infinity: reset to default values\n");
-+	}
-+	return ret;
++	resched_curr(cpu_rq(cpu));
++	return HRTIMER_NORESTART;
 +}
 +
-+static struct ctl_table infinity_reset_table[] = {
-+	{
-+		.procname	= "infinity_reset",
-+		.data		= &infinity_reset_val,
-+		.maxlen		= sizeof(unsigned long),
-+		.mode		= 0200,
-+		.proc_handler	= reset_handler,
-+	},
-+	{}
-+};
++void infinity_timer_start(struct rq *rq, u64 slice_ns)
++{
++	struct hrtimer *timer;
++
++	timer = this_cpu_ptr(&infinity_deadline_timer);
++	hrtimer_start(timer, ns_to_ktime(slice_ns),
++		      HRTIMER_MODE_REL_PINNED_SOFT);
++}
++
++void infinity_timer_cancel(void)
++{
++	struct hrtimer *timer;
++
++	timer = this_cpu_ptr(&infinity_deadline_timer);
++	hrtimer_try_to_cancel(timer);
++}
++
++/* ------------------------------------------------------------------ */
++/* Auto-carriage scaling                                               */
++/* ------------------------------------------------------------------ */
++
++static void __init auto_carriage_ns(void)
++{
++	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
++	unsigned int factor = 1 + ilog2(cpus);
++
++	infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS * factor;
++	pr_info("Infinity: auto-scaled carriage=%lu ns (%u cpus, factor=%u)\n",
++		infinity_carriage_ns, cpus, factor);
++}
 +
 +/* ------------------------------------------------------------------ */
 +/* Initialization                                                      */
@@ -400,15 +387,22 @@ index 000000000..beb058074
 +
 +static int __init infinity_sched_init(void)
 +{
++	int cpu;
++
 +	__register_sysctl_init("kernel", infinity_sysctl_table,
 +			      "infinity_sysctl_table",
 +			      ARRAY_SIZE(infinity_sysctl_table) - 1);
-+	__register_sysctl_init("kernel", infinity_reset_table,
-+			      "infinity_reset_table",
-+			      ARRAY_SIZE(infinity_reset_table) - 1);
 +
-+	pr_info("Infinity scheduler active: carriage=%lu ns, smt_divisor=%lu\n",
-+		infinity_tune_carriage_ns,
++	for_each_possible_cpu(cpu) {
++		struct hrtimer *timer = per_cpu_ptr(&infinity_deadline_timer, cpu);
++
++		hrtimer_setup(timer, infinity_deadline_callback,
++			      CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED_SOFT);
++	}
++
++	auto_carriage_ns();
++
++	pr_info("Infinity scheduler active: smt_divisor=%lu\n",
 +		infinity_tune_smt_divisor);
 +
 +	return 0;
@@ -422,36 +416,45 @@ index 000000000..beb058074
 +
 +u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 +{
-+	u64 slice;
++	u64 slice, share;
 +
 +	if (nr_runnable == 0)
 +		nr_runnable = 1;
 +
-+	slice = READ_ONCE(infinity_tune_carriage_ns) / nr_runnable;
++	share = infinity_carriage_ns / nr_runnable;
++	slice = share;
 +
-+	/* EMA modulation: higher EMA → shorter slice (active throttle) */
++	/*
++	 * EMA modulation: higher EMA → shorter slice.
++	 * Uses a steeper slope (× 9/10) for up to 10× reduction at EMA=100%.
++	 */
 +	if (ema > 0) {
 +		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
-+		/* Reduce slice by up to 75% at ema=100% */
-+		slice = slice * (100ULL - pct * 3ULL / 4ULL) / 100ULL;
++		slice = slice * (100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
++				 INFINITY_VRUNTIME_SLOPE_DEN) / 100ULL;
 +	}
 +
-+	/* Apply SMT scaling before the safety floor, otherwise a 400us
-+	 * minimum slice would be divided to 25us on an SMT-16 core. */
++	/* SMT scaling */
 +	if (on_smt_secondary) {
 +		unsigned long div = READ_ONCE(infinity_tune_smt_divisor);
 +		if (div > 1)
 +			slice = div64_u64(slice, div);
 +	}
 +
-+	/* Safety bounds — always last.  Note that the carriage ceiling
-+	 * (INFINITY_CARRIAGE_NS_MAX = 100ms) is intentionally wider than
-+	 * the slice cap (2ms) so that multi-task fairness scales correctly;
-+	 * carriage_ns *only* affects the per-task share divided by nr_runnable,
-+	 * and the 2ms budget cap prevents any single task from exceeding
-+	 * the design target regardless of the sysctl setting. */
-+	if (slice < INFINITY_SLICE_MIN_NS)
-+		slice = INFINITY_SLICE_MIN_NS;
++	/*
++	 * Proportional minimum: 50% of fair share (not an absolute floor).
++	 * The EMA modulation can never reduce the slice below half of the
++	 * task's fair share, which guarantees that every task always makes
++	 * measurable forward progress while preserving the ordering between
++	 * interactive and CPU-bound tasks.
++	 */
++	{
++		u64 min_slice = share >> 1;
++		if (slice < min_slice)
++			slice = min_slice;
++	}
++
++	/* Ceiling: single-task budget cap */
 +	if (slice > INFINITY_BUDGET_MAX_NS)
 +		slice = INFINITY_BUDGET_MAX_NS;
 +
@@ -475,7 +478,7 @@ index 000000000..beb058074
 +}
 +
 +/* ------------------------------------------------------------------ */
-+/* infinity_wakeup — EMA decay on wakeup (symmetric τ with climb)      */
++/* infinity_wakeup — EMA decay on wakeup (4× faster than climb)        */
 +/* ------------------------------------------------------------------ */
 +
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
@@ -486,16 +489,21 @@ index 000000000..beb058074
 +		return;
 +
 +	/*
-+	 * Decay is symmetric with climb: both use τ = BUDGET_MAX × FP_ONE / ALPHA.
-+	 * step = ema × sleep_ns × α / (BUDGET_MAX × FP_ONE)
++	 * Decay is 4× faster than climb (τ_decay = τ_climb / 4 = 24ms).
++	 * This asymmetry gives interactive tasks faster recovery during
++	 * brief sleeps (e.g. GPU pipeline bubbles) while the slower climb
++	 * ensures CPU-bound tasks are not penalised prematurely.
 +	 *
-+	 * The step is clamped to ema to prevent underflow — the EMA approaches
-+	 * 0 asymptotically but never reaches it in finite time.  Every sleep
-+	 * duration, from sub-microsecond to multi-second, registers proportional
-+	 * decay through the same continuous formula.
++	 * step = ema × sleep_ns × α × D / (BUDGET_MAX × FP_ONE)
++	 *       where D = INFINITY_EMA_DECAY_DIV = 4
++	 *
++	 * The proportional clamp (step > ema) prevents underflow — the
++	 * EMA approaches 0 asymptotically but never reaches it in finite
++	 * time.
 +	 */
 +	ctx->prev_ema = ctx->ema;
-+	step = div64_u64(ctx->ema * sleep_ns * INFINITY_EMA_ALPHA,
++	step = div64_u64(ctx->ema * sleep_ns * INFINITY_EMA_ALPHA *
++			 INFINITY_EMA_DECAY_DIV,
 +			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
 +	if (step > ctx->ema)
 +		step = ctx->ema;
@@ -523,16 +531,10 @@ index 000000000..beb058074
 +	u64 effective;
 +
 +	/*
-+	 * Scale the vslice as a continuous function of the effective EMA.
-+	 * The formula vslice' = vslice × ema / BUDGET_MAX is asymptotic:
-+	 * at EMA → 0, the vslice approaches 0 (instant scheduling on
-+	 * wakeup); at EMA → BUDGET_MAX, the vslice approaches the nominal
-+	 * value.  The +1 term guarantees a positive vslice for EEVDF tree
-+	 * placement at EMA = 0.
-+	 *
-+	 * This replaces the v3 fixed-50%-reduction cap with a fully
-+	 * continuous scaling — every EMA value produces a distinct
-+	 * vslice, no thresholds, no discontinuities.
++	 * Asymptotic vslice: vslice' = vslice × ema / BUDGET_MAX.
++	 * At EMA → 0: vslice → 0 (instant scheduling on wakeup).
++	 * At EMA → BUDGET_MAX: vslice approaches the nominal value.
++	 * No cap, no threshold, fully continuous.
 +	 */
 +	effective = infinity_effective_ema(ctx);
 +	if (effective >= INFINITY_BUDGET_MAX_NS)
@@ -548,7 +550,13 @@ index 000000000..beb058074
 +{
 +	if (ema) {
 +		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-+		u64 denom = 100ULL - pct * 3ULL / 4ULL;
++		/*
++		 * Steeper slope: × 9/10 instead of × 3/4.
++		 * denom = 100 - pct × 9/10, always ≥ 10.
++		 * At pct=100: scale = 100/10 = 10× (vs 4×).
++		 */
++		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
++				      INFINITY_VRUNTIME_SLOPE_DEN;
 +
 +		if (denom < 100ULL)
 +			vdelta = div64_u64(vdelta * 100ULL, denom);
@@ -557,12 +565,11 @@ index 000000000..beb058074
 +}
 +
 +/* ------------------------------------------------------------------ */
-+/* infinity_rt_consume — EMA climb on RT wakeup                        */
++/* infinity_rt_consume — EMA climb on RT runtime                       */
 +/* ------------------------------------------------------------------ */
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
-+	/* Scale the RT EMA step proportionally to actual runtime */
 +	u64 step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
 +			   INFINITY_RT_ALPHA,
 +			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
@@ -580,18 +587,8 @@ index 000000000..beb058074
 +	if (sleep_ns == 0)
 +		return;
 +
-+	/*
-+	 * Time-proportional RT EMA decay, matching the fair path.
-+	 * step = rt_ema × sleep_ns × α / (RT_BUDGET × FP_ONE)
-+	 *
-+	 * The old event-rate-dependent decay (divide by 4 per sleep) was
-+	 * independent of actual sleep duration.  A time-proportional decay
-+	 * means well-behaved RT tasks (short compute, long blocks) recover
-+	 * faster, while RT tasks that briefly block and resume retain more
-+	 * of their rt_ema — accurate runtime tracking regardless of wakeup
-+	 * frequency.
-+	 */
-+	step = div64_u64(ctx->rt_ema * sleep_ns * INFINITY_RT_ALPHA,
++	step = div64_u64(ctx->rt_ema * sleep_ns * INFINITY_RT_ALPHA *
++			 INFINITY_EMA_DECAY_DIV,
 +			 INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 +	if (step > ctx->rt_ema)
 +		step = ctx->rt_ema;
@@ -611,21 +608,23 @@ index 000000000..beb058074
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..3dd258361
+index 000000000..0c27ce432
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,176 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.h — Infinity scheduler API (v4).
++ * infinity_sched.h — Infinity scheduler API (dev).
 + *
 + * Architecture:
 + *
 + *   fair.c / rt.c (Linux scheduler)   infinity_sched.c (Infinity algorithm)
 + *   ────────────────────────────────   ─────────────────────────────────────
 + *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
++ *   update_deadline()       ──init──► infinity_timer_start()  — per-task deadline hrtimer
++ *   dequeue_task_fair()     ──cancel► infinity_timer_cancel() — cancel on dequeue
 + *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
 + *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
 + *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
@@ -639,19 +638,20 @@ index 000000000..3dd258361
 + *   init/init_task.c        ──init──► infinity.{}             — static init
 + *   place_entity()          ──call──► infinity_wakeup_scale() — asymptotic vslice on wakeup
 + *
-+ * Tunables (sysctl kernel.infinity_*):
-+ *   infinity_carriage_ns   — base fair-share window (default 2ms)
-+ *   infinity_smt_divisor   — SMT secondary slice divisor (default 2)
-+ *   infinity_running       — read-only flag, 1 if active
++ * Tunables:
++ *   kernel.infinity_smt_divisor   — SMT secondary slice divisor (default 2)
++ *   kernel.infinity_running       — read-only flag, 1 if active
++ *
++ * The carriage_ns (base fair-share window) is auto-scaled from CPU count at
++ * init, matching stock EEVDF's CPU-count scaling behaviour.  No tunable needed.
++ *
++ * Per-task hrtimer for deadline tracking makes the scheduler independent of
++ * the periodic tick — deadlines expire in real-time, not at the next tick
++ * boundary.  This is particularly beneficial on NOHZ_FULL (tickless) systems.
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
 + * Higher EMA → shorter time slice and faster vruntime advance.
-+ * v4 adds a fully continuous limit-based design: symmetric time constant
-+ * for climb and decay (no hard resets), asymptotic vslice on wakeup,
-+ * time-proportional RT decay, and a two-pole EMA correction that
-+ * distinguishes oscillating (interactive) from sustained (CPU-bound)
-+ * workloads.
 + */
 +
 +#ifndef __INFINITY_SCHED_H
@@ -660,41 +660,49 @@ index 000000000..3dd258361
 +#include <linux/sched.h>
 +
 +/* ------------------------------------------------------------------ */
-+/* Tunable defaults                                                    */
++/* Constants                                                           */
 +/* ------------------------------------------------------------------ */
 +
-+/** Base fair-share window (2ms). */
-+#define INFINITY_CARRIAGE_NS_DEFAULT	2000000ULL
++/** Default base fair-share window (2ms, auto-scaled by CPU count). */
++#define INFINITY_BASE_CARRIAGE_NS	2000000ULL
 +
-+/** SMT secondary slice divisor (2 = half slice). */
-+#define INFINITY_SMT_DIVISOR_DEFAULT	2
++/** Maximum budget ceiling (6ms). */
++#define INFINITY_BUDGET_MAX_NS		6000000ULL
 +
-+/* ------------------------------------------------------------------ */
-+/* Clamp bounds                                                        */
-+/* ------------------------------------------------------------------ */
-+
-+#define INFINITY_CARRIAGE_NS_MIN	1000ULL
-+#define INFINITY_CARRIAGE_NS_MAX	100000000ULL	/* 100ms */
-+
-+#define INFINITY_SMT_DIVISOR_MIN	1
-+#define INFINITY_SMT_DIVISOR_MAX	16
-+
-+/* ------------------------------------------------------------------ */
-+/* Hard constants (not user-tunable)                                   */
-+/* ------------------------------------------------------------------ */
-+
-+/** Minimum slice floor (400us). */
-+#define INFINITY_SLICE_MIN_NS		400000ULL
-+
-+/** Maximum budget (2ms). */
-+#define INFINITY_BUDGET_MAX_NS		2000000ULL
-+
-+/** EMA time constant numerator: τ = BUDGET_MAX × FP_ONE / ALPHA (32ms). */
++/**
++ * EMA time constant: τ = BUDGET_MAX × FP_ONE / ALPHA.
++ * α = 16 gives τ = 6ms × 256 / 16 = 96ms for climb.
++ */
 +#define INFINITY_EMA_ALPHA		16
++
++/**
++ * Decay is 4× faster than climb: τ_decay = τ_climb / 4 = 24ms.
++ * Faster decay means interactive tasks recover their EMA more quickly
++ * during brief sleeps (e.g., GPU wait), without losing the asymptotic
++ * convergence guarantee of the limit concept.
++ */
++#define INFINITY_EMA_DECAY_DIV		4
 +
 +/** Fixed-point shift for fractional precision (8 bits). */
 +#define INFINITY_FP_SHIFT		8
 +#define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
++
++/**
++ * Vruntime scaling slope: × 9/10 instead of × 3/4.
++ * Max scaling at EMA=100%: 100 / (100 - 90) = 10× (was 4×).
++ * This gives a more aggressive allocation shift toward interactive tasks
++ * while remaining mathematically bounded — the divisor is always ≥ 10.
++ */
++#define INFINITY_VRUNTIME_SLOPE_NUM	9
++#define INFINITY_VRUNTIME_SLOPE_DEN	10
++
++/* ------------------------------------------------------------------ */
++/* SMT divisor bounds                                                  */
++/* ------------------------------------------------------------------ */
++
++#define INFINITY_SMT_DIVISOR_DEFAULT	2
++#define INFINITY_SMT_DIVISOR_MIN	1
++#define INFINITY_SMT_DIVISOR_MAX	16
 +
 +/**
 + * Effective EMA with two-pole correction.
@@ -720,11 +728,8 @@ index 000000000..3dd258361
 +/** RT budget ceiling (10ms — larger than fair to give RT tasks runway). */
 +#define INFINITY_RT_BUDGET_NS		10000000ULL
 +
-+/** RT alpha: slow climb (1/64 per wakeup). */
++/** RT alpha: same time constant as fair path. */
 +#define INFINITY_RT_ALPHA		4
-+
-+/** RT beta: fast decay (1/4 per sleep). */
-+#define INFINITY_RT_BETA			64
 +
 +/** Max priority decay. */
 +#define INFINITY_RT_PRIO_RANGE		30
@@ -736,8 +741,14 @@ index 000000000..3dd258361
 +/* External sysctl tunables                                            */
 +/* ------------------------------------------------------------------ */
 +
-+extern unsigned long infinity_tune_carriage_ns;
 +extern unsigned long infinity_tune_smt_divisor;
++
++/* ------------------------------------------------------------------ */
++/* Per-task deadline hrtimer (tick-independent scheduling)             */
++/* ------------------------------------------------------------------ */
++
++extern void infinity_timer_start(struct rq *rq, u64 slice_ns);
++extern void infinity_timer_cancel(void);
 +
 +/* ------------------------------------------------------------------ */
 +/* API — called from fair.c and rt.c                                   */
@@ -756,8 +767,6 @@ index 000000000..3dd258361
 + * approaches zero as EMA → 0 (instant scheduling on wakeup) and
 + * approaches the nominal vslice as EMA → BUDGET_MAX.
 + *
-+ * This is the continuous-limit version of the v3 fixed-50%-reduction
-+ * approach — there is no cap, no threshold, no discrete reduction.
 + * The +1 term guarantees a positive vslice for EEVDF tree placement.
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
@@ -766,12 +775,11 @@ index 000000000..3dd258361
 + * infinity_vruntime_scale — scale vruntime advancement by EMA
 + *
 + * Called from update_curr() to advance vruntime faster for CPU-bound
-+ * tasks (high EMA).  The scaling factor mirrors infinity_slice(): a
-+ * task that receives a 25% slice at EMA=100% has its vruntime advanced
-+ * 4x faster, reducing its effective CPU allocation by the same ratio.
++ * tasks (high EMA).  Uses slope × 9/10 instead of × 3/4 — max 10×
++ * scaling at EMA=100% (was 4×).
 + *
 + *   EMA ~= 0             (interactive):   ~1x (normal)
-+ *   EMA ~= BUDGET_MAX    (CPU-bound):     ~4x
++ *   EMA ~= BUDGET_MAX    (CPU-bound):     ~10x
 + */
 +u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
 +

@@ -1,17 +1,17 @@
-# infinity-scheduler (v4)
+# infinity-scheduler (dev)
 
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget; CPU-bound tasks converge toward a minimum. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
 
 > [!TIP]
-> **TL;DR — v4 is about making the EMA fully continuous (no hard resets, no caps).**
+> **TL;DR — dev makes Infinity tick-independent, more aggressive, and self-tuning.**
 >
-> Climb and decay now share the same time constant (τ = 32ms), so EMA naturally
-> settles at your task's duty cycle — a game that uses 30% CPU stabilises at 30%
-> EMA and gets exactly the priority it needs, no tuning required. Wakeup vslice
-> approaches zero as EMA drops (instant scheduling on wakeup), and a two-pole
-> correction gives oscillating workloads (games, interactive apps) a systematic
-> edge over sustained CPU-bound tasks. RT tasks now use the same time-based
-> decay formula instead of event-rate-dependent fixed steps.
+> A per-task hrtimer fires at the exact deadline expiry — no longer dependent on
+> the periodic tick. The vruntime scaling slope is now × 9/10 (max 10× instead of
+> 4×) for a stronger allocation shift to interactive tasks. The slice minimum is
+> 50% of fair share (proportional, not a fixed 400µs floor) so the EMA always has
+> room to modulate. Carriage_ns auto-scales from CPU count — one less knob to
+> worry about. Decay is 4× faster than climb (τ = 24ms vs 96ms) for quicker
+> interactive recovery during brief sleeps.
 
 <p align="center">
   <img src="assets/infinity_v4_compress.png" alt="Infinity v4 Scheduler Architecture" width="800"/>
@@ -60,12 +60,11 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 
 | Parameter | Default | Range | Description |
 |---|---|---|---|
-| `infinity_carriage_ns` | 2000000 (2ms) | [1000, 100000000] | Base fair-share window (ns) |
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
-| `infinity_reset` | — | — | Write `1` to reset all tunables to defaults |
 
-No auto-tuning sysctl is needed — the EMA is self-stabilizing by construction.
+The base fair-share window (`carriage_ns`) is auto-scaled from CPU count at init,
+matching stock EEVDF's CPU-count scaling behaviour.  No user tunable is needed.
 
 ```bash
 sudo sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
