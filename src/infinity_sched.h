@@ -72,12 +72,17 @@
 #define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
 
 /**
- * Vruntime scaling slope: × 9/10 instead of × 3/4.
- * Max scaling at EMA=100%: 100 / (100 - 90) = 10× (was 4×).
- * This gives a more aggressive allocation shift toward interactive tasks
- * while remaining mathematically bounded — the divisor is always ≥ 10.
+ * Vruntime scaling slope: × 8/10 (max 5× at EMA=100%).
+ * Reduced from × 9/10 (max 10×) to prevent application launch stalls:
+ * short-lived initialization bursts that saturate the EMA within a few
+ * hundred milliseconds would otherwise have their vruntime advanced by
+ * 10×, disqualifying them from EEVDF selection until the burst passes.
+ *
+ * At max scaling: 100 / (100 - 80) = 5×.
+ * The denominator is always ≥ 20, so the scaling is bounded and cannot
+ * diverge regardless of EMA input.
  */
-#define INFINITY_VRUNTIME_SLOPE_NUM	9
+#define INFINITY_VRUNTIME_SLOPE_NUM	8
 #define INFINITY_VRUNTIME_SLOPE_DEN	10
 
 /* ------------------------------------------------------------------ */
