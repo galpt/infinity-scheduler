@@ -17,17 +17,15 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 
 ```mermaid
 flowchart TB
-    classDef fairStroke fill:#fff,stroke:#3b82f6,stroke-width:2
-    classDef algoNode fill:#eef2ff,stroke:#6366f1,stroke-width:2
-    classDef tagNode fill:#f0fdf4,stroke:#22c55e,stroke-width:2
-    classDef wakeNode fill:#f0fdfa,stroke:#14b8a6,stroke-width:2
-    classDef rtStroke fill:#fff,stroke:#f59e0b,stroke-width:2
-    classDef rtNode fill:#fffbeb,stroke:#d97706,stroke-width:2
-    classDef infraNode fill:#f8fafc,stroke:#94a3b8,stroke-width:2
+    classDef fair fill:#0000,stroke:#3b82f6,stroke-width:2
+    classDef algo fill:#0000,stroke:#6366f1,stroke-width:2
+    classDef tag fill:#0000,stroke:#22c55e,stroke-width:2
+    classDef wake fill:#0000,stroke:#14b8a6,stroke-width:2
+    classDef rt fill:#0000,stroke:#f59e0b,stroke-width:2
+    classDef rtN fill:#0000,stroke:#d97706,stroke-width:2
+    classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        direction TB
-
         TASK["Task
  \ 
 wakes / sleeps"] --> GAUGE["EMA gauge
@@ -36,26 +34,26 @@ wakes / sleeps"] --> GAUGE["EMA gauge
  \ 
 τ_climb 96ms
 τ_decay 24ms"]
-        class GAUGE fairStroke
+        class GAUGE fair
 
         GAUGE --> TWOPOLE["two-pole correction
  \ 
 effective = ema − Δema/2
  \ 
 neutral at wakeup"]
-        class TWOPOLE algoNode
+        class TWOPOLE algo
 
         TWOPOLE --> SLICE["infinity_slice()
  \ 
 EMA↑ → slice↓
  \ 
 min 50% of share"]
-        class SLICE algoNode
+        class SLICE algo
 
         TWOPOLE --> VRT["infinity_vruntime_scale()
  \ 
 ×8/10 slope, max 5×"]
-        class VRT algoNode
+        class VRT algo
 
         subgraph TAGS["Subsystem tags (50ms expiry)"]
             INPUT["INPUT
@@ -68,7 +66,7 @@ dma_fence_signal()"]
  \ 
 snd_pcm_read()"]
         end
-        class INPUT,GRAPHICS,AUDIO tagNode
+        class INPUT,GRAPHICS,AUDIO tag
 
         TAGS -- "INPUT/AUDIO: 1× bypass" --> VRT
         TAGS -- "GRAPHICS: ×5/10 (max 2×)" --> VRT
@@ -76,31 +74,31 @@ snd_pcm_read()"]
         VRT --> UPD["update_curr()
  \ 
 vruntime += scaled_delta"]
-        class UPD fairStroke
+        class UPD fair
 
         UPD --> HRTICK["hrtick_start(rq, slice_ns)
  \ 
 tick-independent timer
  \ 
 fires at exact slice expiry"]
-        class HRTICK algoNode
+        class HRTICK algo
 
         HRTICK --> PICK["pick_eevdf()
  \ 
 EEVDF tree
  \ 
 earliest deadline wins"]
-        class PICK algoNode
+        class PICK algo
 
         PICK --> FUTEX["futex_waiting?
  \ 
 bypass protect_slice"]
-        class FUTEX algoNode
+        class FUTEX algo
 
         FUTEX --> RUN["Task runs
  \ 
 until block or preempt"]
-        class RUN fairStroke
+        class RUN fair
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
@@ -119,18 +117,19 @@ vslice' = vslice × ema / BUDGET_MAX
 deadline = vruntime + vslice'"]
             PLACE --> PICK
         end
-        class DECAY,WUP,PLACE wakeNode
+        class DECAY,WUP,PLACE wake
 
         RUN -. "block / preempt" .-> WAKEUP
         RUN --> GAUGE
     end
-    class FAIR fairStroke
 
     subgraph RT["RT tasks (SCHED_FIFO/RR)"]
-        direction TB
         RT_T["RT task runs"] --> RT_C["infinity_rt_consume()
  \ 
 EMA climbs with runtime"]
+        class RT_T rt
+        class RT_C rtN
+
         RT_C --> RT_D["infinity_rt_wakeup()
  \ 
 time-proportional decay
@@ -138,18 +137,20 @@ time-proportional decay
 same τ as fair path
  \ 
 dedicated rt_last_sleep_ns"]
+        class RT_D rtN
+
         RT_D --> RT_P["infinity_rt_effective_prio()
  \ 
 rt_ema↑ → priority↓
  \ 
 moved to lower RT queue"]
+        class RT_P rtN
+
         RT_P --> RT_Q["RT queue placement
  \ 
 gated to root_task_group"]
+        class RT_Q rt
     end
-    class RT_T,RT_Q rtStroke
-    class RT_C,RT_D,RT_P rtNode
-    class RT rtStroke
 
     subgraph INFRA["Scheduler infrastructure"]
         AC["carriage_ns
@@ -168,8 +169,7 @@ smt_divisor
  \ 
 running (ro)"]
     end
-    class AC,OF,TU infraNode
-    class INFRA infraNode
+    class AC,OF,TU infra
 ```
 
 ## Quick start
