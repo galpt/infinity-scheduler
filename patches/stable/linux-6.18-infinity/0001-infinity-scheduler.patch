@@ -1,10 +1,7 @@
-From 4d0e3d51c8620bfbc16f89d155bc80295a1d4ad3 Mon Sep 17 00:00:00 2001
+From 7da6090e9e55837ab8388b462179d73aa39768e9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 19:02:56 +0700
+Date: Thu, 2 Jul 2026 19:18:50 +0700
 Subject: [PATCH] infinity-scheduler v4+dev (6.18)
-
-Full cumulative patch for the Infinity scheduler on kernel 6.18.
-See patch for kernel 7.1 for full changelog.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -14,11 +11,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  85 ++++++++-
- kernel/sched/infinity_sched.c | 322 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 330 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 172 ++++++++++++++++++
  kernel/sched/rt.c             |  62 ++++++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 660 insertions(+), 9 deletions(-)
+ 10 files changed, 668 insertions(+), 9 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -273,10 +270,10 @@ index 5b7523242..14342653d 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..e041f5f95
+index 000000000..16c1b8f07
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,330 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -489,7 +486,6 @@ index 000000000..e041f5f95
 +	if (sleep_ns > 40000000000ULL)
 +		sleep_ns = 40000000000ULL;
 +
-+	ctx->prev_ema = ctx->ema;
 +	step = mul_u64_u64_div_u64(ctx->ema,
 +				 sleep_ns * INFINITY_EMA_ALPHA *
 +				 INFINITY_EMA_DECAY_DIV,
@@ -497,6 +493,15 @@ index 000000000..e041f5f95
 +	if (step > ctx->ema)
 +		step = ctx->ema;
 +	ctx->ema -= step;
++
++	/*
++	 * Set prev_ema after the decay so the two-pole correction
++	 * (d = ema - prev_ema) evaluates to ~0 at wakeup time, preserving
++	 * the full wakeup vslice reduction and interactive boost.
++	 * During the subsequent compute burst infinity_consume() will
++	 * overwrite prev_ema before climbing, re-enabling the correction.
++	 */
++	ctx->prev_ema = ctx->ema;
 +}
 +
 +/* ------------------------------------------------------------------ */
