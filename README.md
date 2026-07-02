@@ -20,8 +20,8 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 ## Quick start
 
 ```bash
-# 1. Clone the v4 branch
-git clone -b v4 https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the dev branch
+git clone -b dev https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -65,11 +65,6 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 
 The base fair-share window (`carriage_ns`) is auto-scaled from CPU count at init,
 matching stock EEVDF's CPU-count scaling behaviour.  No user tunable is needed.
-
-```bash
-sudo sysctl kernel.infinity_carriage_ns=4000000     # 4ms base window
-sudo sysctl kernel.infinity_reset=1                 # reset to defaults
-```
 
 ## Feature comparison
 
