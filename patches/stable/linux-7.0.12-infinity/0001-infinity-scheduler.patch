@@ -89,7 +89,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..c2f767a37 100644
+index 3bce48ad0..68f64ab8d 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -150,7 +150,7 @@ index 3bce48ad0..c2f767a37 100644
 +#endif
 +			se->slice = infinity_slice(cfs_rq->nr_queued, is_smt,
 +						   infinity_effective_ema(&p__->infinity));
-+			infinity_timer_start(rq_of(cfs_rq), se->slice);
++			hrtick_start(rq_of(cfs_rq), se->slice);
 +		} else {
 +			se->slice = sysctl_sched_base_slice;
 +		}
@@ -226,19 +226,18 @@ index 3bce48ad0..c2f767a37 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7184,9 +7250,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7184,9 +7250,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
 -	/*
 -	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
 -	 */
-+	/* Infinity: cancel deadline hrtimer */
-+	infinity_timer_cancel();
++
  
  	hrtick_update(rq);
  	return true;
-@@ -13459,6 +13524,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13459,6 +13523,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -252,10 +251,10 @@ index 3bce48ad0..c2f767a37 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..fde5348a5
+index 000000000..5556bba61
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,351 @@
+@@ -0,0 +1,309 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -285,8 +284,6 @@ index 000000000..fde5348a5
 +#include <linux/sched.h>
 +#include <linux/math64.h>
 +#include <linux/sysctl.h>
-+#include "sched.h"
-+#include <linux/hrtimer.h>
 +#include "infinity_sched.h"
 +
 +/* ------------------------------------------------------------------ */
@@ -338,37 +335,6 @@ index 000000000..fde5348a5
 +};
 +
 +/* ------------------------------------------------------------------ */
-+/* Per-CPU deadline hrtimer (tick-independent scheduling)              */
-+/* ------------------------------------------------------------------ */
-+
-+static DEFINE_PER_CPU(struct hrtimer, infinity_deadline_timer);
-+
-+static enum hrtimer_restart infinity_deadline_callback(struct hrtimer *timer)
-+{
-+	int cpu = smp_processor_id();
-+
-+	resched_curr(cpu_rq(cpu));
-+	return HRTIMER_NORESTART;
-+}
-+
-+void infinity_timer_start(struct rq *rq, u64 slice_ns)
-+{
-+	struct hrtimer *timer;
-+
-+	timer = this_cpu_ptr(&infinity_deadline_timer);
-+	hrtimer_start(timer, ns_to_ktime(slice_ns),
-+		      HRTIMER_MODE_REL_PINNED_SOFT);
-+}
-+
-+void infinity_timer_cancel(void)
-+{
-+	struct hrtimer *timer;
-+
-+	timer = this_cpu_ptr(&infinity_deadline_timer);
-+	hrtimer_try_to_cancel(timer);
-+}
-+
-+/* ------------------------------------------------------------------ */
 +/* Auto-carriage scaling                                               */
 +/* ------------------------------------------------------------------ */
 +
@@ -388,18 +354,9 @@ index 000000000..fde5348a5
 +
 +static int __init infinity_sched_init(void)
 +{
-+	int cpu;
-+
 +	__register_sysctl_init("kernel", infinity_sysctl_table,
 +			      "infinity_sysctl_table",
 +			      ARRAY_SIZE(infinity_sysctl_table) - 1);
-+
-+	for_each_possible_cpu(cpu) {
-+		struct hrtimer *timer = per_cpu_ptr(&infinity_deadline_timer, cpu);
-+
-+		hrtimer_setup(timer, infinity_deadline_callback,
-+			      CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED_SOFT);
-+	}
 +
 +	auto_carriage_ns();
 +
@@ -609,10 +566,10 @@ index 000000000..fde5348a5
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..0c27ce432
+index 000000000..4086f9270
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,167 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -624,8 +581,6 @@ index 000000000..0c27ce432
 + *   fair.c / rt.c (Linux scheduler)   infinity_sched.c (Infinity algorithm)
 + *   ────────────────────────────────   ─────────────────────────────────────
 + *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
-+ *   update_deadline()       ──init──► infinity_timer_start()  — per-task deadline hrtimer
-+ *   dequeue_task_fair()     ──cancel► infinity_timer_cancel() — cancel on dequeue
 + *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
 + *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
 + *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
@@ -646,9 +601,9 @@ index 000000000..0c27ce432
 + * The carriage_ns (base fair-share window) is auto-scaled from CPU count at
 + * init, matching stock EEVDF's CPU-count scaling behaviour.  No tunable needed.
 + *
-+ * Per-task hrtimer for deadline tracking makes the scheduler independent of
-+ * the periodic tick — deadlines expire in real-time, not at the next tick
-+ * boundary.  This is particularly beneficial on NOHZ_FULL (tickless) systems.
++ * Deadline tracking uses the kernel's built-in hrtick_start() mechanism rather
++ * than a custom hrtimer — this avoids the lock inversion (rq->lock vs
++ * cpu_base->lock) that a raw hrtimer would introduce inside scheduler locks.
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -743,13 +698,6 @@ index 000000000..0c27ce432
 +/* ------------------------------------------------------------------ */
 +
 +extern unsigned long infinity_tune_smt_divisor;
-+
-+/* ------------------------------------------------------------------ */
-+/* Per-task deadline hrtimer (tick-independent scheduling)             */
-+/* ------------------------------------------------------------------ */
-+
-+extern void infinity_timer_start(struct rq *rq, u64 slice_ns);
-+extern void infinity_timer_cancel(void);
 +
 +/* ------------------------------------------------------------------ */
 +/* API — called from fair.c and rt.c                                   */

@@ -9,8 +9,6 @@
  *   fair.c / rt.c (Linux scheduler)   infinity_sched.c (Infinity algorithm)
  *   ────────────────────────────────   ─────────────────────────────────────
  *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
- *   update_deadline()       ──init──► infinity_timer_start()  — per-task deadline hrtimer
- *   dequeue_task_fair()     ──cancel► infinity_timer_cancel() — cancel on dequeue
  *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
  *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
  *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
@@ -31,9 +29,9 @@
  * The carriage_ns (base fair-share window) is auto-scaled from CPU count at
  * init, matching stock EEVDF's CPU-count scaling behaviour.  No tunable needed.
  *
- * Per-task hrtimer for deadline tracking makes the scheduler independent of
- * the periodic tick — deadlines expire in real-time, not at the next tick
- * boundary.  This is particularly beneficial on NOHZ_FULL (tickless) systems.
+ * Deadline tracking uses the kernel's built-in hrtick_start() mechanism rather
+ * than a custom hrtimer — this avoids the lock inversion (rq->lock vs
+ * cpu_base->lock) that a raw hrtimer would introduce inside scheduler locks.
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -128,13 +126,6 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 /* ------------------------------------------------------------------ */
 
 extern unsigned long infinity_tune_smt_divisor;
-
-/* ------------------------------------------------------------------ */
-/* Per-task deadline hrtimer (tick-independent scheduling)             */
-/* ------------------------------------------------------------------ */
-
-extern void infinity_timer_start(struct rq *rq, u64 slice_ns);
-extern void infinity_timer_cancel(void);
 
 /* ------------------------------------------------------------------ */
 /* API — called from fair.c and rt.c                                   */

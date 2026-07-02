@@ -27,8 +27,6 @@
 #include <linux/sched.h>
 #include <linux/math64.h>
 #include <linux/sysctl.h>
-#include "sched.h"
-#include <linux/hrtimer.h>
 #include "infinity_sched.h"
 
 /* ------------------------------------------------------------------ */
@@ -80,37 +78,6 @@ static struct ctl_table infinity_sysctl_table[] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Per-CPU deadline hrtimer (tick-independent scheduling)              */
-/* ------------------------------------------------------------------ */
-
-static DEFINE_PER_CPU(struct hrtimer, infinity_deadline_timer);
-
-static enum hrtimer_restart infinity_deadline_callback(struct hrtimer *timer)
-{
-	int cpu = smp_processor_id();
-
-	resched_curr(cpu_rq(cpu));
-	return HRTIMER_NORESTART;
-}
-
-void infinity_timer_start(struct rq *rq, u64 slice_ns)
-{
-	struct hrtimer *timer;
-
-	timer = this_cpu_ptr(&infinity_deadline_timer);
-	hrtimer_start(timer, ns_to_ktime(slice_ns),
-		      HRTIMER_MODE_REL_PINNED_SOFT);
-}
-
-void infinity_timer_cancel(void)
-{
-	struct hrtimer *timer;
-
-	timer = this_cpu_ptr(&infinity_deadline_timer);
-	hrtimer_try_to_cancel(timer);
-}
-
-/* ------------------------------------------------------------------ */
 /* Auto-carriage scaling                                               */
 /* ------------------------------------------------------------------ */
 
@@ -130,18 +97,9 @@ static void __init auto_carriage_ns(void)
 
 static int __init infinity_sched_init(void)
 {
-	int cpu;
-
 	__register_sysctl_init("kernel", infinity_sysctl_table,
 			      "infinity_sysctl_table",
 			      ARRAY_SIZE(infinity_sysctl_table) - 1);
-
-	for_each_possible_cpu(cpu) {
-		struct hrtimer *timer = per_cpu_ptr(&infinity_deadline_timer, cpu);
-
-		hrtimer_setup(timer, infinity_deadline_callback,
-			      CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED_SOFT);
-	}
 
 	auto_carriage_ns();
 
