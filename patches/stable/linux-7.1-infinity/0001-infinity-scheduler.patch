@@ -1,6 +1,6 @@
-From ae273034a98d99ee66409846071d1906ea4ad078 Mon Sep 17 00:00:00 2001
+From 49629d6f3832e2789918af725e16c2c6be2da5a8 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 00:14:04 +0700
+Date: Fri, 3 Jul 2026 00:20:18 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -51,7 +51,7 @@ index a2aa82f4e..42aa6e0a9 100644
  }
  
 diff --git a/drivers/input/evdev.c b/drivers/input/evdev.c
-index c7325226c..b40771e5b 100644
+index c7325226c..9c9d98a68 100644
 --- a/drivers/input/evdev.c
 +++ b/drivers/input/evdev.c
 @@ -14,6 +14,7 @@
@@ -73,7 +73,7 @@ index c7325226c..b40771e5b 100644
 +			 * 50ms expiry ensures the tag clears quickly
 +			 * when input stops. */
 +			current->infinity.subsystem_tags |= INFTY_TAG_INPUT;
-+			current->infinity.tag_timestamp = ktime_get_ns();
++			current->infinity.tag_timestamp = sched_clock();
  			break;
 +		}
  
@@ -1021,7 +1021,7 @@ index b215b0ead..90d1e26ac 100644
  		retval = uclamp_validate(p, attr);
  		if (retval)
 diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
-index 302643c1c..2e850fd99 100644
+index 302643c1c..5f4cd4ffb 100644
 --- a/sound/core/pcm_native.c
 +++ b/sound/core/pcm_native.c
 @@ -10,6 +10,7 @@
@@ -1042,7 +1042,7 @@ index 302643c1c..2e850fd99 100644
 +		 * meaning the audio playback/capture thread is actively
 +		 * processing audio data.  Tag expires after 50ms. */
 +		current->infinity.subsystem_tags |= INFTY_TAG_AUDIO;
-+		current->infinity.tag_timestamp = ktime_get_ns();
++		current->infinity.tag_timestamp = sched_clock();
  		result = frames_to_bytes(runtime, result);
 +	}
  	return result;
