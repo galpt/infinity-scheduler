@@ -29,9 +29,14 @@
  * The carriage_ns (base fair-share window) is auto-scaled from CPU count at
  * init, matching stock EEVDF's CPU-count scaling behaviour.  No tunable needed.
  *
- * Deadline tracking uses the kernel's built-in hrtick_start() mechanism rather
- * than a custom hrtimer — this avoids the lock inversion (rq->lock vs
- * cpu_base->lock) that a raw hrtimer would introduce inside scheduler locks.
+ * Deadline precision is handled by the kernel's native hrtick_update()
+ * infrastructure, which calls hrtick_start_fair() at task switch, tick
+ * evaluation, and enqueue/dequeue boundaries.  Infinity computes the
+ * EMA-modulated slice in update_deadline(); the kernel's scheduler
+ * framework manages the hardware timer correctly for running tasks only.
+ *
+ * This avoids the lock inversion (rq->lock vs cpu_base->lock) that a
+ * raw hrtimer would introduce inside scheduler locks.
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.

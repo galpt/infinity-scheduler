@@ -1,6 +1,6 @@
-From 87d21a434e03c36697f21d8d90b787b398ac5f29 Mon Sep 17 00:00:00 2001
+From facb67e02445a20c5be4c6218ec7bb2cbfca1b10 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 22:22:24 +0700
+Date: Thu, 2 Jul 2026 23:06:14 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -12,13 +12,13 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |   8 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  80 +++++++-
+ kernel/sched/fair.c           |  79 +++++++-
  kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 200 +++++++++++++++++++
+ kernel/sched/infinity_sched.h | 205 ++++++++++++++++++++
  kernel/sched/rt.c             |  62 +++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   5 +-
- 13 files changed, 739 insertions(+), 11 deletions(-)
+ 13 files changed, 743 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -156,7 +156,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..3b72e6feb 100644
+index 5b7523242..2735f4af1 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -189,7 +189,7 @@ index 5b7523242..3b72e6feb 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1047,9 +1059,32 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1047,9 +1059,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -217,7 +217,6 @@ index 5b7523242..3b72e6feb 100644
 +#endif
 +			se->slice = infinity_slice(cfs_rq->nr_queued, is_smt,
 +						   infinity_effective_ema(&p__->infinity));
-+			hrtick_start(rq_of(cfs_rq), se->slice);
 +		} else {
 +			se->slice = sysctl_sched_base_slice;
 +		}
@@ -225,7 +224,7 @@ index 5b7523242..3b72e6feb 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1224,7 +1259,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1224,7 +1258,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -240,7 +239,7 @@ index 5b7523242..3b72e6feb 100644
  	resched = update_deadline(cfs_rq, curr);
  	update_min_vruntime(cfs_rq);
  
-@@ -5223,6 +5264,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5223,6 +5263,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -255,7 +254,7 @@ index 5b7523242..3b72e6feb 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5572,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5571,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
  
  	se = pick_eevdf(cfs_rq);
@@ -264,7 +263,7 @@ index 5b7523242..3b72e6feb 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6970,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6969,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -279,7 +278,7 @@ index 5b7523242..3b72e6feb 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7219,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7218,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -288,7 +287,7 @@ index 5b7523242..3b72e6feb 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7172,6 +7233,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7172,6 +7232,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -297,7 +296,7 @@ index 5b7523242..3b72e6feb 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -13137,6 +13200,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13199,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -672,10 +671,10 @@ index 000000000..56c29489c
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..e9db2e604
+index 000000000..b9606ab81
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,205 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -707,9 +706,14 @@ index 000000000..e9db2e604
 + * The carriage_ns (base fair-share window) is auto-scaled from CPU count at
 + * init, matching stock EEVDF's CPU-count scaling behaviour.  No tunable needed.
 + *
-+ * Deadline tracking uses the kernel's built-in hrtick_start() mechanism rather
-+ * than a custom hrtimer — this avoids the lock inversion (rq->lock vs
-+ * cpu_base->lock) that a raw hrtimer would introduce inside scheduler locks.
++ * Deadline precision is handled by the kernel's native hrtick_update()
++ * infrastructure, which calls hrtick_start_fair() at task switch, tick
++ * evaluation, and enqueue/dequeue boundaries.  Infinity computes the
++ * EMA-modulated slice in update_deadline(); the kernel's scheduler
++ * framework manages the hardware timer correctly for running tasks only.
++ *
++ * This avoids the lock inversion (rq->lock vs cpu_base->lock) that a
++ * raw hrtimer would introduce inside scheduler locks.
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.

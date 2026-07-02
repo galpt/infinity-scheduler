@@ -50,10 +50,7 @@ flowchart TB
         VRT --> UPD["update_curr()\nvruntime += scaled_delta"]
         class UPD fair
 
-        UPD --> HRTICK["hrtick_start(rq, slice_ns)\n \ntick-independent timer\nfires at exact slice expiry"]
-        class HRTICK algo
-
-        HRTICK --> PICK["pick_eevdf()\n \nEEVDF tree\nearliest deadline wins"]
+        UPD --> PICK["pick_eevdf()\n \nEEVDF tree\nearliest deadline wins"]
         class PICK algo
 
         PICK --> FUTEX["futex_waiting?\nbypass protect_slice"]
