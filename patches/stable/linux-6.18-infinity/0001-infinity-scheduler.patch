@@ -1,3 +1,27 @@
+From 4d0e3d51c8620bfbc16f89d155bc80295a1d4ad3 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Thu, 2 Jul 2026 19:02:56 +0700
+Subject: [PATCH] infinity-scheduler v4+dev (6.18)
+
+Full cumulative patch for the Infinity scheduler on kernel 6.18.
+See patch for kernel 7.1 for full changelog.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ include/linux/sched.h         |   9 +
+ include/uapi/linux/sched.h    |   4 +-
+ init/init_task.c              |   5 +
+ kernel/futex/waitwake.c       |   5 +-
+ kernel/sched/Makefile         |   1 +
+ kernel/sched/fair.c           |  85 ++++++++-
+ kernel/sched/infinity_sched.c | 322 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 172 ++++++++++++++++++
+ kernel/sched/rt.c             |  62 ++++++-
+ kernel/sched/syscalls.c       |   4 +
+ 10 files changed, 660 insertions(+), 9 deletions(-)
+ create mode 100644 kernel/sched/infinity_sched.c
+ create mode 100644 kernel/sched/infinity_sched.h
+
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index b469878de..3fefc69a3 100644
 --- a/include/linux/sched.h
@@ -871,3 +895,6 @@ index 77ae87f36..18dd18daf 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
+-- 
+2.55.0
+
