@@ -1,6 +1,6 @@
-From 60cfa4c2e3f92158bfcc2a955da02081bf379943 Mon Sep 17 00:00:00 2001
+From 64ddb94edf1f9ac7012bbdc904d97c24608b9015 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 01:24:00 +0700
+Date: Fri, 3 Jul 2026 01:37:25 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -15,10 +15,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  77 +++++++-
  kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 205 ++++++++++++++++++++
- kernel/sched/rt.c             |  61 +++++-
+ kernel/sched/rt.c             |  78 +++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   9 +-
- 13 files changed, 759 insertions(+), 11 deletions(-)
+ 13 files changed, 776 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -902,7 +902,7 @@ index 000000000..49ce2c219
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..912b025cb 100644
+index 4ee8faf01..6f097cf8d 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -957,7 +957,7 @@ index 4ee8faf01..912b025cb 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1495,45 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1495,62 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -983,6 +983,15 @@ index 4ee8faf01..912b025cb 100644
 +				int qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
 +				if (qprio != old_prio) {
++					struct rq *rq = rq_of_rt_rq(rt_rq);
++					bool is_curr = (p == rq->curr);
++
++					/* Rebalance Safety: A running task is never on
++					 * the pushable plist.  Only dequeue it if it
++					 * is not the current task. */
++					if (!is_curr)
++						dequeue_pushable_task(rq, p);
++
 +					queue = array->queue + qprio;
 +					if (head)
 +						list_move(&rt_se->run_list, queue);
@@ -995,6 +1004,14 @@ index 4ee8faf01..912b025cb 100644
 +					dec_rt_prio(rt_rq, old_prio);
 +					inc_rt_prio(rt_rq, qprio);
 +					p->prio = qprio;
++
++					/* Rebalance Safety: Re-index into the
++					 * pushable plist with the new priority key,
++					 * but only if the task is not running. */
++					if (!is_curr)
++						enqueue_pushable_task(rq, p);
++					else if (qprio > old_prio)
++						resched_curr(rq);
 +					return;
 +				}
 +			}

@@ -1,6 +1,6 @@
-From 3c020fc3ccc6ec6b6aa38baef138ed39a9253d46 Mon Sep 17 00:00:00 2001
+From 3a1d51e4ed3db23a2ee367e33b3a82740d84314f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 01:24:00 +0700
+Date: Fri, 3 Jul 2026 01:37:25 +0700
 Subject: [PATCH] infinity-scheduler dev: full cumulative patch
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -15,10 +15,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  81 +++++++-
  kernel/sched/infinity_sched.c | 355 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 205 ++++++++++++++++++++
- kernel/sched/rt.c             |  63 +++++-
+ kernel/sched/rt.c             |  74 ++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   6 +-
- 13 files changed, 746 insertions(+), 14 deletions(-)
+ 13 files changed, 757 insertions(+), 14 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -899,7 +899,7 @@ index 000000000..49ce2c219
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..636f22532 100644
+index 0cbee0318..b078b65be 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -954,7 +954,7 @@ index 0cbee0318..636f22532 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1490,47 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1490,58 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -982,6 +982,12 @@ index 0cbee0318..636f22532 100644
 +				int qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
 +				if (qprio != old_prio) {
++					struct rq *rq = rq_of_rt_rq(rt_rq);
++					bool is_curr = (p == rq->curr);
++
++					if (!is_curr)
++						dequeue_pushable_task(rq, p);
++
 +					queue = array->queue + qprio;
 +					if (head)
 +						list_move(&rt_se->run_list, queue);
@@ -994,6 +1000,11 @@ index 0cbee0318..636f22532 100644
 +					dec_rt_prio(rt_rq, old_prio);
 +					inc_rt_prio(rt_rq, qprio);
 +					p->prio = qprio;
++
++					if (!is_curr)
++						enqueue_pushable_task(rq, p);
++					else if (qprio > old_prio)
++						resched_curr(rq);
 +					return;
 +				}
 +			}
