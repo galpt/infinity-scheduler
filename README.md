@@ -7,7 +7,9 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 >
 > A per-task hrtimer fires at the exact deadline expiry — no longer dependent on
 > the periodic tick. The vruntime scaling slope is × 8/10 (max 5×) — balanced
-> for both interactive boosts and application launch latency. The slice minimum is
+> for both interactive boosts and application launch latency. Subsystem tags
+> (INPUT, GRAPHICS, AUDIO) let hardware drivers explicitly mark interactive
+> threads — bypassing EMA heuristics for verified real-time tasks. The slice minimum is
 > 50% of fair share (proportional, not a fixed 400µs floor) so the EMA always has
 > room to modulate. Carriage_ns auto-scales from CPU count — one less knob to
 > worry about. Decay is 4× faster than climb (τ = 24ms vs 96ms) for quicker

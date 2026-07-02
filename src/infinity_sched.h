@@ -42,6 +42,7 @@
 #define __INFINITY_SCHED_H
 
 #include <linux/sched.h>
+#include <linux/ktime.h>
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -153,17 +154,40 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
+/**
+ * infinity_tag_active — check if a task has a fresh subsystem tag
+ *
+ * Returns true if the task carries an active INPUT, GRAPHICS, or AUDIO
+ * tag that was set within the 50ms expiry window.  Tags are set by
+ * hardware-driven kernel paths (evdev, dma-fence, ALSA) at the moment
+ * of a real hardware event — not by user-space, so there is no gaming
+ * vector.
+ */
+static inline bool infinity_tag_active(struct task_struct *p)
+{
+	if (!p->infinity.subsystem_tags)
+		return false;
+	if (ktime_get_ns() - p->infinity.tag_timestamp > 50000000ULL) {
+		p->infinity.subsystem_tags = 0;
+		return false;
+	}
+	return true;
+}
+
 /*
  * infinity_vruntime_scale — scale vruntime advancement by EMA
  *
  * Called from update_curr() to advance vruntime faster for CPU-bound
- * tasks (high EMA).  Uses slope × 9/10 instead of × 3/4 — max 10×
- * scaling at EMA=100% (was 4×).
+ * tasks (high EMA).  Tasks with an active subsystem tag (INPUT,
+ * GRAPHICS, AUDIO) bypass the scaling entirely — they always run at
+ * their nominal vruntime rate, regardless of their EMA history.
  *
- *   EMA ~= 0             (interactive):   ~1x (normal)
- *   EMA ~= BUDGET_MAX    (CPU-bound):     ~10x
+ *   Tagged task:  ~1x (always, regardless of EMA)
+ *   Untagged,
+ *   EMA ~= 0:     ~1x (normal)
+ *   EMA ~= 100%:  ~5x (maximum penalty)
  */
-u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
+u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p);
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);

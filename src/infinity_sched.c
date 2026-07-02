@@ -239,6 +239,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
+	ctx->subsystem_tags = 0;
+	ctx->tag_timestamp = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -265,8 +267,20 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 /* infinity_vruntime_scale — EMA vruntime advancement scaling          */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
+u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 {
+	u64 ema;
+
+	if (!p)
+		return vdelta;
+
+	/* Subsystem tag bypass: hardware-verified interactive tasks
+	 * (input, graphics, audio) always run at nominal vruntime
+	 * regardless of EMA.  The 50ms expiry prevents stale elevation. */
+	if (infinity_tag_active(p))
+		return vdelta;
+
+	ema = infinity_effective_ema(&p->infinity);
 	if (ema) {
 		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 		/*

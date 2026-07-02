@@ -1,45 +1,87 @@
-From a0f1f30a84dc80312cf089bf43dbf7a14b077fc3 Mon Sep 17 00:00:00 2001
+From 3502c4f5555536636ad4e79f720d96a816eee368 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 2 Jul 2026 19:29:09 +0700
-Subject: [PATCH] infinity-scheduler v4+dev (6.18)
+Date: Thu, 2 Jul 2026 20:10:43 +0700
+Subject: [PATCH] infinity-scheduler cumulative
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |  10 +
+ drivers/dma-buf/dma-fence.c   |   5 +
+ drivers/input/evdev.c         |   5 +-
+ include/linux/sched.h         |  16 ++
  include/uapi/linux/sched.h    |   4 +-
- init/init_task.c              |   6 +
+ init/init_task.c              |   8 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  85 ++++++++-
- kernel/sched/infinity_sched.c | 331 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 172 ++++++++++++++++++
- kernel/sched/rt.c             |  62 ++++++-
+ kernel/sched/fair.c           |  83 +++++++-
+ kernel/sched/infinity_sched.c | 345 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 196 +++++++++++++++++++
+ kernel/sched/rt.c             |  62 +++++-
  kernel/sched/syscalls.c       |   4 +
- 10 files changed, 671 insertions(+), 9 deletions(-)
+ sound/core/pcm_native.c       |   5 +-
+ 13 files changed, 728 insertions(+), 11 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
+diff --git a/drivers/dma-buf/dma-fence.c b/drivers/dma-buf/dma-fence.c
+index 39e6f93dc..a9d8eebdc 100644
+--- a/drivers/dma-buf/dma-fence.c
++++ b/drivers/dma-buf/dma-fence.c
+@@ -759,6 +759,11 @@ dma_fence_default_wait_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
+ 	struct default_wait_cb *wait =
+ 		container_of(cb, struct default_wait_cb, base);
+ 
++	if (wait->task) {
++		wait->task->infinity.subsystem_tags |= INFTY_TAG_GRAPHICS;
++		wait->task->infinity.tag_timestamp = ktime_get_ns();
++	}
++
+ 	wake_up_state(wait->task, TASK_NORMAL);
+ }
+ 
+diff --git a/drivers/input/evdev.c b/drivers/input/evdev.c
+index 90ff6be85..b743686d3 100644
+--- a/drivers/input/evdev.c
++++ b/drivers/input/evdev.c
+@@ -589,8 +589,11 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
+ 			read += input_event_size();
+ 		}
+ 
+-		if (read)
++		if (read) {
++			current->infinity.subsystem_tags |= INFTY_TAG_INPUT;
++			current->infinity.tag_timestamp = ktime_get_ns();
+ 			break;
++		}
+ 
+ 		if (!(file->f_flags & O_NONBLOCK)) {
+ 			error = wait_event_interruptible(client->wait,
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878de..b44586b4d 100644
+index b469878de..2068ca93a 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -816,6 +816,15 @@ struct kmap_ctrl {
+@@ -816,6 +816,21 @@ struct kmap_ctrl {
  #endif
  };
  
++#define INFTY_TAG_INPUT		(1U << 0)
++#define INFTY_TAG_GRAPHICS	(1U << 1)
++#define INFTY_TAG_AUDIO		(1U << 2)
++
 +struct infinity_ctx {
 +	u64		ema;
 +	u64		prev_ema;
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
 +	u64		rt_last_sleep_ns;
++	unsigned int	subsystem_tags;
++	u64		tag_timestamp;
 +	bool		futex_waiting;
 +};
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -870,6 +879,7 @@ struct task_struct {
+@@ -870,6 +885,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -69,10 +111,10 @@ index 359a14cc7..baa07e92e 100644
  
  #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
-index a55e21892..da3f449cd 100644
+index a55e21892..e4cdc7645 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -122,6 +122,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -122,6 +122,14 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -81,6 +123,8 @@ index a55e21892..da3f449cd 100644
 +				.rt_ema		= 0,
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
++				.subsystem_tags = 0,
++				.tag_timestamp	= 0,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -112,7 +156,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..14342653d 100644
+index 5b7523242..cee3b2f55 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -181,7 +225,7 @@ index 5b7523242..14342653d 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1224,7 +1259,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1224,7 +1259,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -192,13 +236,11 @@ index 5b7523242..14342653d 100644
 +
 +	curr->vruntime += infinity_vruntime_scale(
 +		calc_delta_fair(delta_exec, curr),
-+		entity_is_task(curr)
-+			? infinity_effective_ema(&task_of(curr)->infinity)
-+			: 0);
++		entity_is_task(curr) ? task_of(curr) : NULL);
  	resched = update_deadline(cfs_rq, curr);
  	update_min_vruntime(cfs_rq);
  
-@@ -5223,6 +5266,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5223,6 +5264,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -213,7 +255,7 @@ index 5b7523242..14342653d 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5574,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5572,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
  
  	se = pick_eevdf(cfs_rq);
@@ -225,7 +267,7 @@ index 5b7523242..14342653d 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6975,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6973,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -240,7 +282,7 @@ index 5b7523242..14342653d 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7224,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7222,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -249,7 +291,7 @@ index 5b7523242..14342653d 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7172,6 +7238,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7172,6 +7236,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -258,7 +300,7 @@ index 5b7523242..14342653d 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -13137,6 +13205,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13203,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -272,10 +314,10 @@ index 5b7523242..14342653d 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..60f194dd7
+index 000000000..99a807c37
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,345 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -517,6 +559,8 @@ index 000000000..60f194dd7
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
 +	ctx->rt_last_sleep_ns = 0;
++	ctx->subsystem_tags = 0;
++	ctx->tag_timestamp = 0;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -543,8 +587,20 @@ index 000000000..60f194dd7
 +/* infinity_vruntime_scale — EMA vruntime advancement scaling          */
 +/* ------------------------------------------------------------------ */
 +
-+u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
++u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 +{
++	u64 ema;
++
++	if (!p)
++		return vdelta;
++
++	/* Subsystem tag bypass: hardware-verified interactive tasks
++	 * (input, graphics, audio) always run at nominal vruntime
++	 * regardless of EMA.  The 50ms expiry prevents stale elevation. */
++	if (infinity_tag_active(p))
++		return vdelta;
++
++	ema = infinity_effective_ema(&p->infinity);
 +	if (ema) {
 +		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 +		/*
@@ -609,10 +665,10 @@ index 000000000..60f194dd7
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..5ab56b8ab
+index 000000000..2f9ca667a
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,196 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -657,6 +713,7 @@ index 000000000..5ab56b8ab
 +#define __INFINITY_SCHED_H
 +
 +#include <linux/sched.h>
++#include <linux/ktime.h>
 +
 +/* ------------------------------------------------------------------ */
 +/* Constants                                                           */
@@ -768,17 +825,40 @@ index 000000000..5ab56b8ab
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 +
++/**
++ * infinity_tag_active — check if a task has a fresh subsystem tag
++ *
++ * Returns true if the task carries an active INPUT, GRAPHICS, or AUDIO
++ * tag that was set within the 50ms expiry window.  Tags are set by
++ * hardware-driven kernel paths (evdev, dma-fence, ALSA) at the moment
++ * of a real hardware event — not by user-space, so there is no gaming
++ * vector.
++ */
++static inline bool infinity_tag_active(struct task_struct *p)
++{
++	if (!p->infinity.subsystem_tags)
++		return false;
++	if (ktime_get_ns() - p->infinity.tag_timestamp > 50000000ULL) {
++		p->infinity.subsystem_tags = 0;
++		return false;
++	}
++	return true;
++}
++
 +/*
 + * infinity_vruntime_scale — scale vruntime advancement by EMA
 + *
 + * Called from update_curr() to advance vruntime faster for CPU-bound
-+ * tasks (high EMA).  Uses slope × 9/10 instead of × 3/4 — max 10×
-+ * scaling at EMA=100% (was 4×).
++ * tasks (high EMA).  Tasks with an active subsystem tag (INPUT,
++ * GRAPHICS, AUDIO) bypass the scaling entirely — they always run at
++ * their nominal vruntime rate, regardless of their EMA history.
 + *
-+ *   EMA ~= 0             (interactive):   ~1x (normal)
-+ *   EMA ~= BUDGET_MAX    (CPU-bound):     ~10x
++ *   Tagged task:  ~1x (always, regardless of EMA)
++ *   Untagged,
++ *   EMA ~= 0:     ~1x (normal)
++ *   EMA ~= 100%:  ~5x (maximum penalty)
 + */
-+u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
++u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p);
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
@@ -903,6 +983,23 @@ index 77ae87f36..18dd18daf 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
+diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
+index 68bee40c9..6ab6ec12f 100644
+--- a/sound/core/pcm_native.c
++++ b/sound/core/pcm_native.c
+@@ -3535,8 +3535,11 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
+ 		return -EINVAL;
+ 	count = bytes_to_frames(runtime, count);
+ 	result = snd_pcm_lib_read(substream, buf, count);
+-	if (result > 0)
++	if (result > 0) {
++		current->infinity.subsystem_tags |= INFTY_TAG_AUDIO;
++		current->infinity.tag_timestamp = ktime_get_ns();
+ 		result = frames_to_bytes(runtime, result);
++	}
+ 	return result;
+ }
+ 
 -- 
 2.55.0
 
