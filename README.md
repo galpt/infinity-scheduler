@@ -5,7 +5,7 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > [!TIP]
 > **TL;DR — dev makes Infinity tick-independent, more aggressive, and self-tuning.**
 >
-> A per-task hrtimer fires at the exact deadline expiry — no longer dependent on
+> hrtick_start fires at the exact deadline expiry — no longer dependent on
 > the periodic tick. The vruntime scaling slope is × 8/10 (max 5×) — balanced
 > for both interactive boosts and application launch latency. Subsystem tags
 > (INPUT, GRAPHICS, AUDIO) let hardware drivers explicitly mark interactive
