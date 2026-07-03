@@ -5,7 +5,7 @@ index ee06cba5c..ca1e78352 100644
 @@ -817,6 +817,16 @@ struct kmap_ctrl {
  #endif
  };
-
+ 
 +struct infinity_ctx {
 +	u64		ema;
 +	u64		prev_ema;
@@ -42,7 +42,7 @@ index b5f48ebdc..d8d4244ee 100644
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
 +				.last_hw_wakeup	= 0,
-+
++		
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -65,13 +65,13 @@ index 3ebec186f..83d36c7a4 100644
  #include "stats.h"
  #include "autogroup.h"
 +#include "infinity_sched.h"
-
+ 
  /*
   * The initial- and re-scaling of tunables is configurable
 @@ -1160,8 +1161,19 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
  	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
  		curr = NULL;
-
+ 
 -	if (curr && protect && protect_slice(curr))
 -		return curr;
 +	if (curr && protect && protect_slice(curr)) {
@@ -87,7 +87,7 @@ index 3ebec186f..83d36c7a4 100644
 +		else
 +			return curr;
 +	}
-
+ 
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
 @@ -1244,9 +1256,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -122,13 +122,13 @@ index 3ebec186f..83d36c7a4 100644
 +			se->slice = sysctl_sched_base_slice;
 +		}
 +	}
-
+ 
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
 @@ -1424,7 +1458,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
-
+ 
 -	curr->vruntime += calc_delta_fair(delta_exec, curr);
 +	/* Infinity: EMA budget consumption and two-pole correction */
 +	if (entity_is_task(curr)) { struct task_struct *p__ = task_of(curr);
@@ -138,12 +138,12 @@ index 3ebec186f..83d36c7a4 100644
 +		calc_delta_fair(delta_exec, curr),
 +		entity_is_task(curr) ? task_of(curr) : NULL);
  	resched = update_deadline(cfs_rq, curr);
-
+ 
  	if (entity_is_task(curr)) {
 @@ -5507,6 +5547,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
-
+ 
 +	/*
 +	 * Reduce the vslice for wakeups.  Low-EMA (interactive) tasks
 +	 * get a shorter vslice, placing their deadline earlier in the
@@ -157,7 +157,7 @@ index 3ebec186f..83d36c7a4 100644
  	 */
 @@ -5783,6 +5831,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
-
+ 
  	se = pick_eevdf(cfs_rq, protect);
 +	if (unlikely(!se)) {
 +		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
@@ -203,7 +203,7 @@ index 3ebec186f..83d36c7a4 100644
 +
  	set_task_max_allowed_capacity(p);
  }
-
+ 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
 index 000000000..1f9594d14
@@ -634,10 +634,10 @@ index 000000000..1f9594d14
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..815f359fe
+index 000000000..bfd4c1318
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,185 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -712,10 +712,9 @@ index 000000000..815f359fe
 +
 +/**
 + * Vruntime scaling slope: × 8/10 (max 5× at EMA=100%).
-+ * Reduced from × 9/10 (max 10×) to prevent application launch stalls:
-+ * short-lived initialization bursts that saturate the EMA within a few
-+ * hundred milliseconds would otherwise have their vruntime advanced by
-+ * 10×, disqualifying them from EEVDF selection until the burst passes.
++ * An × 8/10 slope ensures that short-lived initialization bursts which
++ * saturate the EMA within a few hundred milliseconds disqualify from
++ * EEVDF selection only briefly before the burst passes.
 + *
 + * At max scaling: 100 / (100 - 80) = 5×.
 + * The denominator is always ≥ 20, so the scaling is bounded and cannot
@@ -829,31 +828,31 @@ index 4ee8faf01..a173005c8 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
-
+ 
  #include "sched.h"
  #include "pelt.h"
 +#include "infinity_sched.h"
-
+ 
  int sched_rr_timeslice = RR_TIMESLICE;
  /* More than 4 hours if BW_SHIFT equals 20. */
 @@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
  	if (unlikely(delta_exec <= 0))
  		return;
-
+ 
 +	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
-
+ 
 @@ -1437,9 +1441,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
-
+ 
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
-
+ 
 +		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
@@ -865,24 +864,24 @@ index 4ee8faf01..a173005c8 100644
 +
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
-
+ 
 @@ -1459,6 +1472,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
-
+ 
 +	/* Infinity: record sleep timestamp for RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
-
+ 
  	return true;
 @@ -2550,7 +2567,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
-
+ 
 -	p->rt.time_slice = sched_rr_timeslice;
 +	p->rt.time_slice = infinity_rr_timeslice(p, sched_rr_timeslice);
-
+ 
  	/*
  	 * Requeue to the end of queue if we (and all of our ancestors) are not

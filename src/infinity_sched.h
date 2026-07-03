@@ -72,10 +72,9 @@
 
 /**
  * Vruntime scaling slope: × 8/10 (max 5× at EMA=100%).
- * Reduced from × 9/10 (max 10×) to prevent application launch stalls:
- * short-lived initialization bursts that saturate the EMA within a few
- * hundred milliseconds would otherwise have their vruntime advanced by
- * 10×, disqualifying them from EEVDF selection until the burst passes.
+ * An × 8/10 slope ensures that short-lived initialization bursts which
+ * saturate the EMA within a few hundred milliseconds disqualify from
+ * EEVDF selection only briefly before the burst passes.
  *
  * At max scaling: 100 / (100 - 80) = 5×.
  * The denominator is always ≥ 20, so the scaling is bounded and cannot

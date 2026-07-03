@@ -1,6 +1,6 @@
 # infinity-scheduler (dev-cherrypick)
 
-A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks are handled through smooth priority modulation. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
+A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
 
 > [!TIP]
 > **TL;DR — dev-cherrypick**
@@ -10,8 +10,7 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > - HW-wakeup detection: threaded IRQ kthread check in infinity_wakeup()
 > - Uclamp: reads sched_util_min from userspace task declarations, no hooks
 > - Safety: 128-bit overflow protection, carriage auto-scales from CPU count
-> - RT: continuous Taylor decay, priority modulation with full accounting
-> - PI: explicit bypass when p->prio < p->normal_prio
+> - RT: continuous Taylor decay, adaptive RR timeslice (10–100ms)
 > - Only two tunables: smt_divisor and running (ro)
 
 ```mermaid
@@ -62,22 +61,17 @@ flowchart TB
         RUN --> GAUGE
     end
 
-    subgraph RT["RT tasks (SCHED_FIFO/RR)"]
-        RT_T["RT task runs"] --> RT_C["infinity_rt_consume()\n \nEMA climbs with runtime"]
+    subgraph RT["RT tasks (SCHED_RR only)"]
+        RT_T["SCHED_RR task runs"] --> RT_C["infinity_rt_consume()\n \nrt_ema climbs with runtime"]
         class RT_C rtN
 
         RT_C --> RT_D["infinity_rt_wakeup()\n \ntime-proportional decay\n2nd-order Taylor expansion\ndedicated rt_last_sleep_ns"]
         class RT_D rtN
 
-        RT_D --> RT_GATE["PI Boost Active?\n(prio < normal_prio)"]
-        class RT_GATE rtN
+        RT_D --> RT_S["infinity_rr_timeslice()\n \nrt_ema↑ → timeslice↓\n100ms → 10ms"]
+        class RT_S rtN
 
-        RT_GATE -- Yes: Bypass Throttling --> RT_STOCK["Execute at boosted priority queue\n(Lock release preservation)"]
-
-        RT_GATE -- No: Modulate --> RT_P["infinity_rt_effective_prio()\n \nrt_ema↑ → priority↓"]
-        class RT_P rtN
-
-        RT_P --> RT_Q["RT queue placement\ngated to root_task_group"]
+        RT_S --> RT_Q["Task stays in\noriginal priority queue\n(no priority demotion)"]
     end
 
     subgraph INFRA["Scheduler infrastructure"]
@@ -146,7 +140,7 @@ matching stock EEVDF's CPU-count scaling behaviour.  No user tunable is needed.
 | EEVDF Invariant Assert | N/A (BPF) | **Yes (WARN_ON_ONCE)** |
 | Wakeup deadline boost | N/A | **Asymptotic vslice** |
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
-| RT-stall / PI immunity | No | **Yes (Explicit PI Bypass)** |
+| Adaptive RR timeslice | No | **Yes (rt_ema-based, 10–100ms)** |
 
 ## License
 
