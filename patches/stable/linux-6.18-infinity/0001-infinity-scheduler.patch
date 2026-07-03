@@ -1,6 +1,6 @@
-From 867a53bb144505571b1457dea4725d6543b97af7 Mon Sep 17 00:00:00 2001
+From deecbfcc0ea05f521a27cde59cae0d929fbc9a75 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 23:24:10 +0700
+Date: Sat, 4 Jul 2026 00:18:44 +0700
 Subject: [PATCH] infinity-scheduler cumulative
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -12,13 +12,13 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  init/init_task.c              |  10 +-
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  81 ++++++-
+ kernel/sched/fair.c           |  83 ++++++-
  kernel/sched/infinity_sched.c | 420 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 186 +++++++++++++++
- kernel/sched/rt.c             | 219 +++++++++++++++++-
+ kernel/sched/rt.c             | 220 +++++++++++++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   3 +-
- 13 files changed, 934 insertions(+), 17 deletions(-)
+ 13 files changed, 937 insertions(+), 17 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -157,7 +157,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..44f31e3b1 100644
+index 5b7523242..a491de903 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -255,18 +255,20 @@ index 5b7523242..44f31e3b1 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5571,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5571,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
  
  	se = pick_eevdf(cfs_rq);
 +	if (unlikely(!se)) {
 +		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
-+		return NULL;
++		se = __pick_first_entity(cfs_rq);
++		if (!se)
++			return NULL;
 +	}
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6971,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6973,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -281,7 +283,7 @@ index 5b7523242..44f31e3b1 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7220,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7222,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -290,7 +292,7 @@ index 5b7523242..44f31e3b1 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7172,6 +7234,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7172,6 +7236,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -299,7 +301,7 @@ index 5b7523242..44f31e3b1 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -13137,6 +13201,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13203,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -930,7 +932,7 @@ index 000000000..e8d9a899f
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..296ba6daa 100644
+index 7936d4333..d4c39bb0b 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -1120,7 +1122,7 @@ index 7936d4333..296ba6daa 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1587,96 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1587,97 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -1156,24 +1158,25 @@ index 7936d4333..296ba6daa 100644
 +					goto stock_requeue;
 +				}
 +
-+				if (p->prio < p->normal_prio) {
-+					/*
-+					 * Priority Inheritance boost is active.
-+					 * Bypass Infinity modulation so the task
-+					 * stays in its boosted priority queue
-+					 * and releases locks promptly.
-+					 */
-+					p->infinity.rt_prio_allocated =
-+						p->prio;
-+					goto stock_requeue;
-+				}
-+
 +				int old_qprio = (p->infinity.rt_prio_allocated
 +						 >= 0)
 +					? p->infinity.rt_prio_allocated
 +					: rt_se_prio(rt_se);
-+				int qprio = infinity_rt_effective_prio(
++				int qprio;
++
++				if (p->prio < p->normal_prio) {
++					/*
++					 * Priority Inheritance boost is active.
++					 * Use the boosted priority directly;
++					 * the normal bitmap update and
++					 * accounting below keep the runqueue
++					 * state synchronised.
++					 */
++					qprio = p->prio;
++				} else {
++					qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
++				}
 +
 +				if (qprio != old_qprio) {
 +					struct rq *rq = rq_of_rt_rq(rt_rq);
