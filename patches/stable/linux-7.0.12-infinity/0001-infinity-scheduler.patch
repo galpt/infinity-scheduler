@@ -1,6 +1,6 @@
-From 2c9ea702b4057fc5945351962dfae01112a2c314 Mon Sep 17 00:00:00 2001
+From cfae95b3fb9aa3188e2d179b9cb02884fbd637a2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 22:54:48 +0700
+Date: Fri, 3 Jul 2026 23:05:26 +0700
 Subject: [PATCH] infinity-scheduler cumulative
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -15,10 +15,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/sched/fair.c           |  81 ++++++-
  kernel/sched/infinity_sched.c | 417 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 186 +++++++++++++++
- kernel/sched/rt.c             | 158 ++++++++++++-
+ kernel/sched/rt.c             | 192 +++++++++++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   3 +-
- 13 files changed, 869 insertions(+), 18 deletions(-)
+ 13 files changed, 901 insertions(+), 20 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -927,7 +927,7 @@ index 000000000..e8d9a899f
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..4a4224637 100644
+index 0cbee0318..b51cbe3d7 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -980,7 +980,7 @@ index 0cbee0318..4a4224637 100644
  
  	/*
  	 * Don't enqueue the group if its throttled, or when empty.
-@@ -1349,7 +1376,7 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+@@ -1349,12 +1376,29 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  		else
  			list_add_tail(&rt_se->run_list, queue);
  
@@ -989,7 +989,30 @@ index 0cbee0318..4a4224637 100644
  		rt_se->on_list = 1;
  	}
  	rt_se->on_rq = 1;
-@@ -1364,7 +1391,33 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+ 
+-	inc_rt_tasks(rt_se, rt_rq);
++	/*
++	 * Temporal prio adjustment for inc_rt_tasks: the stock helper uses
++	 * rt_se_prio(rt_se) which resolves to p->prio, but the entity was
++	 * placed in the modulated queue.  Temporarily set p->prio to the
++	 * modulated index so that inc_rt_prio updates highest_prio.curr
++	 * consistently with the bitmap.  The original p->prio is restored
++	 * immediately, preserving Priority Inheritance state.
++	 */
++	if (rt_entity_is_task(rt_se) &&
++	    rt_task_of(rt_se)->infinity.rt_prio_allocated >= 0) {
++		struct task_struct *p = rt_task_of(rt_se);
++		int saved_prio = p->prio;
++		p->prio = p->infinity.rt_prio_allocated;
++		inc_rt_tasks(rt_se, rt_rq);
++		p->prio = saved_prio;
++	} else {
++		inc_rt_tasks(rt_se, rt_rq);
++	}
+ }
+ 
+ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
+@@ -1364,11 +1408,50 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  
  	if (move_entity(flags)) {
  		WARN_ON_ONCE(!rt_se->on_list);
@@ -997,24 +1020,19 @@ index 0cbee0318..4a4224637 100644
 +
 +		/*
 +		 * Task-level entities may have been placed in a different
-+		 * priority queue by Infinity's RT modulation.  Use the
-+		 * rt_prio_allocated tracking field to ensure the bitmap is
-+		 * cleared on the correct queue index even though p->prio
-+		 * was never mutated.  Group entities are never modulated
-+		 * and use the standard path.
++		 * priority queue by Infinity's RT modulation.  Use a
++		 * temporary p->prio override for the delist so that the
++		 * bitmap clear operates on the correct queue index.
++		 * The original p->prio is restored immediately after.
++		 * Group entities are never modulated and use the stock path.
 +		 */
 +		if (rt_entity_is_task(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
 +			if (p->infinity.rt_prio_allocated >= 0) {
-+				int prio = p->infinity.rt_prio_allocated;
-+				p->infinity.rt_prio_allocated = -1;
 +				int saved = p->prio;
-+				p->prio = prio;
++				p->prio = p->infinity.rt_prio_allocated;
 +				__delist_rt_entity(rt_se, array);
-+				dec_rt_tasks(rt_se, rt_rq);
 +				p->prio = saved;
-+				rt_se->on_rq = 0;
-+				return;
 +			} else {
 +				__delist_rt_entity(rt_se, array);
 +			}
@@ -1024,7 +1042,30 @@ index 0cbee0318..4a4224637 100644
  	}
  	rt_se->on_rq = 0;
  
-@@ -1432,9 +1485,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+-	dec_rt_tasks(rt_se, rt_rq);
++	/*
++	 * Apply the same temporary p->prio override for dec_rt_tasks so
++	 * that the priority accounting (dec_rt_prio, highest_prio.curr)
++	 * matches the queue index the entity was actually dequeued from.
++	 * rt_prio_allocated is reset here rather than in the delist block
++	 * because the delist and accounting operations are separated by
++	 * on_rq = 0 and must use the same index for consistency.
++	 */
++	if (rt_entity_is_task(rt_se) &&
++	    rt_task_of(rt_se)->infinity.rt_prio_allocated >= 0) {
++		struct task_struct *p = rt_task_of(rt_se);
++		int saved = p->prio;
++		p->prio = p->infinity.rt_prio_allocated;
++		p->infinity.rt_prio_allocated = -1;
++		dec_rt_tasks(rt_se, rt_rq);
++		p->prio = saved;
++	} else {
++		dec_rt_tasks(rt_se, rt_rq);
++	}
+ }
+ 
+ /*
+@@ -1432,9 +1515,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -1049,7 +1090,7 @@ index 0cbee0318..4a4224637 100644
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1454,6 +1521,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1551,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -1060,7 +1101,7 @@ index 0cbee0318..4a4224637 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1541,85 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1571,85 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
