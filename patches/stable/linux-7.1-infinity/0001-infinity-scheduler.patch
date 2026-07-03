@@ -232,7 +232,7 @@ index 3ebec186f..59732b03b 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..ba9d384f3
+index 000000000..d5ee0b336
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,298 @@
@@ -240,7 +240,7 @@ index 000000000..ba9d384f3
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.c — Infinity scheduler algorithm (dev).
++ * infinity_sched.c — Infinity scheduler algorithm (v4.5).
 + *
 + * Fully continuous limit-based scheduling:
 + *
@@ -536,7 +536,7 @@ index 000000000..ba9d384f3
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..a0b81820d
+index 000000000..e8233b73d
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,180 @@
@@ -544,7 +544,7 @@ index 000000000..a0b81820d
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.h — Infinity scheduler API (dev).
++ * infinity_sched.h — Infinity scheduler API (v4.5).
 + *
 + * Architecture:
 + *
