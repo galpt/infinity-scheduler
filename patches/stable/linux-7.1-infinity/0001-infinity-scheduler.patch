@@ -1,23 +1,23 @@
-From be1cadc32a1407e9aae1725899e756b9c6e4a611 Mon Sep 17 00:00:00 2001
+From ca28e2de4803b6e913458f04683a83b79c5af047 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 22:25:15 +0700
+Date: Fri, 3 Jul 2026 22:37:43 +0700
 Subject: [PATCH] infinity-scheduler cumulative
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/input/evdev.c         |   3 +-
- include/linux/sched.h         |  11 +
+ include/linux/sched.h         |  12 +
  include/uapi/linux/sched.h    |   4 +-
- init/init_task.c              |   8 +
+ init/init_task.c              |   9 +
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  77 ++++++-
- kernel/sched/infinity_sched.c | 375 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 186 +++++++++++++++++
- kernel/sched/rt.c             |  77 ++++++-
+ kernel/sched/infinity_sched.c | 401 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 186 ++++++++++++++++
+ kernel/sched/rt.c             | 127 ++++++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   3 +-
- 12 files changed, 743 insertions(+), 11 deletions(-)
+ 12 files changed, 820 insertions(+), 12 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -37,10 +37,10 @@ index c7325226c..d903290a5 100644
  		if (!(file->f_flags & O_NONBLOCK)) {
  			error = wait_event_interruptible(client->wait,
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba5c..9e0106461 100644
+index ee06cba5c..23ac3fcd8 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,16 @@ struct kmap_ctrl {
+@@ -817,6 +817,17 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -51,13 +51,14 @@ index ee06cba5c..9e0106461 100644
 +	u64		last_sleep_ns;
 +	u64		rt_last_sleep_ns;
 +	u64		last_hw_wakeup;
++	int		rt_prio_allocated;	/* Tracks actual RT queue index for bitmap sync */
 +	bool		futex_waiting;
 +};
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +881,7 @@ struct task_struct {
+@@ -871,6 +882,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -88,10 +89,10 @@ index 33a462428..1aad61dbe 100644
  /* Only for sched_getattr() own flag param, if task is SCHED_DEADLINE */
  #define SCHED_GETATTR_FLAG_DL_DYNAMIC	0x01
 diff --git a/init/init_task.c b/init/init_task.c
-index b5f48ebdc..853a3ba28 100644
+index b5f48ebdc..c841d42fc 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,14 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,15 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -102,6 +103,7 @@ index b5f48ebdc..853a3ba28 100644
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
 +				.last_hw_wakeup	= 0,
++				.rt_prio_allocated = -1,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -278,10 +280,10 @@ index 3ebec186f..ce1e55069 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..d78770c52
+index 000000000..598d71e68
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,375 @@
+@@ -0,0 +1,401 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -290,11 +292,11 @@ index 000000000..d78770c52
 + *
 + * Fully continuous limit-based fair and RT scheduling:
 + *
-+ *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
-+ *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE),
-+ *                      clamped to ema at τ_decay = 24ms.
-+ *   slice = share * (100 - ema_pct * 8/10) / 100  (active throttle)
-+ *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
++ *   While running:  ema += (BUDGET_MAX - ema) × δ × α / (BUDGET_MAX × FP_ONE)
++ *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)  (exponential shift)
++ *                      sub-period residual: ema -= ema × sleep_ns / 24000000
++ *   slice = share × (100 - ema_pct × 8/10) / 100  (active throttle)
++ *   vslice' = vslice × ema / BUDGET_MAX  (asymptotic, no cap)
 + *
 + * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
 + * oscillating workloads (interactive: compute-sleep-compute) from
@@ -410,7 +412,8 @@ index 000000000..d78770c52
 +
 +	/*
 +	 * EMA modulation: higher EMA → shorter slice.
-+	 * Uses a steeper slope (× 9/10) for up to 10× reduction at EMA=100%.
++	 * Uses an 8/10 slope so at EMA=100% the reduction is 80%,
++	 * yielding a 5× vruntime scaling cap (100 / (100 - 80)).
 +	 */
 +	if (ema > 0) {
 +		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
@@ -538,6 +541,7 @@ index 000000000..d78770c52
 +	ctx->last_sleep_ns = now;
 +	ctx->rt_last_sleep_ns = 0;
 +	ctx->last_hw_wakeup = 0;
++	ctx->rt_prio_allocated = -1;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -616,7 +620,15 @@ index 000000000..d78770c52
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
-+	u64 step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
++	u64 step;
++
++	/* Safety guard: clamp rt_ema to BUDGET_MAX to prevent unsigned underflow */
++	if (unlikely(ctx->rt_ema >= INFINITY_RT_BUDGET_NS)) {
++		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
++		return;
++	}
++
++	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
 +			   INFINITY_RT_ALPHA,
 +			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 +	ctx->rt_ema += step;
@@ -628,22 +640,38 @@ index 000000000..d78770c52
 +
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
-+	u64 step;
++	u64 periods;
 +
 +	if (sleep_ns == 0)
 +		return;
 +
-+	/* Same overflow mitigation as infinity_wakeup */
-+	if (sleep_ns > 40000000000ULL)
-+		sleep_ns = 40000000000ULL;
-+
-+	step = mul_u64_u64_div_u64(ctx->rt_ema,
-+				 sleep_ns * INFINITY_RT_ALPHA *
-+				 INFINITY_EMA_DECAY_DIV,
-+				 INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
-+	if (step > ctx->rt_ema)
-+		step = ctx->rt_ema;
-+	ctx->rt_ema -= step;
++	/*
++	 * Exponential shift decay with 160ms half-life for RT EMA.
++	 *
++	 * For sub-half-life sleeps (< 160ms) a linear approximation is
++	 * used (e^-x ≈ 1 - x for small x).  For longer sleeps the RT EMA
++	 * is right-shifted by the number of elapsed half-life periods,
++	 * matching the fair-class wakeup decay and preventing the linear
++	 * collapse that would occur at >= 160ms with the old formula.
++	 *
++	 *   periods = 0  (< 160ms):   linear subtraction (fine-grained)
++	 *   periods = 1  (160ms):      rt_ema >>= 1  (50% retained)
++	 *   periods = 2  (320ms):      rt_ema >>= 2  (25% retained)
++	 */
++	periods = div64_u64(sleep_ns, 160000000ULL);
++	if (periods > 0) {
++		if (periods > 63)
++			ctx->rt_ema = 0;
++		else
++			ctx->rt_ema >>= periods;
++	} else {
++		u64 sub_step = mul_u64_u64_div_u64(ctx->rt_ema,
++				sleep_ns, 160000000ULL);
++		if (sub_step > ctx->rt_ema)
++			ctx->rt_ema = 0;
++		else
++			ctx->rt_ema -= sub_step;
++	}
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -850,7 +878,7 @@ index 000000000..e8d9a899f
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..62a7418d4 100644
+index 4ee8faf01..a90b882a7 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -870,7 +898,39 @@ index 4ee8faf01..62a7418d4 100644
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1437,9 +1440,22 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1369,7 +1372,30 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+ 
+ 	if (move_entity(flags)) {
+ 		WARN_ON_ONCE(!rt_se->on_list);
+-		__delist_rt_entity(rt_se, array);
++
++		/*
++		 * Task-level entities may have been placed in a different
++		 * priority queue by Infinity's RT modulation.  Use the
++		 * rt_prio_allocated tracking field to ensure the bitmap is
++		 * cleared on the correct queue index even though p->prio
++		 * was never mutated.  Group entities are never modulated
++		 * and use the standard path.
++		 */
++		if (rt_entity_is_task(rt_se)) {
++			struct task_struct *p = rt_task_of(rt_se);
++			if (p->infinity.rt_prio_allocated >= 0) {
++				int prio = p->infinity.rt_prio_allocated;
++				p->infinity.rt_prio_allocated = -1;
++				list_del_init(&rt_se->run_list);
++				if (list_empty(array->queue + prio))
++					__clear_bit(prio, array->bitmap);
++				rt_se->on_list = 0;
++			} else {
++				__delist_rt_entity(rt_se, array);
++			}
++		} else {
++			__delist_rt_entity(rt_se, array);
++		}
+ 	}
+ 	rt_se->on_rq = 0;
+ 
+@@ -1437,9 +1463,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -887,14 +947,15 @@ index 4ee8faf01..62a7418d4 100644
 +		}
 +	}
 +
-+	/* Only restore if demoted by Infinity; PI-boosted tasks (prio < normal_prio) are preserved */
-+	if (p->prio > p->normal_prio)
-+		p->prio = p->normal_prio;
-+
++	/*
++	 * p->prio is never mutated by Infinity modulation (PI preservation),
++	 * so no restoration is needed here.  The PF_EXITING case in
++	 * requeue_rt_entity handles final cleanup for exiting tasks.
++	 */
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1459,6 +1475,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1459,6 +1499,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -905,7 +966,7 @@ index 4ee8faf01..62a7418d4 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1495,61 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1519,85 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -915,51 +976,75 @@ index 4ee8faf01..62a7418d4 100644
 +		 * A task with high rt_ema (sustained RT runtime) is placed in a
 +		 * lower-priority queue, so that well-behaved RT tasks (low
 +		 * rt_ema) run first.  Accounting helpers (dec_rt_prio /
-+		 * inc_rt_prio), pushable plist re-indexing, and preemption
-+		 * checks keep the scheduler state synchronised.
++		 * inc_rt_prio) keep the scheduler state synchronised.
++		 *
++		 * The rt_prio_allocated field tracks which queue index the
++		 * entity was actually placed in, so the dequeue path can clear
++		 * the correct bitmap bit even though p->prio is never mutated
++		 * (preserving Priority Inheritance).
 +		 *
 +		 * Gated to root_task_group — nested systemd cgroups have
 +		 * parent entities that read rt_rq->highest_prio.curr from
-+		 * child runqueues, and mutating p->prio in a child without
-+		 * updating the parent state desynchronises the hierarchy.
++		 * child runqueues, and mutating queue placement in a child
++		 * without updating the parent state desynchronises the hierarchy.
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
 +			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
 +				/*
-+				 * Skip exiting tasks — the stale bitmap entry
-+				 * would cause a null-pointer dereference during
-+				 * task teardown.
++				 * Exiting tasks: restore stock prio and set
++				 * rt_prio_allocated so the teardown path
++				 * sees a consistent queue index.
 +				 */
 +				if (unlikely(p->flags & PF_EXITING)) {
++					p->infinity.rt_prio_allocated =
++						rt_se_prio(rt_se);
 +					p->prio = p->normal_prio;
 +					goto stock_requeue;
 +				}
 +
-+				int old_prio = p->prio;
++				int old_qprio = (p->infinity.rt_prio_allocated
++						 >= 0)
++					? p->infinity.rt_prio_allocated
++					: rt_se_prio(rt_se);
 +				int qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
-+				if (qprio != old_prio) {
++
++				if (qprio != old_qprio) {
 +					struct rq *rq = rq_of_rt_rq(rt_rq);
 +
-+					/* Move the entity without modifying p->prio,
-+					 * preserving Priority Inheritance state. */
++					/*
++					 * Priority changed — move to the new
++					 * queue.  p->prio is never touched,
++					 * preserving PI state.
++					 */
++					p->infinity.rt_prio_allocated = qprio;
 +					queue = array->queue + qprio;
 +					if (head)
-+						list_move(&rt_se->run_list, queue);
++						list_move(&rt_se->run_list,
++							  queue);
 +					else
-+						list_move_tail(&rt_se->run_list, queue);
-+					if (list_empty(array->queue + old_prio))
-+						__clear_bit(old_prio,
++						list_move_tail(&rt_se->run_list,
++							       queue);
++					if (list_empty(array->queue + old_qprio))
++						__clear_bit(old_qprio,
 +							    array->bitmap);
 +					__set_bit(qprio, array->bitmap);
-+					dec_rt_prio(rt_rq, old_prio);
++					dec_rt_prio(rt_rq, old_qprio);
 +					inc_rt_prio(rt_rq, qprio);
-+
-+					if (qprio > old_prio)
++					if (qprio > old_qprio)
 +						resched_curr(rq);
 +					return;
 +				}
++
++				/*
++				 * Same priority as current placement —
++				 * requeue within the same queue.  The
++				 * rt_prio_allocated override ensures the
++				 * dequeue bitmap clears the correct bit.
++				 */
++				p->infinity.rt_prio_allocated = qprio;
++				queue = array->queue + qprio;
 +			}
 +		}
 +

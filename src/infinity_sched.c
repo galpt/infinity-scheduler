@@ -6,11 +6,11 @@
  *
  * Fully continuous limit-based fair and RT scheduling:
  *
- *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
- *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE),
- *                      clamped to ema at τ_decay = 24ms.
- *   slice = share * (100 - ema_pct * 8/10) / 100  (active throttle)
- *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
+ *   While running:  ema += (BUDGET_MAX - ema) × δ × α / (BUDGET_MAX × FP_ONE)
+ *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)  (exponential shift)
+ *                      sub-period residual: ema -= ema × sleep_ns / 24000000
+ *   slice = share × (100 - ema_pct × 8/10) / 100  (active throttle)
+ *   vslice' = vslice × ema / BUDGET_MAX  (asymptotic, no cap)
  *
  * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
  * oscillating workloads (interactive: compute-sleep-compute) from
@@ -126,7 +126,8 @@ u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
 
 	/*
 	 * EMA modulation: higher EMA → shorter slice.
-	 * Uses a steeper slope (× 9/10) for up to 10× reduction at EMA=100%.
+	 * Uses an 8/10 slope so at EMA=100% the reduction is 80%,
+	 * yielding a 5× vruntime scaling cap (100 / (100 - 80)).
 	 */
 	if (ema > 0) {
 		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
@@ -254,6 +255,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
 	ctx->last_hw_wakeup = 0;
+	ctx->rt_prio_allocated = -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -332,7 +334,15 @@ u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
-	u64 step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
+	u64 step;
+
+	/* Safety guard: clamp rt_ema to BUDGET_MAX to prevent unsigned underflow */
+	if (unlikely(ctx->rt_ema >= INFINITY_RT_BUDGET_NS)) {
+		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
+		return;
+	}
+
+	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
 			   INFINITY_RT_ALPHA,
 			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 	ctx->rt_ema += step;
@@ -344,22 +354,38 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 {
-	u64 step;
+	u64 periods;
 
 	if (sleep_ns == 0)
 		return;
 
-	/* Same overflow mitigation as infinity_wakeup */
-	if (sleep_ns > 40000000000ULL)
-		sleep_ns = 40000000000ULL;
-
-	step = mul_u64_u64_div_u64(ctx->rt_ema,
-				 sleep_ns * INFINITY_RT_ALPHA *
-				 INFINITY_EMA_DECAY_DIV,
-				 INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
-	if (step > ctx->rt_ema)
-		step = ctx->rt_ema;
-	ctx->rt_ema -= step;
+	/*
+	 * Exponential shift decay with 160ms half-life for RT EMA.
+	 *
+	 * For sub-half-life sleeps (< 160ms) a linear approximation is
+	 * used (e^-x ≈ 1 - x for small x).  For longer sleeps the RT EMA
+	 * is right-shifted by the number of elapsed half-life periods,
+	 * matching the fair-class wakeup decay and preventing the linear
+	 * collapse that would occur at >= 160ms with the old formula.
+	 *
+	 *   periods = 0  (< 160ms):   linear subtraction (fine-grained)
+	 *   periods = 1  (160ms):      rt_ema >>= 1  (50% retained)
+	 *   periods = 2  (320ms):      rt_ema >>= 2  (25% retained)
+	 */
+	periods = div64_u64(sleep_ns, 160000000ULL);
+	if (periods > 0) {
+		if (periods > 63)
+			ctx->rt_ema = 0;
+		else
+			ctx->rt_ema >>= periods;
+	} else {
+		u64 sub_step = mul_u64_u64_div_u64(ctx->rt_ema,
+				sleep_ns, 160000000ULL);
+		if (sub_step > ctx->rt_ema)
+			ctx->rt_ema = 0;
+		else
+			ctx->rt_ema -= sub_step;
+	}
 }
 
 /* ------------------------------------------------------------------ */
