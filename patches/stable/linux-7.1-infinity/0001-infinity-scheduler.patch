@@ -1,6 +1,6 @@
-From c6ffc4b054e85ea3b01b41dd7495125fafc0837a Mon Sep 17 00:00:00 2001
+From 43b331fd6e3cf2b028ef1c4ebc195805d861ce61 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 23:05:26 +0700
+Date: Fri, 3 Jul 2026 23:16:23 +0700
 Subject: [PATCH] infinity-scheduler cumulative
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -12,12 +12,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  77 ++++++-
- kernel/sched/infinity_sched.c | 417 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.c | 420 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 186 +++++++++++++++
- kernel/sched/rt.c             | 192 +++++++++++++++-
+ kernel/sched/rt.c             | 210 ++++++++++++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   3 +-
- 12 files changed, 897 insertions(+), 16 deletions(-)
+ 12 files changed, 918 insertions(+), 16 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -280,10 +280,10 @@ index 3ebec186f..ce1e55069 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..27bb46672
+index 000000000..2e7b53967
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,417 @@
+@@ -0,0 +1,420 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -293,8 +293,9 @@ index 000000000..27bb46672
 + * Fully continuous limit-based fair and RT scheduling:
 + *
 + *   While running:  ema += (BUDGET_MAX - ema) × δ × α / (BUDGET_MAX × FP_ONE)
-+ *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)  (exponential shift)
-+ *                      sub-period residual: ema -= ema × sleep_ns / 24000000
++ *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)
++ *                      Sub-period residual via 2nd-order Taylor expansion
++ *                      (e^-x ≈ 1 - x + x²/2) for continuous decay.
 + *   slice = share × (100 - ema_pct × 8/10) / 100  (active throttle)
 + *   vslice' = vslice × ema / BUDGET_MAX  (asymptotic, no cap)
 + *
@@ -607,9 +608,11 @@ index 000000000..27bb46672
 +
 +	ema = infinity_effective_ema(&p->infinity);
 +
-+	/* Clamp ema to BUDGET_MAX to prevent pct > 100, which would cause
-+	 * denom to unsigned-wraparound and produce a near-infinite divisor,
-+	 * freezing vruntime at 0 and locking the task at the front of EEVDF. */
++	/*
++	 * Enforce BUDGET_MAX ceiling on effective EMA to guarantee that the
++	 * denominator remains bounded (denom ≥ 20), ensuring stable vruntime
++	 * advancement across continuous execution bursts.
++	 */
 +	if (ema > INFINITY_BUDGET_MAX_NS)
 +		ema = INFINITY_BUDGET_MAX_NS;
 +
@@ -894,7 +897,7 @@ index 000000000..e8d9a899f
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..cd5ec1fa4 100644
+index 4ee8faf01..94a072dd1 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -914,7 +917,7 @@ index 4ee8faf01..cd5ec1fa4 100644
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1333,7 +1336,31 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+@@ -1333,7 +1336,43 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
  	struct rt_prio_array *array = &rt_rq->active;
  	struct rt_rq *group_rq = group_rt_rq(rt_se);
@@ -928,6 +931,13 @@ index 4ee8faf01..cd5ec1fa4 100644
 +	 * priority queue based on its current rt_ema, rather than only
 +	 * being demoted on the next requeue tick.
 +	 *
++	 * During save/restore transitions (sched_setscheduler, affinity
++	 * changes) the entity stays in its current queue because
++	 * move_entity is false.  In that case preserve the existing
++	 * rt_prio_allocated rather than recomputing against possibly
++	 * changed parameters, which would desynchronise the queue index
++	 * from the actual list placement.
++	 *
 +	 * The effective priority is temporary — p->prio is never mutated,
 +	 * preserving Priority Inheritance.  Instead the local 'prio'
 +	 * variable is overridden, and rt_prio_allocated records the
@@ -938,16 +948,21 @@ index 4ee8faf01..cd5ec1fa4 100644
 +	    rt_rq->tg == &root_task_group &&
 +	    !(rt_task_of(rt_se)->flags & PF_EXITING)) {
 +		struct task_struct *p = rt_task_of(rt_se);
-+		prio = infinity_rt_effective_prio(p->normal_prio,
-+						  &p->infinity);
-+		p->infinity.rt_prio_allocated = prio;
++		if (move_entity(flags) ||
++		    p->infinity.rt_prio_allocated < 0) {
++			prio = infinity_rt_effective_prio(p->normal_prio,
++							  &p->infinity);
++			p->infinity.rt_prio_allocated = prio;
++		} else {
++			prio = p->infinity.rt_prio_allocated;
++		}
 +	}
 +
 +	queue = array->queue + prio;
  
  	/*
  	 * Don't enqueue the group if its throttled, or when empty.
-@@ -1354,12 +1381,29 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+@@ -1354,12 +1393,29 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  		else
  			list_add_tail(&rt_se->run_list, queue);
  
@@ -979,7 +994,7 @@ index 4ee8faf01..cd5ec1fa4 100644
  }
  
  static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
-@@ -1369,11 +1413,50 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+@@ -1369,11 +1425,54 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  
  	if (move_entity(flags)) {
  		WARN_ON_ONCE(!rt_se->on_list);
@@ -1014,16 +1029,20 @@ index 4ee8faf01..cd5ec1fa4 100644
 +	 * Apply the same temporary p->prio override for dec_rt_tasks so
 +	 * that the priority accounting (dec_rt_prio, highest_prio.curr)
 +	 * matches the queue index the entity was actually dequeued from.
-+	 * rt_prio_allocated is reset here rather than in the delist block
-+	 * because the delist and accounting operations are separated by
-+	 * on_rq = 0 and must use the same index for consistency.
++	 *
++	 * rt_prio_allocated is reset only when the entity physically
++	 * leaves the runqueue (move_entity true).  During save/restore
++	 * transitions move_entity is false — the entity stays in its
++	 * queue and the allocation must be preserved for the matching
++	 * restore enqueue.
 +	 */
 +	if (rt_entity_is_task(rt_se) &&
 +	    rt_task_of(rt_se)->infinity.rt_prio_allocated >= 0) {
 +		struct task_struct *p = rt_task_of(rt_se);
 +		int saved = p->prio;
 +		p->prio = p->infinity.rt_prio_allocated;
-+		p->infinity.rt_prio_allocated = -1;
++		if (move_entity(flags))
++			p->infinity.rt_prio_allocated = -1;
 +		dec_rt_tasks(rt_se, rt_rq);
 +		p->prio = saved;
 +	} else {
@@ -1032,7 +1051,7 @@ index 4ee8faf01..cd5ec1fa4 100644
  }
  
  /*
-@@ -1437,9 +1520,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1437,9 +1536,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -1057,7 +1076,7 @@ index 4ee8faf01..cd5ec1fa4 100644
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1459,6 +1556,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1459,6 +1572,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -1068,7 +1087,7 @@ index 4ee8faf01..cd5ec1fa4 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1576,85 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1592,87 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
@@ -1094,14 +1113,16 @@ index 4ee8faf01..cd5ec1fa4 100644
 +			struct task_struct *p = rt_task_of(rt_se);
 +			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
 +				/*
-+				 * Exiting tasks: restore stock prio and set
-+				 * rt_prio_allocated so the teardown path
-+				 * sees a consistent queue index.
++				 * Exiting tasks: record the current queue
++				 * index in rt_prio_allocated so the teardown
++				 * path clears the correct bitmap bit.
++				 * p->prio is never overridden here —
++				 * the PI subsystem manages priority
++				 * restoration on the exit path.
 +				 */
 +				if (unlikely(p->flags & PF_EXITING)) {
 +					p->infinity.rt_prio_allocated =
 +						rt_se_prio(rt_se);
-+					p->prio = p->normal_prio;
 +					goto stock_requeue;
 +				}
 +

@@ -7,8 +7,9 @@
  * Fully continuous limit-based fair and RT scheduling:
  *
  *   While running:  ema += (BUDGET_MAX - ema) × δ × α / (BUDGET_MAX × FP_ONE)
- *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)  (exponential shift)
- *                      sub-period residual: ema -= ema × sleep_ns / 24000000
+ *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)
+ *                      Sub-period residual via 2nd-order Taylor expansion
+ *                      (e^-x ≈ 1 - x + x²/2) for continuous decay.
  *   slice = share × (100 - ema_pct × 8/10) / 100  (active throttle)
  *   vslice' = vslice × ema / BUDGET_MAX  (asymptotic, no cap)
  *
@@ -321,9 +322,11 @@ u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 
 	ema = infinity_effective_ema(&p->infinity);
 
-	/* Clamp ema to BUDGET_MAX to prevent pct > 100, which would cause
-	 * denom to unsigned-wraparound and produce a near-infinite divisor,
-	 * freezing vruntime at 0 and locking the task at the front of EEVDF. */
+	/*
+	 * Enforce BUDGET_MAX ceiling on effective EMA to guarantee that the
+	 * denominator remains bounded (denom ≥ 20), ensuring stable vruntime
+	 * advancement across continuous execution bursts.
+	 */
 	if (ema > INFINITY_BUDGET_MAX_NS)
 		ema = INFINITY_BUDGET_MAX_NS;
 
