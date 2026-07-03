@@ -349,7 +349,6 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
 	u64 step;
 
-	/* Safety guard: clamp rt_ema to BUDGET_MAX to prevent unsigned underflow */
 	if (unlikely(ctx->rt_ema >= INFINITY_RT_BUDGET_NS)) {
 		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
 		return;
@@ -372,26 +371,12 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns == 0)
 		return;
 
-	/*
-	 * Exponential shift decay with 160ms half-life, using a 2nd-order
-	 * Taylor expansion for the sub-period residual to maintain a
-	 * continuous decay curve across the half-life boundary.
-	 *
-	 *   whole periods (≥ 160ms):  rt_ema >>= periods  (exact)
-	 *   sub-period (< 160ms):     e^-x ≈ 1 - x + x²/2  (Taylor)
-	 *
-	 * At x = 1.0 (residual = 160ms) the Taylor formula gives
-	 * 1 - 1 + 1/2 = 0.5, matching rt_ema >>= 1 — no discontinuity.
-	 */
 	periods = div64_u64_rem(sleep_ns, 160000000ULL, &residual);
 
 	if (periods > 63) {
 		ctx->rt_ema = 0;
 	} else {
-		/* Whole half-life shift cycles */
 		ctx->rt_ema >>= periods;
-
-		/* Sub-period residual via Taylor e^-x ≈ 1 - x + x²/2 */
 		if (residual && ctx->rt_ema) {
 			u64 fraction = div64_u64(residual *
 				INFINITY_FP_ONE, 160000000ULL);
@@ -399,7 +384,6 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 				INFINITY_FP_SHIFT;
 			u64 quad = ((linear * fraction) >>
 				INFINITY_FP_SHIFT) >> 1;
-
 			if (linear > quad)
 				ctx->rt_ema -= min(ctx->rt_ema,
 						   linear - quad);

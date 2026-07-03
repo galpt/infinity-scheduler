@@ -1,27 +1,3 @@
-From deecbfcc0ea05f521a27cde59cae0d929fbc9a75 Mon Sep 17 00:00:00 2001
-From: Galih Tama <galpt@v.recipes>
-Date: Sat, 4 Jul 2026 00:18:44 +0700
-Subject: [PATCH] infinity-scheduler cumulative
-
-Signed-off-by: Galih Tama <galpt@v.recipes>
----
- drivers/dma-buf/dma-fence.c   |   1 +
- drivers/input/evdev.c         |   3 +-
- include/linux/sched.h         |  14 ++
- include/uapi/linux/sched.h    |   4 +-
- init/init_task.c              |  10 +-
- kernel/futex/waitwake.c       |   5 +-
- kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           |  83 ++++++-
- kernel/sched/infinity_sched.c | 420 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 186 +++++++++++++++
- kernel/sched/rt.c             | 220 +++++++++++++++++-
- kernel/sched/syscalls.c       |   4 +
- sound/core/pcm_native.c       |   3 +-
- 13 files changed, 937 insertions(+), 17 deletions(-)
- create mode 100644 kernel/sched/infinity_sched.c
- create mode 100644 kernel/sched/infinity_sched.h
-
 diff --git a/drivers/dma-buf/dma-fence.c b/drivers/dma-buf/dma-fence.c
 index 39e6f93dc..357eb71d1 100644
 --- a/drivers/dma-buf/dma-fence.c
@@ -82,18 +58,10 @@ index b469878de..abbe554f4 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 359a14cc7..baa07e92e 100644
+index 359a14cc7..7034a8dc3 100644
 --- a/include/uapi/linux/sched.h
 +++ b/include/uapi/linux/sched.h
-@@ -131,6 +131,7 @@ struct clone_args {
- #define SCHED_FLAG_DL_OVERRUN		0x04
- #define SCHED_FLAG_KEEP_POLICY		0x08
- #define SCHED_FLAG_KEEP_PARAMS		0x10
-+#define SCHED_FLAG_NO_INFINITY_RT	0x100
- #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
- #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
- 
-@@ -144,6 +145,7 @@ struct clone_args {
+@@ -144,6 +144,7 @@ struct clone_args {
  			 SCHED_FLAG_RECLAIM		| \
  			 SCHED_FLAG_DL_OVERRUN		| \
  			 SCHED_FLAG_KEEP_ALL		| \
@@ -932,161 +900,47 @@ index 000000000..e8d9a899f
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..d4c39bb0b 100644
+index 7936d4333..94cf3ef03 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
-@@ -5,6 +5,7 @@
-  */
+@@ -6,6 +6,7 @@
  
  #include "sched.h"
-+#include "infinity_sched.h"
  #include "pelt.h"
++#include "infinity_sched.h"
  
  int sched_rr_timeslice = RR_TIMESLICE;
-@@ -983,6 +984,8 @@ static void update_curr_rt(struct rq *rq)
+ /* More than 4 hours if BW_SHIFT equals 20. */
+@@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
++	/* Infinity: RT EMA climbs with runtime, used for SCHED_RR priority modulation */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1328,7 +1331,46 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
- 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
- 	struct rt_prio_array *array = &rt_rq->active;
- 	struct rt_rq *group_rq = group_rt_rq(rt_se);
--	struct list_head *queue = array->queue + rt_se_prio(rt_se);
-+	int prio = rt_se_prio(rt_se);
-+	struct list_head *queue;
-+
-+	/*
-+	 * Infinity RT queue placement modulation: apply on every enqueue
-+	 * so that a task waking from sleep starts in the correct modulated
-+	 * priority queue based on its current rt_ema, rather than only
-+	 * being demoted on the next requeue tick.
-+	 *
-+	 * The effective priority is temporary — p->prio is never mutated,
-+	 * preserving Priority Inheritance.  Instead the local 'prio'
-+	 * variable is overridden, and rt_prio_allocated records the
-+	 * actual queue index for the dequeue path's bitmap cleanup and
-+	 * priority accounting.
-+	 */
-+	if (rt_entity_is_task(rt_se) &&
-+	    rt_rq->tg == &root_task_group &&
-+	    !(rt_task_of(rt_se)->flags & PF_EXITING)) {
-+		struct task_struct *p = rt_task_of(rt_se);
-+		if (p->prio < p->normal_prio) {
-+			/*
-+			 * Task is actively boosted via Priority Inheritance
-+			 * (p->prio < p->normal_prio).  Bypass Infinity
-+			 * modulation — the task must execute at its boosted
-+			 * priority queue to release locks promptly and
-+			 * prevent priority inversion.
-+			 */
-+			prio = p->prio;
-+			p->infinity.rt_prio_allocated = prio;
-+		} else if (move_entity(flags) ||
-+			   p->infinity.rt_prio_allocated < 0) {
-+			prio = infinity_rt_effective_prio(p->normal_prio,
-+							  &p->infinity);
-+			p->infinity.rt_prio_allocated = prio;
-+		} else {
-+			prio = p->infinity.rt_prio_allocated;
-+		}
-+	}
-+
-+	queue = array->queue + prio;
- 
- 	/*
- 	 * Don't enqueue the group if its throttled, or when empty.
-@@ -1349,12 +1391,29 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
- 		else
- 			list_add_tail(&rt_se->run_list, queue);
- 
--		__set_bit(rt_se_prio(rt_se), array->bitmap);
-+		__set_bit(prio, array->bitmap);
- 		rt_se->on_list = 1;
- 	}
- 	rt_se->on_rq = 1;
- 
--	inc_rt_tasks(rt_se, rt_rq);
-+	/*
-+	 * Temporal prio adjustment for inc_rt_tasks: the stock helper uses
-+	 * rt_se_prio(rt_se) which resolves to p->prio, but the entity was
-+	 * placed in the modulated queue.  Temporarily set p->prio to the
-+	 * modulated index so that inc_rt_prio updates highest_prio.curr
-+	 * consistently with the bitmap.  The original p->prio is restored
-+	 * immediately, preserving Priority Inheritance state.
-+	 */
-+	if (rt_entity_is_task(rt_se) &&
-+	    rt_task_of(rt_se)->infinity.rt_prio_allocated >= 0) {
-+		struct task_struct *p = rt_task_of(rt_se);
-+		int saved_prio = p->prio;
-+		p->prio = p->infinity.rt_prio_allocated;
-+		inc_rt_tasks(rt_se, rt_rq);
-+		p->prio = saved_prio;
-+	} else {
-+		inc_rt_tasks(rt_se, rt_rq);
-+	}
- }
- 
- static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
-@@ -1364,11 +1423,51 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+@@ -1364,6 +1368,18 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  
  	if (move_entity(flags)) {
  		WARN_ON_ONCE(!rt_se->on_list);
--		__delist_rt_entity(rt_se, array);
-+
-+		/*
-+		 * Task-level entities may have been placed in a different
-+		 * priority queue by Infinity's RT modulation.  Use a
-+		 * temporary p->prio override for the delist so that the
-+		 * bitmap clear operates on the correct queue index.
-+		 * The original p->prio is restored immediately after.
-+		 * Group entities are never modulated and use the stock path.
-+		 */
 +		if (rt_entity_is_task(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
 +			if (p->infinity.rt_prio_allocated >= 0) {
 +				int saved = p->prio;
 +				p->prio = p->infinity.rt_prio_allocated;
 +				__delist_rt_entity(rt_se, array);
++				dec_rt_tasks(rt_se, rt_rq);
 +				p->prio = saved;
-+			} else {
-+				__delist_rt_entity(rt_se, array);
++				rt_se->on_rq = 0;
++				return;
 +			}
-+		} else {
-+			__delist_rt_entity(rt_se, array);
 +		}
+ 		__delist_rt_entity(rt_se, array);
  	}
  	rt_se->on_rq = 0;
- 
--	dec_rt_tasks(rt_se, rt_rq);
-+	/*
-+	 * Apply the same temporary p->prio override for dec_rt_tasks so
-+	 * that the priority accounting (dec_rt_prio, highest_prio.curr)
-+	 * matches the queue index the entity was actually dequeued from.
-+	 * rt_prio_allocated is reset here rather than in the delist block
-+	 * because the delist and accounting operations are separated by
-+	 * on_rq = 0 and must use the same index for consistency.
-+	 */
-+	if (rt_entity_is_task(rt_se) &&
-+	    rt_task_of(rt_se)->infinity.rt_prio_allocated >= 0) {
-+		struct task_struct *p = rt_task_of(rt_se);
-+		int saved = p->prio;
-+		p->prio = p->infinity.rt_prio_allocated;
-+		if (move_entity(flags))
-+			p->infinity.rt_prio_allocated = -1;
-+		dec_rt_tasks(rt_se, rt_rq);
-+		p->prio = saved;
-+	} else {
-+		dec_rt_tasks(rt_se, rt_rq);
-+	}
- }
- 
- /*
-@@ -1432,9 +1531,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1432,9 +1448,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -1094,7 +948,7 @@ index 7936d4333..d4c39bb0b 100644
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
  
-+		/* Infinity: time-proportional RT EMA decay on wakeup */
++		/* Infinity: SCHED_RR EMA decay on wakeup */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
 +			if (now > p->infinity.rt_last_sleep_ns)
@@ -1103,138 +957,86 @@ index 7936d4333..d4c39bb0b 100644
 +		}
 +	}
 +
-+	/*
-+	 * p->prio is never mutated by Infinity modulation (PI preservation),
-+	 * so no restoration is needed here.  The PF_EXITING case in
-+	 * requeue_rt_entity handles final cleanup for exiting tasks.
-+	 */
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1454,6 +1567,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1479,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
-+	/* Infinity: record sleep timestamp for time-proportional RT decay */
++	/* Infinity: record sleep timestamp for SCHED_RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1587,97 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1499,65 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
 +		/*
-+		 * RT queue placement modulation by EMA.
-+		 *
-+		 * A task with high rt_ema (sustained RT runtime) is placed in a
-+		 * lower-priority queue, so that well-behaved RT tasks (low
-+		 * rt_ema) run first.  Accounting helpers (dec_rt_prio /
-+		 * inc_rt_prio) keep the scheduler state synchronised.
-+		 *
-+		 * The rt_prio_allocated field tracks which queue index the
-+		 * entity was actually placed in, so the dequeue path can clear
-+		 * the correct bitmap bit even though p->prio is never mutated
-+		 * (preserving Priority Inheritance).
-+		 *
-+		 * Gated to root_task_group — nested systemd cgroups have
-+		 * parent entities that read rt_rq->highest_prio.curr from
-+		 * child runqueues, and mutating queue placement in a child
-+		 * without updating the parent state desynchronises the hierarchy.
++		 * Infinity SCHED_RR priority modulation: gate by policy so that
++		 * SCHED_FIFO tasks (fixed-priority contract) are never affected.
++		 * Only SCHED_RR tasks get their queue modulated based on rt_ema.
++		 * rt_prio_allocated is kept synchronised so the dequeue path
++		 * always clears the correct bitmap bit, regardless of whether
++		 * modulation actually changed the queue index.
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
 +			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
-+				/*
-+				 * Exiting tasks: restore stock prio and set
-+				 * rt_prio_allocated so the teardown path
-+				 * sees a consistent queue index.
-+				 */
 +				if (unlikely(p->flags & PF_EXITING)) {
 +					p->infinity.rt_prio_allocated =
 +						rt_se_prio(rt_se);
-+					goto stock_requeue;
-+				}
-+
-+				int old_qprio = (p->infinity.rt_prio_allocated
-+						 >= 0)
-+					? p->infinity.rt_prio_allocated
-+					: rt_se_prio(rt_se);
-+				int qprio;
-+
-+				if (p->prio < p->normal_prio) {
-+					/*
-+					 * Priority Inheritance boost is active.
-+					 * Use the boosted priority directly;
-+					 * the normal bitmap update and
-+					 * accounting below keep the runqueue
-+					 * state synchronised.
-+					 */
-+					qprio = p->prio;
-+				} else {
-+					qprio = infinity_rt_effective_prio(
++				} else if (p->policy == SCHED_RR) {
++					int old_qprio = (p->infinity.
++						rt_prio_allocated >= 0)
++						? p->infinity.rt_prio_allocated
++						: rt_se_prio(rt_se);
++					int qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
-+				}
 +
-+				if (qprio != old_qprio) {
-+					struct rq *rq = rq_of_rt_rq(rt_rq);
-+
-+					/*
-+					 * Priority changed — move to the new
-+					 * queue.  p->prio is never touched,
-+					 * preserving PI state.
-+					 */
++					if (qprio != old_qprio) {
++						struct rq *rq = rq_of_rt_rq(
++							rt_rq);
++						p->infinity.rt_prio_allocated =
++							qprio;
++						queue = array->queue + qprio;
++						if (head)
++							list_move(
++								&rt_se->run_list,
++								queue);
++						else
++							list_move_tail(
++								&rt_se->run_list,
++								queue);
++						if (list_empty(
++							array->queue +
++							old_qprio))
++							__clear_bit(old_qprio,
++								array->bitmap);
++						__set_bit(qprio,
++							  array->bitmap);
++						dec_rt_prio(rt_rq, old_qprio);
++						inc_rt_prio(rt_rq, qprio);
++						if (qprio > old_qprio)
++							resched_curr(rq);
++						return;
++					}
 +					p->infinity.rt_prio_allocated = qprio;
 +					queue = array->queue + qprio;
-+					if (head)
-+						list_move(&rt_se->run_list,
-+							  queue);
-+					else
-+						list_move_tail(&rt_se->run_list,
-+							       queue);
-+					if (list_empty(array->queue + old_qprio))
-+						__clear_bit(old_qprio,
-+							    array->bitmap);
-+					__set_bit(qprio, array->bitmap);
-+					dec_rt_prio(rt_rq, old_qprio);
-+					inc_rt_prio(rt_rq, qprio);
-+					if (qprio > old_qprio)
-+						resched_curr(rq);
-+					return;
++				} else {
++					/* SCHED_FIFO or other: track stock priority */
++					p->infinity.rt_prio_allocated =
++						rt_se_prio(rt_se);
 +				}
-+
-+				/*
-+				 * Same priority as current placement —
-+				 * requeue within the same queue.  The
-+				 * rt_prio_allocated override ensures the
-+				 * dequeue bitmap clears the correct bit.
-+				 */
-+				p->infinity.rt_prio_allocated = qprio;
-+				queue = array->queue + qprio;
 +			}
 +		}
 +
-+stock_requeue:
  		if (head)
  			list_move(&rt_se->run_list, queue);
  		else
-diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
-index 77ae87f36..18dd18daf 100644
---- a/kernel/sched/syscalls.c
-+++ b/kernel/sched/syscalls.c
-@@ -566,6 +566,10 @@ int __sched_setscheduler(struct task_struct *p,
- 	}
- 
- 	/* Update task specific "requested" clamps */
-+	if (attr->sched_flags & SCHED_FLAG_NO_INFINITY_RT) {
-+		p->infinity.rt_ema = 0;
-+	}
-+
- 	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
- 		retval = uclamp_validate(p, attr);
- 		if (retval)
 diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
 index 68bee40c9..7abd362b9 100644
 --- a/sound/core/pcm_native.c
@@ -1250,6 +1052,3 @@ index 68bee40c9..7abd362b9 100644
  	return result;
  }
  
--- 
-2.55.0
-
