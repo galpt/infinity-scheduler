@@ -241,10 +241,10 @@ index 3ebec186f..33ab06185 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..e041f5f95
+index 000000000..16c1b8f07
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,330 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -457,7 +457,6 @@ index 000000000..e041f5f95
 +	if (sleep_ns > 40000000000ULL)
 +		sleep_ns = 40000000000ULL;
 +
-+	ctx->prev_ema = ctx->ema;
 +	step = mul_u64_u64_div_u64(ctx->ema,
 +				 sleep_ns * INFINITY_EMA_ALPHA *
 +				 INFINITY_EMA_DECAY_DIV,
@@ -465,6 +464,15 @@ index 000000000..e041f5f95
 +	if (step > ctx->ema)
 +		step = ctx->ema;
 +	ctx->ema -= step;
++
++	/*
++	 * Set prev_ema after the decay so the two-pole correction
++	 * (d = ema - prev_ema) evaluates to ~0 at wakeup time, preserving
++	 * the full wakeup vslice reduction and interactive boost.
++	 * During the subsequent compute burst infinity_consume() will
++	 * overwrite prev_ema before climbing, re-enabling the correction.
++	 */
++	ctx->prev_ema = ctx->ema;
 +}
 +
 +/* ------------------------------------------------------------------ */
