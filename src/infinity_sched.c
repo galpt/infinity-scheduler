@@ -266,7 +266,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
 	ctx->last_hw_wakeup = 0;
-	ctx->rt_prio_allocated = -1;
+
 }
 
 /* ------------------------------------------------------------------ */
@@ -392,13 +392,31 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_rt_effective_prio — priority after EMA modulation          */
+/* infinity_rr_timeslice — adaptive SCHED_RR timeslice                */
 /* ------------------------------------------------------------------ */
 
-u8 infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx)
+unsigned int infinity_rr_timeslice(struct task_struct *p,
+				   unsigned int rr_default)
 {
-	u64 decay = div64_u64(ctx->rt_ema * INFINITY_RT_PRIO_RANGE,
+	u64 decay_pct;
+
+	/*
+	 * Scale the RR timeslice by rt_ema consumption.
+	 * A task with high rt_ema (sustained RT runtime) gets a shorter
+	 * timeslice, causing more frequent requeue and giving other
+	 * tasks at the same priority more CPU access.
+	 *
+	 *   rt_ema = 0%    → base timeslice (100ms default)
+	 *   rt_ema = 100%  → 10ms minimum
+	 */
+	if (!p->infinity.rt_ema)
+		return rr_default;
+
+	decay_pct = div64_u64(p->infinity.rt_ema * 90ULL,
 			      INFINITY_RT_BUDGET_NS);
-	s16 adj = (s16)base_prio + (s16)decay;
-	return (u8)min((int)adj, INFINITY_RT_PRIO_FLOOR);
+	if (decay_pct > 90)
+		decay_pct = 90;
+
+	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
+				      / 100ULL));
 }

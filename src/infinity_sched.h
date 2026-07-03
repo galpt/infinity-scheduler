@@ -180,6 +180,7 @@ u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p);
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
-u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
+unsigned int infinity_rr_timeslice(struct task_struct *p,
+				   unsigned int rr_default);
 
 #endif /* __INFINITY_SCHED_H */

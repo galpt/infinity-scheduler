@@ -1,8 +1,8 @@
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878de..abbe554f4 100644
+index b469878de..bdeb36acc 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -816,6 +816,19 @@ struct kmap_ctrl {
+@@ -816,6 +816,18 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -14,7 +14,6 @@ index b469878de..abbe554f4 100644
 +	u64		last_sleep_ns;
 +	u64		rt_last_sleep_ns;
 +	u64		last_hw_wakeup;
-+	int		rt_prio_allocated;	/* Tracks actual RT queue index for bitmap sync */
 +	bool		futex_waiting;
 +};
 +
@@ -22,7 +21,7 @@ index b469878de..abbe554f4 100644
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -870,6 +883,7 @@ struct task_struct {
+@@ -870,6 +882,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -226,10 +225,10 @@ index 5b7523242..a491de903 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..2e7b53967
+index 000000000..c985849f0
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,420 @@
+@@ -0,0 +1,437 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -498,7 +497,6 @@ index 000000000..2e7b53967
 +	ctx->last_sleep_ns = now;
 +	ctx->rt_last_sleep_ns = 0;
 +	ctx->last_hw_wakeup = 0;
-+	ctx->rt_prio_allocated = -1;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -640,22 +638,40 @@ index 000000000..2e7b53967
 +}
 +
 +/* ------------------------------------------------------------------ */
-+/* infinity_rt_effective_prio — priority after EMA modulation          */
++/* infinity_rr_timeslice — adaptive SCHED_RR timeslice                */
 +/* ------------------------------------------------------------------ */
 +
-+u8 infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx)
++unsigned int infinity_rr_timeslice(struct task_struct *p,
++				   unsigned int rr_default)
 +{
-+	u64 decay = div64_u64(ctx->rt_ema * INFINITY_RT_PRIO_RANGE,
++	u64 decay_pct;
++
++	/*
++	 * Scale the RR timeslice by rt_ema consumption.
++	 * A task with high rt_ema (sustained RT runtime) gets a shorter
++	 * timeslice, causing more frequent requeue and giving other
++	 * tasks at the same priority more CPU access.
++	 *
++	 *   rt_ema = 0%    → base timeslice (100ms default)
++	 *   rt_ema = 100%  → 10ms minimum
++	 */
++	if (!p->infinity.rt_ema)
++		return rr_default;
++
++	decay_pct = div64_u64(p->infinity.rt_ema * 90ULL,
 +			      INFINITY_RT_BUDGET_NS);
-+	s16 adj = (s16)base_prio + (s16)decay;
-+	return (u8)min((int)adj, INFINITY_RT_PRIO_FLOOR);
++	if (decay_pct > 90)
++		decay_pct = 90;
++
++	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
++				      / 100ULL));
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..e8d9a899f
+index 000000000..71def7d75
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,187 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -839,11 +855,12 @@ index 000000000..e8d9a899f
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
-+u8   infinity_rt_effective_prio(u8 base_prio, struct infinity_ctx *ctx);
++unsigned int infinity_rr_timeslice(struct task_struct *p,
++				   unsigned int rr_default);
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..94cf3ef03 100644
+index 7936d4333..a3f69d4d7 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
@@ -858,32 +875,13 @@ index 7936d4333..94cf3ef03 100644
  	if (unlikely(delta_exec <= 0))
  		return;
  
-+	/* Infinity: RT EMA climbs with runtime, used for SCHED_RR priority modulation */
++	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1364,6 +1368,18 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
- 
- 	if (move_entity(flags)) {
- 		WARN_ON_ONCE(!rt_se->on_list);
-+		if (rt_entity_is_task(rt_se)) {
-+			struct task_struct *p = rt_task_of(rt_se);
-+			if (p->infinity.rt_prio_allocated >= 0) {
-+				int saved = p->prio;
-+				p->prio = p->infinity.rt_prio_allocated;
-+				__delist_rt_entity(rt_se, array);
-+				dec_rt_tasks(rt_se, rt_rq);
-+				p->prio = saved;
-+				rt_se->on_rq = 0;
-+				return;
-+			}
-+		}
- 		__delist_rt_entity(rt_se, array);
- 	}
- 	rt_se->on_rq = 0;
-@@ -1432,9 +1448,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1432,9 +1436,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -891,7 +889,7 @@ index 7936d4333..94cf3ef03 100644
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
  
-+		/* Infinity: SCHED_RR EMA decay on wakeup */
++		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
 +			if (now > p->infinity.rt_last_sleep_ns)
@@ -903,80 +901,23 @@ index 7936d4333..94cf3ef03 100644
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1454,6 +1479,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1467,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
-+	/* Infinity: record sleep timestamp for SCHED_RR EMA decay */
++	/* Infinity: record sleep timestamp for RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1499,65 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
- 		struct rt_prio_array *array = &rt_rq->active;
- 		struct list_head *queue = array->queue + rt_se_prio(rt_se);
+@@ -2522,7 +2539,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 	if (--p->rt.time_slice)
+ 		return;
  
-+		/*
-+		 * Infinity SCHED_RR priority modulation: gate by policy so that
-+		 * SCHED_FIFO tasks (fixed-priority contract) are never affected.
-+		 * Only SCHED_RR tasks get their queue modulated based on rt_ema.
-+		 * rt_prio_allocated is kept synchronised so the dequeue path
-+		 * always clears the correct bitmap bit, regardless of whether
-+		 * modulation actually changed the queue index.
-+		 */
-+		if (!group_rt_rq(rt_se)) {
-+			struct task_struct *p = rt_task_of(rt_se);
-+			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
-+				if (unlikely(p->flags & PF_EXITING)) {
-+					p->infinity.rt_prio_allocated =
-+						rt_se_prio(rt_se);
-+				} else if (p->policy == SCHED_RR) {
-+					int old_qprio = (p->infinity.
-+						rt_prio_allocated >= 0)
-+						? p->infinity.rt_prio_allocated
-+						: rt_se_prio(rt_se);
-+					int qprio = infinity_rt_effective_prio(
-+						p->normal_prio, &p->infinity);
-+
-+					if (qprio != old_qprio) {
-+						struct rq *rq = rq_of_rt_rq(
-+							rt_rq);
-+						p->infinity.rt_prio_allocated =
-+							qprio;
-+						queue = array->queue + qprio;
-+						if (head)
-+							list_move(
-+								&rt_se->run_list,
-+								queue);
-+						else
-+							list_move_tail(
-+								&rt_se->run_list,
-+								queue);
-+						if (list_empty(
-+							array->queue +
-+							old_qprio))
-+							__clear_bit(old_qprio,
-+								array->bitmap);
-+						__set_bit(qprio,
-+							  array->bitmap);
-+						dec_rt_prio(rt_rq, old_qprio);
-+						inc_rt_prio(rt_rq, qprio);
-+						if (qprio > old_qprio)
-+							resched_curr(rq);
-+						return;
-+					}
-+					p->infinity.rt_prio_allocated = qprio;
-+					queue = array->queue + qprio;
-+				} else {
-+					/* SCHED_FIFO or other: track stock priority */
-+					p->infinity.rt_prio_allocated =
-+						rt_se_prio(rt_se);
-+				}
-+			}
-+		}
-+
- 		if (head)
- 			list_move(&rt_se->run_list, queue);
- 		else
+-	p->rt.time_slice = sched_rr_timeslice;
++	p->rt.time_slice = infinity_rr_timeslice(p, sched_rr_timeslice);
+ 
+ 	/*
+ 	 * Requeue to the end of queue if we (and all of our ancestors) are not
