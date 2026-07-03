@@ -7,7 +7,7 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > - EMA: asymmetric τ (climb 96ms, decay 24ms), two-pole correction
 > - Wakeup decay: 2nd-order Taylor expansion (e^-x ≈ 1 - x + x²/2), continuous
 > - Slice: ×8/10 slope (max 5×), 50% proportional min, hrtick deadline precision
-> - HW-wakeup detection: threaded IRQ kthread check in infinity_wakeup()
+> - EMA self-stabilizing: no thresholds, no bypasses needed
 > - Uclamp: reads sched_util_min from userspace task declarations, no hooks
 > - Safety: 128-bit overflow protection, carriage auto-scales from CPU count
 > - RT: continuous Taylor decay, adaptive RR timeslice (10–100ms)
@@ -31,10 +31,8 @@ flowchart TB
         TWOPOLE --> SLICE["infinity_slice()\n \nEMA↑ → slice↓\nmin 50% of share"]
         class SLICE algo
 
-        TWOPOLE --> VRT["infinity_vruntime_scale()\n \n×8/10 slope, max 5×\n+ uclamp / threaded-IRQ bypass"]
+        TWOPOLE --> VRT["infinity_vruntime_scale()\n \n×8/10 slope, max 5×\n+ uclamp bypass"]
         class VRT algo
-
-        WAKE["infinity_wakeup()\n \nSCHED_FIFO kthread check:\nset last_hw_wakeup"] -. "kthread wakeup" .-> VRT
 
         VRT --> UPD["update_curr()\nvruntime += scaled_delta"]
         class UPD fair

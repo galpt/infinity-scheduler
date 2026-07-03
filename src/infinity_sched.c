@@ -195,15 +195,6 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 		return;
 
 	/*
-	 * Hardware-wakeup classification: if the waker is a kernel thread
-	 * at SCHED_FIFO priority, it is likely servicing a threaded IRQ
-	 * handler.  Record the timestamp so infinity_vruntime_scale()
-	 * can give the task a 50ms vruntime grace period.
-	 */
-	if (current->policy == SCHED_FIFO && (current->flags & PF_KTHREAD))
-		ctx->last_hw_wakeup = sched_clock();
-
-	/*
 	 * Exponential shift decay with 24ms half-life, using a 2nd-order
 	 * Taylor expansion for the sub-period residual to maintain a
 	 * continuous decay curve across the half-life boundary.
@@ -265,7 +256,6 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
-	ctx->last_hw_wakeup = 0;
 
 }
 
@@ -310,15 +300,6 @@ u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 	if (p->uclamp_req[UCLAMP_MIN].value > 0)
 		return vdelta;
 #endif
-
-	/*
-	 * Hardware-wakeup bypass: if this task was recently woken by a
-	 * threaded IRQ handler, the timestamp was set by infinity_wakeup()
-	 * and recorded in last_hw_wakeup.  Run at nominal vruntime for
-	 * 50ms.
-	 */
-	if (sched_clock() - p->infinity.last_hw_wakeup < 50000000ULL)
-		return vdelta;
 
 	ema = infinity_effective_ema(&p->infinity);
 
