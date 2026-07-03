@@ -1,17 +1,6 @@
-# infinity-scheduler (dev-cherrypick)
+# infinity-scheduler (v4.5)
 
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
-
-> [!TIP]
-> **TL;DR — dev-cherrypick**
-> - EMA: asymmetric τ (climb 128ms, decay 32ms), two-pole correction
-> - Wakeup decay: 2nd-order Taylor expansion (e^-x ≈ 1 - x + x²/2), continuous
-> - Weight: EMA-modulated EEVDF weight (floor at base/10)
-> - EMA self-stabilizing: no thresholds, no bypasses needed
-> - Uclamp: reads sched_util_min from userspace task declarations, no hooks
-> - Safety: 128-bit overflow protection, carriage auto-scales from CPU count
-> - RT: continuous Taylor decay, adaptive RR timeslice (10–100ms)
-> - Only two tunables: smt_divisor and running (ro)
 
 ```mermaid
 flowchart TB
@@ -73,8 +62,8 @@ flowchart TB
 ## Quick start
 
 ```bash
-# 1. Clone the dev-cherrypick branch
-git clone -b dev-cherrypick https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the v4.5 branch
+git clone -b v4.5 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
