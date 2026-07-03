@@ -1,8 +1,46 @@
+From be1cadc32a1407e9aae1725899e756b9c6e4a611 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Fri, 3 Jul 2026 22:25:15 +0700
+Subject: [PATCH] infinity-scheduler cumulative
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/input/evdev.c         |   3 +-
+ include/linux/sched.h         |  11 +
+ include/uapi/linux/sched.h    |   4 +-
+ init/init_task.c              |   8 +
+ kernel/futex/waitwake.c       |   5 +-
+ kernel/sched/Makefile         |   1 +
+ kernel/sched/fair.c           |  77 ++++++-
+ kernel/sched/infinity_sched.c | 375 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 186 +++++++++++++++++
+ kernel/sched/rt.c             |  77 ++++++-
+ kernel/sched/syscalls.c       |   4 +
+ sound/core/pcm_native.c       |   3 +-
+ 12 files changed, 743 insertions(+), 11 deletions(-)
+ create mode 100644 kernel/sched/infinity_sched.c
+ create mode 100644 kernel/sched/infinity_sched.h
+
+diff --git a/drivers/input/evdev.c b/drivers/input/evdev.c
+index c7325226c..d903290a5 100644
+--- a/drivers/input/evdev.c
++++ b/drivers/input/evdev.c
+@@ -589,8 +589,9 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
+ 			read += input_event_size();
+ 		}
+ 
+-		if (read)
++		if (read) {
+ 			break;
++		}
+ 
+ 		if (!(file->f_flags & O_NONBLOCK)) {
+ 			error = wait_event_interruptible(client->wait,
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ee06cba5c..0dfe87bef 100644
+index ee06cba5c..9e0106461 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,15 @@ struct kmap_ctrl {
+@@ -817,6 +817,16 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -12,13 +50,14 @@ index ee06cba5c..0dfe87bef 100644
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
 +	u64		rt_last_sleep_ns;
++	u64		last_hw_wakeup;
 +	bool		futex_waiting;
 +};
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +880,7 @@ struct task_struct {
+@@ -871,6 +881,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -49,10 +88,10 @@ index 33a462428..1aad61dbe 100644
  /* Only for sched_getattr() own flag param, if task is SCHED_DEADLINE */
  #define SCHED_GETATTR_FLAG_DL_DYNAMIC	0x01
 diff --git a/init/init_task.c b/init/init_task.c
-index b5f48ebdc..9ee0787ad 100644
+index b5f48ebdc..853a3ba28 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -148,6 +148,13 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +148,14 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -62,6 +101,7 @@ index b5f48ebdc..9ee0787ad 100644
 +				.rt_ema		= 0,
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
++				.last_hw_wakeup	= 0,
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -93,7 +133,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3ebec186f..33ab06185 100644
+index 3ebec186f..ce1e55069 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -57,6 +57,7 @@
@@ -126,7 +166,7 @@ index 3ebec186f..33ab06185 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1244,9 +1256,32 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1244,9 +1256,31 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -154,7 +194,6 @@ index 3ebec186f..33ab06185 100644
 +#endif
 +			se->slice = infinity_slice(cfs_rq->nr_queued, is_smt,
 +						   infinity_effective_ema(&p__->infinity));
-+			hrtick_start(rq_of(cfs_rq), se->slice);
 +		} else {
 +			se->slice = sysctl_sched_base_slice;
 +		}
@@ -162,7 +201,7 @@ index 3ebec186f..33ab06185 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -1424,7 +1459,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1424,7 +1458,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -173,13 +212,11 @@ index 3ebec186f..33ab06185 100644
 +
 +	curr->vruntime += infinity_vruntime_scale(
 +		calc_delta_fair(delta_exec, curr),
-+		entity_is_task(curr)
-+			? infinity_effective_ema(&task_of(curr)->infinity)
-+			: 0);
++		entity_is_task(curr) ? task_of(curr) : NULL);
  	resched = update_deadline(cfs_rq, curr);
  
  	if (entity_is_task(curr)) {
-@@ -5507,6 +5550,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5507,6 +5547,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -194,19 +231,16 @@ index 3ebec186f..33ab06185 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5783,6 +5834,11 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5783,6 +5831,8 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
-+	if (!se) {
-+		se = __pick_first_entity(cfs_rq);
-+		if (!se)
-+			return NULL;
-+	}
++	if (!se)
++		return NULL;
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -7198,6 +7254,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7198,6 +7248,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -221,7 +255,7 @@ index 3ebec186f..33ab06185 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7430,6 +7494,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7430,6 +7488,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -230,7 +264,7 @@ index 3ebec186f..33ab06185 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -13713,6 +13779,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13713,6 +13773,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -244,10 +278,10 @@ index 3ebec186f..33ab06185 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..60f194dd7
+index 000000000..d78770c52
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,375 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -257,24 +291,23 @@ index 000000000..60f194dd7
 + * Fully continuous limit-based fair and RT scheduling:
 + *
 + *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
-+ *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE)
++ *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE),
++ *                      clamped to ema at τ_decay = 24ms.
 + *   slice = share * (100 - ema_pct * 8/10) / 100  (active throttle)
 + *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
 + *
-+ * Key differences from v4:
-+ *   - Deadline tracking via hrtick_start (tick-independent, lock-safe)
-+ *   - 50% of fair share minimum slice (proportional, not absolute)
-+ *   - Carriage_ns auto-scaled from CPU count (no sysctl needed)
-+ *   - Faster decay τ (4× faster than climb, 24ms vs 96ms)
-+ *   - Bounded vruntime scaling (× 8/10 slope, max 5×)
++ * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
++ * oscillating workloads (interactive: compute-sleep-compute) from
++ * sustained CPU-bound tasks, giving interactivity a systematic boost.
 + *
-+ * The EMA converges asymptotically toward BUDGET_MAX when running and
-+ * toward 0 when sleeping — the true Limitless.  No clamps, no thresholds,
-+ * no external feedback loop.  Self-stabilising by construction.
++ * All task classification data is observed within the scheduler
++ * (uclamp declarations, wakeup source classification, EMA tracking).
++ * Driver hooks are not used.  Carriage_ns auto-scales from CPU count.
 + */
 +
 +#include <linux/types.h>
 +#include <linux/sched.h>
++#include <linux/sched/clock.h>
 +#include <linux/math64.h>
 +#include <linux/sysctl.h>
 +#include "infinity_sched.h"
@@ -287,7 +320,7 @@ index 000000000..60f194dd7
 +static int infinity_running_flag = 1;
 +
 +/* Auto-scaled carriage — set at init, not user-tunable */
-+static unsigned long infinity_carriage_ns;
++static unsigned long infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS;
 +
 +static int clamp_smt_divisor(const struct ctl_table *table, int write,
 +			     void *buf, size_t *lenp, loff_t *ppos)
@@ -420,6 +453,12 @@ index 000000000..60f194dd7
 +{
 +	u64 step;
 +
++	/* Safety clamp: prevent underflow if ema drifts past BUDGET_MAX */
++	if (ctx->ema >= INFINITY_BUDGET_MAX_NS) {
++		ctx->prev_ema = ctx->ema;
++		return;
++	}
++
 +	ctx->prev_ema = ctx->ema;
 +
 +	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
@@ -434,39 +473,48 @@ index 000000000..60f194dd7
 +
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
-+	u64 step;
-+
 +	if (sleep_ns == 0)
 +		return;
 +
 +	/*
-+	 * Decay is 4× faster than climb (τ_decay = τ_climb / 4 = 24ms).
-+	 * This asymmetry gives interactive tasks faster recovery during
-+	 * brief sleeps (e.g. GPU pipeline bubbles) while the slower climb
-+	 * ensures CPU-bound tasks are not penalised prematurely.
-+	 *
-+	 * step = ema × sleep_ns × α × D / (BUDGET_MAX × FP_ONE)
-+	 *       where D = INFINITY_EMA_DECAY_DIV = 4
-+	 *
-+	 * Sleep is capped at 40 seconds to prevent stale migration timestamps
-+	 * from producing an artificially large numerator.  The calculation uses
-+	 * mul_u64_u64_div_u64 for a 128-bit intermediate multiplication, which
-+	 * guarantees no u64 overflow regardless of the input magnitudes.
-+	 *
-+	 * The proportional clamp (step > ema) prevents underflow — the
-+	 * EMA approaches 0 asymptotically but never reaches it in finite
-+	 * time.
++	 * Hardware-wakeup classification: if the waker is a kernel thread
++	 * at SCHED_FIFO priority, it is likely servicing a threaded IRQ
++	 * handler.  Record the timestamp so infinity_vruntime_scale()
++	 * can give the task a 50ms vruntime grace period.
 +	 */
-+	if (sleep_ns > 40000000000ULL)
-+		sleep_ns = 40000000000ULL;
++	if (current->policy == SCHED_FIFO && (current->flags & PF_KTHREAD))
++		ctx->last_hw_wakeup = sched_clock();
 +
-+	step = mul_u64_u64_div_u64(ctx->ema,
-+				 sleep_ns * INFINITY_EMA_ALPHA *
-+				 INFINITY_EMA_DECAY_DIV,
-+				 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
-+	if (step > ctx->ema)
-+		step = ctx->ema;
-+	ctx->ema -= step;
++	/*
++	 * Exponential shift decay with 24ms half-life.
++	 *
++	 * For sub-half-life sleeps (< 24ms) the linear approximation is
++	 * accurate (e^-x ≈ 1 - x for small x).  For longer sleeps the
++	 * EMA is right-shifted by the number of elapsed half-life periods,
++	 * giving true exponential decay without the hard clamp at τ that
++	 * the old linear step would produce.
++	 *
++	 *   periods = 0  (< 24ms):   linear subtraction (fine-grained)
++	 *   periods = 1  (24ms):      ema >>= 1  (50% retained)
++	 *   periods = 2  (48ms):      ema >>= 2  (25% retained)
++	 *   periods = 10 (240ms):     ema >>= 10 (~0.1% retained)
++	 */
++	{
++		u64 periods = div64_u64(sleep_ns, 24000000ULL);
++		if (periods > 0) {
++			if (periods > 63)
++				ctx->ema = 0;
++			else
++				ctx->ema >>= periods;
++		} else {
++			u64 sub_step = mul_u64_u64_div_u64(ctx->ema,
++					sleep_ns, 24000000ULL);
++			if (sub_step > ctx->ema)
++				ctx->ema = 0;
++			else
++				ctx->ema -= sub_step;
++		}
++	}
 +
 +	/*
 +	 * Set prev_ema after the decay so the two-pole correction
@@ -489,6 +537,7 @@ index 000000000..60f194dd7
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
 +	ctx->rt_last_sleep_ns = 0;
++	ctx->last_hw_wakeup = 0;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -515,18 +564,47 @@ index 000000000..60f194dd7
 +/* infinity_vruntime_scale — EMA vruntime advancement scaling          */
 +/* ------------------------------------------------------------------ */
 +
-+u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
++u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 +{
++	u64 ema;
++
++	if (!p)
++		return vdelta;
++
++	/*
++	 * Utilization clamping bypass: if the task has set
++	 * sched_util_min > 0 via sched_setattr(), it has explicitly
++	 * declared itself interactive.  Respect that declaration
++	 * and bypass EMA scaling.
++	 */
++#ifdef CONFIG_UCLAMP_TASK
++	if (p->uclamp_req[UCLAMP_MIN].value > 0)
++		return vdelta;
++#endif
++
++	/*
++	 * Hardware-wakeup bypass: if this task was recently woken by a
++	 * threaded IRQ handler, the timestamp was set by infinity_wakeup()
++	 * and recorded in last_hw_wakeup.  Run at nominal vruntime for
++	 * 50ms.
++	 */
++	if (sched_clock() - p->infinity.last_hw_wakeup < 50000000ULL)
++		return vdelta;
++
++	ema = infinity_effective_ema(&p->infinity);
++
++	/* Clamp ema to BUDGET_MAX to prevent pct > 100, which would cause
++	 * denom to unsigned-wraparound and produce a near-infinite divisor,
++	 * freezing vruntime at 0 and locking the task at the front of EEVDF. */
++	if (ema > INFINITY_BUDGET_MAX_NS)
++		ema = INFINITY_BUDGET_MAX_NS;
++
 +	if (ema) {
 +		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-+		/*
-+		 * Bounded slope: × 8/10, max 5× at EMA=100%.
-+		 * denom = 100 - pct × 8/10, always ≥ 20.
-+		 */
 +		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
 +				      INFINITY_VRUNTIME_SLOPE_DEN;
 +
-+		if (denom < 100ULL)
++		if (denom >= 20ULL && denom < 100ULL)
 +			vdelta = div64_u64(vdelta * 100ULL, denom);
 +	}
 +	return vdelta;
@@ -581,10 +659,10 @@ index 000000000..60f194dd7
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..5ab56b8ab
+index 000000000..e8d9a899f
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,186 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -707,8 +785,16 @@ index 000000000..5ab56b8ab
 +/** RT alpha: same time constant as fair path. */
 +#define INFINITY_RT_ALPHA		4
 +
-+/** Max priority decay. */
-+#define INFINITY_RT_PRIO_RANGE		30
++/**
++ * Bounded priority decay window (max 8 slots).
++ *
++ * A wider window (30) would allow a misbehaving RT audio or compositor
++ * thread to demote far below its dependent supervisor, creating a
++ * priority inversion deadlock.  Compressing to 8 provides meaningful
++ * separation (a priority-45 task can drop to at most 53) without
++ * letting the gap cross typical dependency boundaries.
++ */
++#define INFINITY_RT_PRIO_RANGE		8
 +
 +/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 +#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
@@ -740,17 +826,23 @@ index 000000000..5ab56b8ab
 + */
 +u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 +
-+/*
-+ * infinity_vruntime_scale — scale vruntime advancement by EMA
++/**
++ * infinity_vruntime_scale - Scale vruntime advancement by EMA
++ * @vdelta: Nominal virtual runtime increment
++ * @p:     Task whose vruntime is being advanced
 + *
-+ * Called from update_curr() to advance vruntime faster for CPU-bound
-+ * tasks (high EMA).  Uses slope × 9/10 instead of × 3/4 — max 10×
-+ * scaling at EMA=100% (was 4×).
++ * Adjusts the pace of vruntime accumulation for CPU-bound tasks (high EMA)
++ * while preserving latency-sensitive interactive tasks.  Two bypass mechanisms
++ * prevent throttling of interactive workloads:
 + *
-+ *   EMA ~= 0             (interactive):   ~1x (normal)
-+ *   EMA ~= BUDGET_MAX    (CPU-bound):     ~10x
++ *   - Utilization clamping: if the task has set sched_util_min > 0 via
++ *     sched_setattr(), it declared itself interactive — honor that.
++ *   - Hardware-wakeup tracking: if the task was recently woken by a threaded
++ *     IRQ handler, it gets a 50ms vruntime grace period.
++ *
++ * Return: Optimized virtual runtime delta.
 + */
-+u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
++u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p);
 +
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
@@ -758,7 +850,7 @@ index 000000000..5ab56b8ab
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 4ee8faf01..c4cbcb562 100644
+index 4ee8faf01..62a7418d4 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -813,36 +905,45 @@ index 4ee8faf01..c4cbcb562 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1475,6 +1495,47 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1475,6 +1495,61 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  
 +		/*
-+		 * Modulate queue placement by EMA consumption for RT tasks.
-+		 * A task that has consumed significant RT runtime (high rt_ema)
-+		 * is placed in a lower-priority queue so that well-behaved RT
-+		 * tasks (low rt_ema) run first.  The task's actual priority is
-+		 * unchanged; only its queue position is modulated.
++		 * RT queue placement modulation by EMA.
 +		 *
-+		 * For RT group scheduling, skip group entities since they
-+		 * represent a CPU reservation, not an individual task.
++		 * A task with high rt_ema (sustained RT runtime) is placed in a
++		 * lower-priority queue, so that well-behaved RT tasks (low
++		 * rt_ema) run first.  Accounting helpers (dec_rt_prio /
++		 * inc_rt_prio), pushable plist re-indexing, and preemption
++		 * checks keep the scheduler state synchronised.
++		 *
++		 * Gated to root_task_group — nested systemd cgroups have
++		 * parent entities that read rt_rq->highest_prio.curr from
++		 * child runqueues, and mutating p->prio in a child without
++		 * updating the parent state desynchronises the hierarchy.
 +		 */
 +		if (!group_rt_rq(rt_se)) {
 +			struct task_struct *p = rt_task_of(rt_se);
-+			/*
-+			 * Restrict priority modulation to the root task group.
-+			 * Nested systemd cgroups have parent group entities that
-+			 * read rt_rq->highest_prio.curr from child runqueues.
-+			 * Mutating p->prio on a child task without updating the
-+			 * parent tracking state desynchronizes the cgroup
-+			 * hierarchy, causing pick_next_rt_entity() to dereference
-+			 * an empty list on a stale bitmap bit.
-+			 */
 +			if (rt_rq_of_se(rt_se)->tg == &root_task_group) {
++				/*
++				 * Skip exiting tasks — the stale bitmap entry
++				 * would cause a null-pointer dereference during
++				 * task teardown.
++				 */
++				if (unlikely(p->flags & PF_EXITING)) {
++					p->prio = p->normal_prio;
++					goto stock_requeue;
++				}
++
 +				int old_prio = p->prio;
 +				int qprio = infinity_rt_effective_prio(
 +						p->normal_prio, &p->infinity);
 +				if (qprio != old_prio) {
++					struct rq *rq = rq_of_rt_rq(rt_rq);
++
++					/* Move the entity without modifying p->prio,
++					 * preserving Priority Inheritance state. */
 +					queue = array->queue + qprio;
 +					if (head)
 +						list_move(&rt_se->run_list, queue);
@@ -852,12 +953,17 @@ index 4ee8faf01..c4cbcb562 100644
 +						__clear_bit(old_prio,
 +							    array->bitmap);
 +					__set_bit(qprio, array->bitmap);
-+					p->prio = qprio;
++					dec_rt_prio(rt_rq, old_prio);
++					inc_rt_prio(rt_rq, qprio);
++
++					if (qprio > old_prio)
++						resched_curr(rq);
 +					return;
 +				}
 +			}
 +		}
 +
++stock_requeue:
  		if (head)
  			list_move(&rt_se->run_list, queue);
  		else
@@ -876,3 +982,21 @@ index b215b0ead..90d1e26ac 100644
  	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
  		retval = uclamp_validate(p, attr);
  		if (retval)
+diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
+index 302643c1c..d01f5fe38 100644
+--- a/sound/core/pcm_native.c
++++ b/sound/core/pcm_native.c
+@@ -3575,8 +3575,9 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
+ 		return -EINVAL;
+ 	count = bytes_to_frames(runtime, count);
+ 	result = snd_pcm_lib_read(substream, buf, count);
+-	if (result > 0)
++	if (result > 0) {
+ 		result = frames_to_bytes(runtime, result);
++	}
+ 	return result;
+ }
+ 
+-- 
+2.55.0
+

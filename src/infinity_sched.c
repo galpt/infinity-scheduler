@@ -7,24 +7,23 @@
  * Fully continuous limit-based fair and RT scheduling:
  *
  *   While running:  ema += (BUDGET_MAX - ema) * delta_ns * α / (BUDGET_MAX * FP_ONE)
- *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE)
+ *   While sleeping:  ema -= ema * sleep_ns * α * D / (BUDGET_MAX * FP_ONE),
+ *                      clamped to ema at τ_decay = 24ms.
  *   slice = share * (100 - ema_pct * 8/10) / 100  (active throttle)
  *   vslice' = vslice * ema / BUDGET_MAX  (asymptotic, no cap)
  *
- * Key differences from v4:
- *   - Deadline tracking via hrtick_start (tick-independent, lock-safe)
- *   - 50% of fair share minimum slice (proportional, not absolute)
- *   - Carriage_ns auto-scaled from CPU count (no sysctl needed)
- *   - Faster decay τ (4× faster than climb, 24ms vs 96ms)
- *   - Bounded vruntime scaling (× 8/10 slope, max 5×)
+ * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
+ * oscillating workloads (interactive: compute-sleep-compute) from
+ * sustained CPU-bound tasks, giving interactivity a systematic boost.
  *
- * The EMA converges asymptotically toward BUDGET_MAX when running and
- * toward 0 when sleeping — the true Limitless.  No clamps, no thresholds,
- * no external feedback loop.  Self-stabilising by construction.
+ * All task classification data is observed within the scheduler
+ * (uclamp declarations, wakeup source classification, EMA tracking).
+ * Driver hooks are not used.  Carriage_ns auto-scales from CPU count.
  */
 
 #include <linux/types.h>
 #include <linux/sched.h>
+#include <linux/sched/clock.h>
 #include <linux/math64.h>
 #include <linux/sysctl.h>
 #include "infinity_sched.h"
@@ -37,7 +36,7 @@ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 static int infinity_running_flag = 1;
 
 /* Auto-scaled carriage — set at init, not user-tunable */
-static unsigned long infinity_carriage_ns;
+static unsigned long infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS;
 
 static int clamp_smt_divisor(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
@@ -170,6 +169,12 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
 	u64 step;
 
+	/* Safety clamp: prevent underflow if ema drifts past BUDGET_MAX */
+	if (ctx->ema >= INFINITY_BUDGET_MAX_NS) {
+		ctx->prev_ema = ctx->ema;
+		return;
+	}
+
 	ctx->prev_ema = ctx->ema;
 
 	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
@@ -184,39 +189,48 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 {
-	u64 step;
-
 	if (sleep_ns == 0)
 		return;
 
 	/*
-	 * Decay is 4× faster than climb (τ_decay = τ_climb / 4 = 24ms).
-	 * This asymmetry gives interactive tasks faster recovery during
-	 * brief sleeps (e.g. GPU pipeline bubbles) while the slower climb
-	 * ensures CPU-bound tasks are not penalised prematurely.
-	 *
-	 * step = ema × sleep_ns × α × D / (BUDGET_MAX × FP_ONE)
-	 *       where D = INFINITY_EMA_DECAY_DIV = 4
-	 *
-	 * Sleep is capped at 40 seconds to prevent stale migration timestamps
-	 * from producing an artificially large numerator.  The calculation uses
-	 * mul_u64_u64_div_u64 for a 128-bit intermediate multiplication, which
-	 * guarantees no u64 overflow regardless of the input magnitudes.
-	 *
-	 * The proportional clamp (step > ema) prevents underflow — the
-	 * EMA approaches 0 asymptotically but never reaches it in finite
-	 * time.
+	 * Hardware-wakeup classification: if the waker is a kernel thread
+	 * at SCHED_FIFO priority, it is likely servicing a threaded IRQ
+	 * handler.  Record the timestamp so infinity_vruntime_scale()
+	 * can give the task a 50ms vruntime grace period.
 	 */
-	if (sleep_ns > 40000000000ULL)
-		sleep_ns = 40000000000ULL;
+	if (current->policy == SCHED_FIFO && (current->flags & PF_KTHREAD))
+		ctx->last_hw_wakeup = sched_clock();
 
-	step = mul_u64_u64_div_u64(ctx->ema,
-				 sleep_ns * INFINITY_EMA_ALPHA *
-				 INFINITY_EMA_DECAY_DIV,
-				 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
-	if (step > ctx->ema)
-		step = ctx->ema;
-	ctx->ema -= step;
+	/*
+	 * Exponential shift decay with 24ms half-life.
+	 *
+	 * For sub-half-life sleeps (< 24ms) the linear approximation is
+	 * accurate (e^-x ≈ 1 - x for small x).  For longer sleeps the
+	 * EMA is right-shifted by the number of elapsed half-life periods,
+	 * giving true exponential decay without the hard clamp at τ that
+	 * the old linear step would produce.
+	 *
+	 *   periods = 0  (< 24ms):   linear subtraction (fine-grained)
+	 *   periods = 1  (24ms):      ema >>= 1  (50% retained)
+	 *   periods = 2  (48ms):      ema >>= 2  (25% retained)
+	 *   periods = 10 (240ms):     ema >>= 10 (~0.1% retained)
+	 */
+	{
+		u64 periods = div64_u64(sleep_ns, 24000000ULL);
+		if (periods > 0) {
+			if (periods > 63)
+				ctx->ema = 0;
+			else
+				ctx->ema >>= periods;
+		} else {
+			u64 sub_step = mul_u64_u64_div_u64(ctx->ema,
+					sleep_ns, 24000000ULL);
+			if (sub_step > ctx->ema)
+				ctx->ema = 0;
+			else
+				ctx->ema -= sub_step;
+		}
+	}
 
 	/*
 	 * Set prev_ema after the decay so the two-pole correction
@@ -239,6 +253,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
+	ctx->last_hw_wakeup = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -265,18 +280,47 @@ u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
 /* infinity_vruntime_scale — EMA vruntime advancement scaling          */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_vruntime_scale(u64 vdelta, u64 ema)
+u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
 {
+	u64 ema;
+
+	if (!p)
+		return vdelta;
+
+	/*
+	 * Utilization clamping bypass: if the task has set
+	 * sched_util_min > 0 via sched_setattr(), it has explicitly
+	 * declared itself interactive.  Respect that declaration
+	 * and bypass EMA scaling.
+	 */
+#ifdef CONFIG_UCLAMP_TASK
+	if (p->uclamp_req[UCLAMP_MIN].value > 0)
+		return vdelta;
+#endif
+
+	/*
+	 * Hardware-wakeup bypass: if this task was recently woken by a
+	 * threaded IRQ handler, the timestamp was set by infinity_wakeup()
+	 * and recorded in last_hw_wakeup.  Run at nominal vruntime for
+	 * 50ms.
+	 */
+	if (sched_clock() - p->infinity.last_hw_wakeup < 50000000ULL)
+		return vdelta;
+
+	ema = infinity_effective_ema(&p->infinity);
+
+	/* Clamp ema to BUDGET_MAX to prevent pct > 100, which would cause
+	 * denom to unsigned-wraparound and produce a near-infinite divisor,
+	 * freezing vruntime at 0 and locking the task at the front of EEVDF. */
+	if (ema > INFINITY_BUDGET_MAX_NS)
+		ema = INFINITY_BUDGET_MAX_NS;
+
 	if (ema) {
 		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-		/*
-		 * Bounded slope: × 8/10, max 5× at EMA=100%.
-		 * denom = 100 - pct × 8/10, always ≥ 20.
-		 */
 		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
 				      INFINITY_VRUNTIME_SLOPE_DEN;
 
-		if (denom < 100ULL)
+		if (denom >= 20ULL && denom < 100ULL)
 			vdelta = div64_u64(vdelta * 100ULL, denom);
 	}
 	return vdelta;

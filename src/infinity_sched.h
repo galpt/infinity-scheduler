@@ -120,8 +120,16 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 /** RT alpha: same time constant as fair path. */
 #define INFINITY_RT_ALPHA		4
 
-/** Max priority decay. */
-#define INFINITY_RT_PRIO_RANGE		30
+/**
+ * Bounded priority decay window (max 8 slots).
+ *
+ * A wider window (30) would allow a misbehaving RT audio or compositor
+ * thread to demote far below its dependent supervisor, creating a
+ * priority inversion deadlock.  Compressing to 8 provides meaningful
+ * separation (a priority-45 task can drop to at most 53) without
+ * letting the gap cross typical dependency boundaries.
+ */
+#define INFINITY_RT_PRIO_RANGE		8
 
 /** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
 #define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
@@ -153,17 +161,23 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  */
 u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
 
-/*
- * infinity_vruntime_scale — scale vruntime advancement by EMA
+/**
+ * infinity_vruntime_scale - Scale vruntime advancement by EMA
+ * @vdelta: Nominal virtual runtime increment
+ * @p:     Task whose vruntime is being advanced
  *
- * Called from update_curr() to advance vruntime faster for CPU-bound
- * tasks (high EMA).  Uses slope × 9/10 instead of × 3/4 — max 10×
- * scaling at EMA=100% (was 4×).
+ * Adjusts the pace of vruntime accumulation for CPU-bound tasks (high EMA)
+ * while preserving latency-sensitive interactive tasks.  Two bypass mechanisms
+ * prevent throttling of interactive workloads:
  *
- *   EMA ~= 0             (interactive):   ~1x (normal)
- *   EMA ~= BUDGET_MAX    (CPU-bound):     ~10x
+ *   - Utilization clamping: if the task has set sched_util_min > 0 via
+ *     sched_setattr(), it declared itself interactive — honor that.
+ *   - Hardware-wakeup tracking: if the task was recently woken by a threaded
+ *     IRQ handler, it gets a 50ms vruntime grace period.
+ *
+ * Return: Optimized virtual runtime delta.
  */
-u64 infinity_vruntime_scale(u64 vdelta, u64 ema);
+u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p);
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);

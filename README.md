@@ -1,20 +1,85 @@
 # infinity-scheduler (dev-cherrypick)
 
-A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget; CPU-bound tasks converge toward a minimum. Same concept applies to real-time tasks through smooth priority modulation. Built into CFS/EEVDF and RT, no BPF or sched-ext dependency.
+A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks are handled through smooth priority modulation. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
 
 > [!TIP]
-> **TL;DR — cherrypick base for incremental testing. Known-stable at this commit.**
->
-> Deadline tracking uses the kernel's hrtick infrastructure — no custom timer,
-> no tick dependency. The vruntime scaling slope is × 9/10 (max 10×) for a
-> stronger allocation shift to interactive tasks. The slice minimum is 50% of
-> fair share (proportional, not a fixed 400µs floor). Carriage_ns auto-scales
-> from CPU count — one less knob to worry about. Decay is 4× faster than climb
-> (τ = 24ms vs 96ms) for quicker interactive recovery during brief sleeps.
+> **TL;DR — dev-cherrypick**
+> - EMA: asymmetric τ (climb 96ms, decay 24ms), two-pole correction
+> - Slice: ×8/10 slope (max 5×), 50% proportional min, hrtick deadline precision
+> - HW-wakeup detection: threaded IRQ kthread check in infinity_wakeup()
+> - Uclamp: reads sched_util_min from userspace task declarations, no hooks
+> - Safety: 128-bit overflow protection, carriage auto-scales from CPU count
+> - RT: time-proportional decay, priority modulation with full accounting
+> - Only two tunables: smt_divisor and running (ro)
 
-<p align="center">
-  <img src="assets/infinity_dev_branch_compress.png" alt="Infinity dev Scheduler Architecture" width="800"/>
-</p>
+```mermaid
+flowchart TB
+    classDef fair fill:#0000,stroke:#3b82f6,stroke-width:2
+    classDef algo fill:#0000,stroke:#6366f1,stroke-width:2
+    classDef wake fill:#0000,stroke:#14b8a6,stroke-width:2
+    classDef rtN fill:#0000,stroke:#d97706,stroke-width:2
+    classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
+
+    subgraph FAIR["Fair tasks (SCHED_OTHER)"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 96ms\nτ_decay 24ms"]
+        class GAUGE fair
+
+        GAUGE --> TWOPOLE["two-pole correction\n \neffective = ema − Δema/2\nneutral at wakeup"]
+        class TWOPOLE algo
+
+        TWOPOLE --> SLICE["infinity_slice()\n \nEMA↑ → slice↓\nmin 50% of share"]
+        class SLICE algo
+
+        TWOPOLE --> VRT["infinity_vruntime_scale()\n \n×8/10 slope, max 5×\n+ uclamp / threaded-IRQ bypass"]
+        class VRT algo
+
+        WAKE["infinity_wakeup()\n \nSCHED_FIFO kthread check:\nset last_hw_wakeup"] -. "kthread wakeup" .-> VRT
+
+        VRT --> UPD["update_curr()\nvruntime += scaled_delta"]
+        class UPD fair
+
+        UPD --> PICK["pick_eevdf()\n \nEEVDF tree\nearliest deadline wins"]
+        class PICK algo
+
+        PICK --> FUTEX["futex_waiting?\nbypass protect_slice"]
+        class FUTEX algo
+
+        FUTEX --> RUN["Task runs\nuntil block or preempt"]
+        class RUN fair
+
+        subgraph WAKEUP["Wakeup path"]
+            WQ["enqueue_task_fair()"]
+            WQ --> DECAY["infinity_wakeup()\n \nema = f(sleep_ns)\n40s cap, 128-bit safety"]
+            DECAY --> WUP["infinity_wakeup_scale()\n \nvslice' = vslice × ema / BUDGET_MAX\n→ 0 as ema → 0, no cap"]
+            WUP --> PLACE["place_entity()\ndeadline = vruntime + vslice'"]
+            PLACE --> PICK
+        end
+        class DECAY,WUP,PLACE wake
+
+        RUN -. "block / preempt" .-> WAKEUP
+        RUN --> GAUGE
+    end
+
+    subgraph RT["RT tasks (SCHED_FIFO/RR)"]
+        RT_T["RT task runs"] --> RT_C["infinity_rt_consume()\n \nEMA climbs with runtime"]
+        class RT_C rtN
+
+        RT_C --> RT_D["infinity_rt_wakeup()\n \ntime-proportional decay\nsame τ as fair path\ndedicated rt_last_sleep_ns"]
+        class RT_D rtN
+
+        RT_D --> RT_P["infinity_rt_effective_prio()\n \nrt_ema↑ → priority↓\nmoved to lower RT queue"]
+        class RT_P rtN
+
+        RT_P --> RT_Q["RT queue placement\ngated to root_task_group"]
+    end
+
+    subgraph INFRA["Scheduler infrastructure"]
+        AC["carriage_ns\n \nauto-scaled from CPU count\n1 + ilog min(cpus, 8)"]
+        OF["sleep decay\n \nmul_u64_u64_div_u64\n128-bit overflow safety"]
+        TU["tunables\n \nsmt_divisor\nrunning (ro)"]
+    end
+    class AC,OF,TU infra
+```
 
 ## Quick start
 
@@ -45,7 +110,6 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: carriage=
 
 ```
 .
-├── assets/                 Architecture diagram
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/stable/         0001-infinity-scheduler.patch for each kernel version
 ├── tools/                  Install script, build helpers, patch fixers
