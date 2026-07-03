@@ -4,22 +4,22 @@
  *
  * infinity_sched.c — Infinity scheduler algorithm (dev).
  *
- * Fully continuous limit-based fair and RT scheduling:
+ * Fully continuous limit-based scheduling:
  *
  *   While running:  ema += (BUDGET_MAX - ema) × δ × α / (BUDGET_MAX × FP_ONE)
  *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)
  *                      Sub-period residual via 2nd-order Taylor expansion
  *                      (e^-x ≈ 1 - x + x²/2) for continuous decay.
- *   slice = share × (100 - ema_pct × 8/10) / 100  (active throttle)
- *   vslice' = vslice × ema / BUDGET_MAX  (asymptotic, no cap)
+ *   Weight:          effective = base × (100 - ema_pct × 8/10) / 100
+ *                      with floor at base/10.
  *
  * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
  * oscillating workloads (interactive: compute-sleep-compute) from
  * sustained CPU-bound tasks, giving interactivity a systematic boost.
  *
  * All task classification data is observed within the scheduler
- * (uclamp declarations, wakeup source classification, EMA tracking).
- * Driver hooks are not used.  Carriage_ns auto-scales from CPU count.
+ * (uclamp declarations, EMA tracking).  Driver hooks are not used.
+ * Carriage_ns auto-scales from CPU count.
  */
 
 #include <linux/types.h>
@@ -30,14 +30,14 @@
 #include "infinity_sched.h"
 
 /* ------------------------------------------------------------------ */
-/* Tunables with safe clamps                                           */
+/* Sysctl tunables                                                     */
 /* ------------------------------------------------------------------ */
 
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 static int infinity_running_flag = 1;
 
-/* Auto-scaled carriage — set at init, not user-tunable */
-static unsigned long infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS;
+/* Carriage (base fair-share window), auto-scaled at init. */
+unsigned long infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS;
 
 static int clamp_smt_divisor(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
@@ -112,58 +112,6 @@ static int __init infinity_sched_init(void)
 late_initcall(infinity_sched_init);
 
 /* ------------------------------------------------------------------ */
-/* infinity_slice — fair-share slice with EMA modulation               */
-/* ------------------------------------------------------------------ */
-
-u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema)
-{
-	u64 slice, share;
-
-	if (nr_runnable == 0)
-		nr_runnable = 1;
-
-	share = infinity_carriage_ns / nr_runnable;
-	slice = share;
-
-	/*
-	 * EMA modulation: higher EMA → shorter slice.
-	 * Uses an 8/10 slope so at EMA=100% the reduction is 80%,
-	 * yielding a 5× vruntime scaling cap (100 / (100 - 80)).
-	 */
-	if (ema > 0) {
-		u64 pct = (ema * 100ULL) / INFINITY_BUDGET_MAX_NS;
-		slice = slice * (100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
-				 INFINITY_VRUNTIME_SLOPE_DEN) / 100ULL;
-	}
-
-	/* SMT scaling */
-	if (on_smt_secondary) {
-		unsigned long div = READ_ONCE(infinity_tune_smt_divisor);
-		if (div > 1)
-			slice = div64_u64(slice, div);
-	}
-
-	/*
-	 * Proportional minimum: 50% of fair share (not an absolute floor).
-	 * The EMA modulation can never reduce the slice below half of the
-	 * task's fair share, which guarantees that every task always makes
-	 * measurable forward progress while preserving the ordering between
-	 * interactive and CPU-bound tasks.
-	 */
-	{
-		u64 min_slice = share >> 1;
-		if (slice < min_slice)
-			slice = min_slice;
-	}
-
-	/* Ceiling: single-task budget cap */
-	if (slice > INFINITY_BUDGET_MAX_NS)
-		slice = INFINITY_BUDGET_MAX_NS;
-
-	return slice;
-}
-
-/* ------------------------------------------------------------------ */
 /* infinity_consume — EMA budget consumption                           */
 /* ------------------------------------------------------------------ */
 
@@ -186,7 +134,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_wakeup — EMA decay on wakeup (4× faster than climb)        */
+/* infinity_wakeup — EMA decay on wakeup                               */
 /* ------------------------------------------------------------------ */
 
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
@@ -195,8 +143,9 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 		return;
 
 	/*
-	 * Exponential shift decay with 24ms half-life, using a 2nd-order
-	 * Taylor expansion for the sub-period residual to maintain a
+	 * Exponential shift decay with 32ms effective half-life
+	 * (τ_cimb / DIV = 128ms / 4), using a 2nd-order Taylor
+	 * expansion for the sub-period residual to maintain a
 	 * continuous decay curve across the half-life boundary.
 	 *
 	 *   whole periods (≥ 24ms):  ema >>= periods  (exact exponential)
@@ -204,10 +153,6 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	 *
 	 * At x = 1.0 (residual = 24ms) the Taylor formula gives
 	 * 1 - 1 + 1/2 = 0.5, matching ema >>= 1 — no discontinuity.
-	 *
-	 * This prevents the catastrophic linear collapse at x ≈ 1 that
-	 * the old first-order formula produced (ema → 0 at 23.99ms vs
-	 * ema/2 retained at 24.01ms).
 	 */
 	{
 		u64 periods, residual;
@@ -235,18 +180,11 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 		}
 	}
 
-	/*
-	 * Set prev_ema after the decay so the two-pole correction
-	 * (d = ema - prev_ema) evaluates to ~0 at wakeup time, preserving
-	 * the full wakeup vslice reduction and interactive boost.
-	 * During the subsequent compute burst infinity_consume() will
-	 * overwrite prev_ema before climbing, re-enabling the correction.
-	 */
 	ctx->prev_ema = ctx->ema;
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_fork_init                                                 */
+/* infinity_fork_init                                                   */
 /* ------------------------------------------------------------------ */
 
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
@@ -256,71 +194,37 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
-
 }
 
 /* ------------------------------------------------------------------ */
-/* infinity_wakeup_scale — asymptotic vslice scaling on wakeup         */
+/* infinity_wakeup_scale — no longer used (replaced by weight)         */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx)
-{
-	u64 effective;
-
-	/*
-	 * Asymptotic vslice: vslice' = vslice × ema / BUDGET_MAX.
-	 * At EMA → 0: vslice → 0 (instant scheduling on wakeup).
-	 * At EMA → BUDGET_MAX: vslice approaches the nominal value.
-	 * No cap, no threshold, fully continuous.
-	 */
-	effective = infinity_effective_ema(ctx);
-	if (effective >= INFINITY_BUDGET_MAX_NS)
-		return vslice;
-	return div64_u64(vslice * effective, INFINITY_BUDGET_MAX_NS) + 1;
-}
+/*
+ * infinity_wakeup_scale was removed in favour of weight modulation.
+ * The EMA-modulated weight produces the same effect: a low-EMA task
+ * has a higher weight, gets an earlier deadline, and is picked sooner.
+ */
 
 /* ------------------------------------------------------------------ */
-/* infinity_vruntime_scale — EMA vruntime advancement scaling          */
+/* infinity_slice — no longer used (replaced by weight)                */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p)
-{
-	u64 ema;
+/*
+ * infinity_slice was removed in favour of weight modulation.  EEVDF
+ * natively computes the slice from the task's weight via calc_delta_fair.
+ * SMT halving is handled directly in update_deadline.
+ */
 
-	if (!p)
-		return vdelta;
+/* ------------------------------------------------------------------ */
+/* infinity_vruntime_scale — no longer used (replaced by weight)       */
+/* ------------------------------------------------------------------ */
 
-	/*
-	 * Utilization clamping bypass: if the task has set
-	 * sched_util_min > 0 via sched_setattr(), it has explicitly
-	 * declared itself interactive.  Respect that declaration
-	 * and bypass EMA scaling.
-	 */
-#ifdef CONFIG_UCLAMP_TASK
-	if (p->uclamp_req[UCLAMP_MIN].value > 0)
-		return vdelta;
-#endif
-
-	ema = infinity_effective_ema(&p->infinity);
-
-	/*
-	 * Enforce BUDGET_MAX ceiling on effective EMA to guarantee that the
-	 * denominator remains bounded (denom ≥ 20), ensuring stable vruntime
-	 * advancement across continuous execution bursts.
-	 */
-	if (ema > INFINITY_BUDGET_MAX_NS)
-		ema = INFINITY_BUDGET_MAX_NS;
-
-	if (ema) {
-		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
-		u64 denom = 100ULL - pct * INFINITY_VRUNTIME_SLOPE_NUM /
-				      INFINITY_VRUNTIME_SLOPE_DEN;
-
-		if (denom >= 20ULL && denom < 100ULL)
-			vdelta = div64_u64(vdelta * 100ULL, denom);
-	}
-	return vdelta;
-}
+/*
+ * infinity_vruntime_scale was removed in favour of weight modulation.
+ * Vruntime advances naturally because the weight determines the slice
+ * and deadline — no separate vruntime scaling is needed.
+ */
 
 /* ------------------------------------------------------------------ */
 /* infinity_rt_consume — EMA climb on RT runtime                       */
@@ -381,15 +285,6 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
 {
 	u64 decay_pct;
 
-	/*
-	 * Scale the RR timeslice by rt_ema consumption.
-	 * A task with high rt_ema (sustained RT runtime) gets a shorter
-	 * timeslice, causing more frequent requeue and giving other
-	 * tasks at the same priority more CPU access.
-	 *
-	 *   rt_ema = 0%    → base timeslice (100ms default)
-	 *   rt_ema = 100%  → 10ms minimum
-	 */
 	if (!p->infinity.rt_ema)
 		return rr_default;
 

@@ -4,9 +4,9 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 
 > [!TIP]
 > **TL;DR — dev-cherrypick**
-> - EMA: asymmetric τ (climb 96ms, decay 24ms), two-pole correction
+> - EMA: asymmetric τ (climb 128ms, decay 32ms), two-pole correction
 > - Wakeup decay: 2nd-order Taylor expansion (e^-x ≈ 1 - x + x²/2), continuous
-> - Slice: ×8/10 slope (max 5×), 50% proportional min, hrtick deadline precision
+> - Weight: EMA-modulated EEVDF weight (floor at base/10)
 > - EMA self-stabilizing: no thresholds, no bypasses needed
 > - Uclamp: reads sched_util_min from userspace task declarations, no hooks
 > - Safety: 128-bit overflow protection, carriage auto-scales from CPU count
@@ -22,38 +22,28 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 96ms\nτ_decay 24ms"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 128ms\nτ_decay 32ms"]
         class GAUGE fair
 
         GAUGE --> TWOPOLE["two-pole correction\n \neffective = ema − Δema/2\nneutral at wakeup"]
         class TWOPOLE algo
 
-        TWOPOLE --> SLICE["infinity_slice()\n \nEMA↑ → slice↓\nmin 50% of share"]
-        class SLICE algo
+        TWOPOLE --> WEIGHT["infinity_update_weight()\n \nreweight_entity()\nweight = base × (100 - pct×8/10) / 100\nfloor at base/10"]
+        class WEIGHT algo
 
-        TWOPOLE --> VRT["infinity_vruntime_scale()\n \n×8/10 slope, max 5×\n+ uclamp bypass"]
-        class VRT algo
+        WEIGHT --> EEVDF["EEVDF\n \ndeadline = vruntime + slice/weight\nweight↑ → earlier deadline"]
+        class EEVDF algo
 
-        VRT --> UPD["update_curr()\nvruntime += scaled_delta"]
-        class UPD fair
-
-        UPD --> PICK["pick_eevdf()\n \nEEVDF tree\nearliest deadline wins"]
-        class PICK algo
-
-        PICK --> FUTEX["futex_waiting?\nbypass protect_slice"]
-        class FUTEX algo
-
-        FUTEX --> RUN["Task runs\nuntil block or preempt"]
+        EEVDF --> RUN["Task runs\nuntil block or preempt"]
         class RUN fair
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
             WQ --> DECAY["infinity_wakeup()\n \nema = f(sleep_ns)\nperiod-shift bounds tracking\n& 128-bit math safety"]
-            DECAY --> WUP["infinity_wakeup_scale()\n \nvslice' = vslice × ema / BUDGET_MAX\n→ 0 as ema → 0, no cap"]
-            WUP --> PLACE["place_entity()\ndeadline = vruntime + vslice'"]
-            PLACE --> PICK
+            DECAY --> WAKE["Waking task\nhas higher weight →\nnaturally earlier deadline"]
+            WAKE --> RUN
         end
-        class DECAY,WUP,PLACE wake
+        class DECAY wake
 
         RUN -. "block / preempt" .-> WAKEUP
         RUN --> GAUGE
@@ -73,7 +63,7 @@ flowchart TB
     end
 
     subgraph INFRA["Scheduler infrastructure"]
-        AC["carriage_ns\n \nauto-scaled from CPU count\n1 + ilog min(cpus, 8)"]
+        AC["carriage_ns\n \nauto-scaled from CPU count\n1 + ilog min(cpus, 8)\nshifts τ_decay"]
         OF["sleep decay\n \n2nd-order Taylor expansion\nperiod-shift bounds < 63\n128-bit math safety"]
         TU["tunables\n \nsmt_divisor\nrunning (ro)"]
     end

@@ -6,35 +6,37 @@
  *
  * Architecture:
  *
- *   fair.c / rt.c (Linux scheduler)   infinity_sched.c (Infinity algorithm)
- *   ────────────────────────────────   ─────────────────────────────────────
- *   update_deadline()       ──call──► infinity_slice()        — fair-share slice
- *   update_curr()           ──call──► infinity_consume()      — EMA budget consumption
- *   update_curr()           ──call──► infinity_vruntime_scale() — EMA vruntime scaling
- *   enqueue_task_fair()     ──call──► infinity_wakeup()       — EMA decay on wakeup
- *   dequeue_task_fair()     ──call──► (records last_sleep_ns) — sleep tracking
- *   pick_eevdf()            ──check──► futex_waiting          — bypass protect_slice
- *   update_curr_rt()        ──call──► (stock RT scheduler, no Infinity hooks)
- *   enqueue_task_rt()       ──call──► (stock RT scheduler)
- *   dequeue_task_rt()       ──call──► (stock RT scheduler)
- *   task_fork_fair()        ──call──► infinity_fork_init()    — fork init
- *   init/init_task.c        ──init──► infinity.{}             — static init
- *   place_entity()          ──call──► infinity_wakeup_scale() — asymptotic vslice on wakeup
+ *   fair.c (Linux scheduler)         infinity_sched.c (Infinity algorithm)
+ *   ──────────────────────────       ─────────────────────────────────────
+ *   update_deadline()        ──call──► infinity_maybe_reweight() — EMA weight
+ *   update_curr()            ──call──► infinity_consume()        — EMA budget
+ *   update_curr()            ──call──► infinity_maybe_reweight() — EMA weight
+ *   enqueue_task_fair()      ──call──► infinity_wakeup()         — EMA decay
+ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)   — sleep tracking
+ *   pick_eevdf()             ──check──► futex_waiting            — protect_slice bypass
+ *   update_curr_rt()         ──call──► infinity_rt_consume()     — RT EMA climb
+ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()      — RT EMA decay
+ *   dequeue_task_rt()        ──call──► (records rt_last_sleep_ns)
+ *   task_tick_rt()           ──call──► infinity_rr_timeslice()   — adaptive RR slice
+ *   task_fork_fair()         ──call──► infinity_fork_init()      — fork init
+ *   init/init_task.c         ──init──► infinity.{}               — static init
+ *
+ * The weight-based approach replaces the old slice + vruntime scaling:
+ * instead of shortening the slice and accelerating vruntime for CPU-bound
+ * tasks, we modulate the task's EEVDF weight via reweight_entity().
+ * EEVDF natively computes a shorter slice and later deadline from a lower
+ * weight — no second level of fairness logic needed.
  *
  * Tunables:
  *   kernel.infinity_smt_divisor   — SMT secondary slice divisor (default 2)
  *   kernel.infinity_running       — read-only flag, 1 if active
  *
- * The carriage_ns (base fair-share window) is auto-scaled from CPU count at
- * init, matching stock EEVDF's CPU-count scaling behaviour.  No tunable needed.
- *
- * Deadline tracking uses the kernel's built-in hrtick_start() mechanism rather
- * than a custom hrtimer — this avoids the lock inversion (rq->lock vs
- * cpu_base->lock) that a raw hrtimer would introduce inside scheduler locks.
+ * The carriage_ns (base fair-share window) is auto-scaled from CPU count
+ * at init.  Deadline tracking uses the kernel's built-in hrtick_start().
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
- * Higher EMA → shorter time slice and faster vruntime advance.
+ * Higher EMA → lower effective weight → later deadline.
  */
 
 #ifndef __INFINITY_SCHED_H
@@ -54,15 +56,15 @@
 
 /**
  * EMA time constant: τ = BUDGET_MAX × FP_ONE / ALPHA.
- * α = 16 gives τ = 6ms × 256 / 16 = 96ms for climb.
+ * α = 12 gives τ = 6ms × 256 / 12 = 128ms for climb,
+ * τ_decay = 128 / 4 = 32ms.
+ * The 32ms decay suits 60-165Hz displays (2–5 frames to clear EMA).
  */
-#define INFINITY_EMA_ALPHA		16
+#define INFINITY_EMA_ALPHA		12
 
 /**
- * Decay is 4× faster than climb: τ_decay = τ_climb / 4 = 24ms.
- * Faster decay means interactive tasks recover their EMA more quickly
- * during brief sleeps (e.g., GPU wait), without losing the asymptotic
- * convergence guarantee of the limit concept.
+ * Decay divisor: τ_decay = τ_climb / DIV.
+ * Kept at 4 for 1:4 climb/decay asymmetry.
  */
 #define INFINITY_EMA_DECAY_DIV		4
 
@@ -71,17 +73,14 @@
 #define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
 
 /**
- * Vruntime scaling slope: × 8/10 (max 5× at EMA=100%).
- * An × 8/10 slope ensures that short-lived initialization bursts which
- * saturate the EMA within a few hundred milliseconds disqualify from
- * EEVDF selection only briefly before the burst passes.
- *
- * At max scaling: 100 / (100 - 80) = 5×.
- * The denominator is always ≥ 20, so the scaling is bounded and cannot
- * diverge regardless of EMA input.
+ * Weight reduction slope versus EMA percentage: × 8/10.
+ * At EMA=100%, weight is reduced by 80%: effective = base × 20/100.
+ * The minimum effective weight is base/10 (at EMA ≈ 88%).
+ * Clamp: denom ≥ 10 (i.e. effective_weight ≥ base_weight / 10).
  */
-#define INFINITY_VRUNTIME_SLOPE_NUM	8
-#define INFINITY_VRUNTIME_SLOPE_DEN	10
+#define INFINITY_WEIGHT_SLOPE_NUM	8
+#define INFINITY_WEIGHT_SLOPE_DEN	10
+#define INFINITY_WEIGHT_DENOM_MIN	10ULL
 
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
@@ -109,6 +108,47 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 }
 
 /* ------------------------------------------------------------------ */
+/* Weight calculation from EMA                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * infinity_calc_weight — Compute EMA-modulated EEVDF weight.
+ * @p:    Task whose weight to compute.
+ * @ema:  Current effective EMA (from infinity_effective_ema).
+ *
+ * The base weight comes from @p's static priority (user's nice value).
+ * The EMA modulates it:
+ *   effective = base × (100 - pct × 8/10) / 100
+ * with a floor of base/10 to prevent complete starvation.
+ *
+ * Tasks with uclamp_min > 0 are bypassed (return their base weight).
+ *
+ * Return: Effective weight for EEVDF.
+ */
+static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+{
+	u32 base = p->se.load.weight;
+
+#ifdef CONFIG_UCLAMP_TASK
+	if (p->uclamp_req[UCLAMP_MIN].value > 0)
+		return base;
+#endif
+
+	if (ema > INFINITY_BUDGET_MAX_NS)
+		ema = INFINITY_BUDGET_MAX_NS;
+
+	if (ema) {
+		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
+		u64 denom = 100ULL - pct * INFINITY_WEIGHT_SLOPE_NUM /
+				      INFINITY_WEIGHT_SLOPE_DEN;
+		if (denom < INFINITY_WEIGHT_DENOM_MIN)
+			denom = INFINITY_WEIGHT_DENOM_MIN;
+		return (u32)max(1ULL, base * denom / 100ULL);
+	}
+	return base;
+}
+
+/* ------------------------------------------------------------------ */
 /* RT EMA constants                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -117,20 +157,6 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 
 /** RT alpha: same time constant as fair path. */
 #define INFINITY_RT_ALPHA		4
-
-/**
- * Bounded priority decay window (max 8 slots).
- *
- * A wider window (30) would allow a misbehaving RT audio or compositor
- * thread to demote far below its dependent supervisor, creating a
- * priority inversion deadlock.  Compressing to 8 provides meaningful
- * separation (a priority-45 task can drop to at most 53) without
- * letting the gap cross typical dependency boundaries.
- */
-#define INFINITY_RT_PRIO_RANGE		8
-
-/** Hard floor — RT never decays below this (MAX_RT_PRIO - 1 = 98). */
-#define INFINITY_RT_PRIO_FLOOR		(MAX_RT_PRIO - 1)
 
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
@@ -142,40 +168,9 @@ extern unsigned long infinity_tune_smt_divisor;
 /* API — called from fair.c and rt.c                                   */
 /* ------------------------------------------------------------------ */
 
-u64 infinity_slice(unsigned long nr_runnable, bool on_smt_secondary, u64 ema);
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
-
-/*
- * infinity_wakeup_scale — scale vslice asymptotically on wakeup
- *
- * Called from place_entity() to shorten the vslice of a waking task
- * as a continuous function of its effective EMA.  The vslice
- * approaches zero as EMA → 0 (instant scheduling on wakeup) and
- * approaches the nominal vslice as EMA → BUDGET_MAX.
- *
- * The +1 term guarantees a positive vslice for EEVDF tree placement.
- */
-u64 infinity_wakeup_scale(u64 vslice, struct infinity_ctx *ctx);
-
-/**
- * infinity_vruntime_scale - Scale vruntime advancement by EMA
- * @vdelta: Nominal virtual runtime increment
- * @p:     Task whose vruntime is being advanced
- *
- * Adjusts the pace of vruntime accumulation for CPU-bound tasks (high EMA)
- * while preserving latency-sensitive interactive tasks.  Two bypass mechanisms
- * prevent throttling of interactive workloads:
- *
- *   - Utilization clamping: if the task has set sched_util_min > 0 via
- *     sched_setattr(), it declared itself interactive — honor that.
- *   - Hardware-wakeup tracking: if the task was recently woken by a threaded
- *     IRQ handler, it gets a 50ms vruntime grace period.
- *
- * Return: Optimized virtual runtime delta.
- */
-u64 infinity_vruntime_scale(u64 vdelta, struct task_struct *p);
 
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
