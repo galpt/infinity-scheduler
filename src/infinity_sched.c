@@ -210,7 +210,6 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (sleep_ns > 40000000000ULL)
 		sleep_ns = 40000000000ULL;
 
-	ctx->prev_ema = ctx->ema;
 	step = mul_u64_u64_div_u64(ctx->ema,
 				 sleep_ns * INFINITY_EMA_ALPHA *
 				 INFINITY_EMA_DECAY_DIV,
@@ -218,6 +217,15 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	if (step > ctx->ema)
 		step = ctx->ema;
 	ctx->ema -= step;
+
+	/*
+	 * Set prev_ema after the decay so the two-pole correction
+	 * (d = ema - prev_ema) evaluates to ~0 at wakeup time, preserving
+	 * the full wakeup vslice reduction and interactive boost.
+	 * During the subsequent compute burst infinity_consume() will
+	 * overwrite prev_ema before climbing, re-enabling the correction.
+	 */
+	ctx->prev_ema = ctx->ema;
 }
 
 /* ------------------------------------------------------------------ */
@@ -230,6 +238,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->prev_ema = 0;
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
+	ctx->rt_last_sleep_ns = 0;
 }
 
 /* ------------------------------------------------------------------ */
