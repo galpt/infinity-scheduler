@@ -1,30 +1,3 @@
-diff --git a/drivers/dma-buf/dma-fence.c b/drivers/dma-buf/dma-fence.c
-index abb6d8f8f..487d17338 100644
---- a/drivers/dma-buf/dma-fence.c
-+++ b/drivers/dma-buf/dma-fence.c
-@@ -781,6 +781,7 @@ dma_fence_default_wait_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
- 	struct default_wait_cb *wait =
- 		container_of(cb, struct default_wait_cb, base);
- 
-+
- 	wake_up_state(wait->task, TASK_NORMAL);
- }
- 
-diff --git a/drivers/input/evdev.c b/drivers/input/evdev.c
-index c7325226c..d903290a5 100644
---- a/drivers/input/evdev.c
-+++ b/drivers/input/evdev.c
-@@ -589,8 +589,9 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
- 			read += input_event_size();
- 		}
- 
--		if (read)
-+		if (read) {
- 			break;
-+		}
- 
- 		if (!(file->f_flags & O_NONBLOCK)) {
- 			error = wait_event_interruptible(client->wait,
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index d41e7a8f9..301268e18 100644
 --- a/include/linux/sched.h
@@ -57,19 +30,6 @@ index d41e7a8f9..301268e18 100644
  	struct sched_dl_entity		*dl_server;
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
-diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
-index 359a14cc7..7034a8dc3 100644
---- a/include/uapi/linux/sched.h
-+++ b/include/uapi/linux/sched.h
-@@ -144,6 +144,7 @@ struct clone_args {
- 			 SCHED_FLAG_RECLAIM		| \
- 			 SCHED_FLAG_DL_OVERRUN		| \
- 			 SCHED_FLAG_KEEP_ALL		| \
--			 SCHED_FLAG_UTIL_CLAMP)
-+			 SCHED_FLAG_UTIL_CLAMP		| \
-+			 SCHED_FLAG_NO_INFINITY_RT)
- 
- #endif /* _UAPI_LINUX_SCHED_H */
 diff --git a/init/init_task.c b/init/init_task.c
 index 5c838757f..d1cc8b6c4 100644
 --- a/init/init_task.c
@@ -98,23 +58,6 @@ index 5c838757f..d1cc8b6c4 100644
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
-diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index 1c2dd03f1..f2406896c 100644
---- a/kernel/futex/waitwake.c
-+++ b/kernel/futex/waitwake.c
-@@ -354,8 +354,11 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
- 		 * flagged for rescheduling. Only call schedule if there
- 		 * is no timeout, or if it has yet to expire.
- 		 */
--		if (!timeout || timeout->task)
-+		if (!timeout || timeout->task) {
-+			current->infinity.futex_waiting = true;
- 			schedule();
-+			current->infinity.futex_waiting = false;
-+		}
- 	}
- 	__set_current_state(TASK_RUNNING);
- }
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
 index b1f1a3670..9bea3857e 100644
 --- a/kernel/sched/Makefile
@@ -1039,18 +982,3 @@ index 0cbee0318..4f93f2d1b 100644
  		if (head)
  			list_move(&rt_se->run_list, queue);
  		else
-diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
-index 5a64453da..c01d3ae3a 100644
---- a/sound/core/pcm_native.c
-+++ b/sound/core/pcm_native.c
-@@ -3553,8 +3553,9 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
- 		return -EINVAL;
- 	count = bytes_to_frames(runtime, count);
- 	result = snd_pcm_lib_read(substream, buf, count);
--	if (result > 0)
-+	if (result > 0) {
- 		result = frames_to_bytes(runtime, result);
-+	}
- 	return result;
- }
- 

@@ -1,18 +1,3 @@
-diff --git a/drivers/input/evdev.c b/drivers/input/evdev.c
-index c7325226c..d903290a5 100644
---- a/drivers/input/evdev.c
-+++ b/drivers/input/evdev.c
-@@ -589,8 +589,9 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
- 			read += input_event_size();
- 		}
- 
--		if (read)
-+		if (read) {
- 			break;
-+		}
- 
- 		if (!(file->f_flags & O_NONBLOCK)) {
- 			error = wait_event_interruptible(client->wait,
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index ee06cba5c..f47fc2fc1 100644
 --- a/include/linux/sched.h
@@ -63,23 +48,6 @@ index b5f48ebdc..c841d42fc 100644
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
-diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index ceed9d879..b768e0cbc 100644
---- a/kernel/futex/waitwake.c
-+++ b/kernel/futex/waitwake.c
-@@ -354,8 +354,11 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
- 		 * flagged for rescheduling. Only call schedule if there
- 		 * is no timeout, or if it has yet to expire.
- 		 */
--		if (!timeout || timeout->task)
-+		if (!timeout || timeout->task) {
-+			current->infinity.futex_waiting = true;
- 			schedule();
-+			current->infinity.futex_waiting = false;
-+		}
- 	}
- 	__set_current_state(TASK_RUNNING);
- }
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
 index b1f1a3670..9bea3857e 100644
 --- a/kernel/sched/Makefile
@@ -976,18 +944,3 @@ index 4ee8faf01..871600a6d 100644
  		if (head)
  			list_move(&rt_se->run_list, queue);
  		else
-diff --git a/sound/core/pcm_native.c b/sound/core/pcm_native.c
-index 302643c1c..d01f5fe38 100644
---- a/sound/core/pcm_native.c
-+++ b/sound/core/pcm_native.c
-@@ -3575,8 +3575,9 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
- 		return -EINVAL;
- 	count = bytes_to_frames(runtime, count);
- 	result = snd_pcm_lib_read(substream, buf, count);
--	if (result > 0)
-+	if (result > 0) {
- 		result = frames_to_bytes(runtime, result);
-+	}
- 	return result;
- }
- 
