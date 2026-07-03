@@ -1,6 +1,6 @@
-From e9ecbab8bca1970c470870535a62f42c5b6e2eda Mon Sep 17 00:00:00 2001
+From 2c9ea702b4057fc5945351962dfae01112a2c314 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Fri, 3 Jul 2026 22:37:43 +0700
+Date: Fri, 3 Jul 2026 22:54:48 +0700
 Subject: [PATCH] infinity-scheduler cumulative
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -13,12 +13,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
  kernel/sched/fair.c           |  81 ++++++-
- kernel/sched/infinity_sched.c | 401 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 186 ++++++++++++++++
- kernel/sched/rt.c             | 127 ++++++++++-
+ kernel/sched/infinity_sched.c | 417 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 186 +++++++++++++++
+ kernel/sched/rt.c             | 158 ++++++++++++-
  kernel/sched/syscalls.c       |   4 +
  sound/core/pcm_native.c       |   3 +-
- 13 files changed, 824 insertions(+), 16 deletions(-)
+ 13 files changed, 869 insertions(+), 18 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -313,10 +313,10 @@ index 3bce48ad0..483513a62 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..598d71e68
+index 000000000..27bb46672
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,401 @@
+@@ -0,0 +1,417 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -522,33 +522,43 @@ index 000000000..598d71e68
 +		ctx->last_hw_wakeup = sched_clock();
 +
 +	/*
-+	 * Exponential shift decay with 24ms half-life.
++	 * Exponential shift decay with 24ms half-life, using a 2nd-order
++	 * Taylor expansion for the sub-period residual to maintain a
++	 * continuous decay curve across the half-life boundary.
 +	 *
-+	 * For sub-half-life sleeps (< 24ms) the linear approximation is
-+	 * accurate (e^-x ≈ 1 - x for small x).  For longer sleeps the
-+	 * EMA is right-shifted by the number of elapsed half-life periods,
-+	 * giving true exponential decay without the hard clamp at τ that
-+	 * the old linear step would produce.
++	 *   whole periods (≥ 24ms):  ema >>= periods  (exact exponential)
++	 *   sub-period (< 24ms):     e^-x ≈ 1 - x + x²/2  (Taylor)
 +	 *
-+	 *   periods = 0  (< 24ms):   linear subtraction (fine-grained)
-+	 *   periods = 1  (24ms):      ema >>= 1  (50% retained)
-+	 *   periods = 2  (48ms):      ema >>= 2  (25% retained)
-+	 *   periods = 10 (240ms):     ema >>= 10 (~0.1% retained)
++	 * At x = 1.0 (residual = 24ms) the Taylor formula gives
++	 * 1 - 1 + 1/2 = 0.5, matching ema >>= 1 — no discontinuity.
++	 *
++	 * This prevents the catastrophic linear collapse at x ≈ 1 that
++	 * the old first-order formula produced (ema → 0 at 23.99ms vs
++	 * ema/2 retained at 24.01ms).
 +	 */
 +	{
-+		u64 periods = div64_u64(sleep_ns, 24000000ULL);
-+		if (periods > 0) {
-+			if (periods > 63)
-+				ctx->ema = 0;
-+			else
-+				ctx->ema >>= periods;
++		u64 periods, residual;
++		periods = div64_u64_rem(sleep_ns, 24000000ULL, &residual);
++
++		if (periods > 63) {
++			ctx->ema = 0;
 +		} else {
-+			u64 sub_step = mul_u64_u64_div_u64(ctx->ema,
-+					sleep_ns, 24000000ULL);
-+			if (sub_step > ctx->ema)
-+				ctx->ema = 0;
-+			else
-+				ctx->ema -= sub_step;
++			/* Whole half-life shift cycles */
++			ctx->ema >>= periods;
++
++			/* Sub-period residual via Taylor e^-x ≈ 1 - x + x²/2 */
++			if (residual && ctx->ema) {
++				u64 fraction = div64_u64(residual *
++					INFINITY_FP_ONE, 24000000ULL);
++				u64 linear = (ctx->ema * fraction) >>
++					INFINITY_FP_SHIFT;
++				u64 quad = ((linear * fraction) >>
++					INFINITY_FP_SHIFT) >> 1;
++
++				if (linear > quad)
++					ctx->ema -= min(ctx->ema,
++							linear - quad);
++			}
 +		}
 +	}
 +
@@ -673,37 +683,43 @@ index 000000000..598d71e68
 +
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
-+	u64 periods;
++	u64 periods, residual;
 +
 +	if (sleep_ns == 0)
 +		return;
 +
 +	/*
-+	 * Exponential shift decay with 160ms half-life for RT EMA.
++	 * Exponential shift decay with 160ms half-life, using a 2nd-order
++	 * Taylor expansion for the sub-period residual to maintain a
++	 * continuous decay curve across the half-life boundary.
 +	 *
-+	 * For sub-half-life sleeps (< 160ms) a linear approximation is
-+	 * used (e^-x ≈ 1 - x for small x).  For longer sleeps the RT EMA
-+	 * is right-shifted by the number of elapsed half-life periods,
-+	 * matching the fair-class wakeup decay and preventing the linear
-+	 * collapse that would occur at >= 160ms with the old formula.
++	 *   whole periods (≥ 160ms):  rt_ema >>= periods  (exact)
++	 *   sub-period (< 160ms):     e^-x ≈ 1 - x + x²/2  (Taylor)
 +	 *
-+	 *   periods = 0  (< 160ms):   linear subtraction (fine-grained)
-+	 *   periods = 1  (160ms):      rt_ema >>= 1  (50% retained)
-+	 *   periods = 2  (320ms):      rt_ema >>= 2  (25% retained)
++	 * At x = 1.0 (residual = 160ms) the Taylor formula gives
++	 * 1 - 1 + 1/2 = 0.5, matching rt_ema >>= 1 — no discontinuity.
 +	 */
-+	periods = div64_u64(sleep_ns, 160000000ULL);
-+	if (periods > 0) {
-+		if (periods > 63)
-+			ctx->rt_ema = 0;
-+		else
-+			ctx->rt_ema >>= periods;
++	periods = div64_u64_rem(sleep_ns, 160000000ULL, &residual);
++
++	if (periods > 63) {
++		ctx->rt_ema = 0;
 +	} else {
-+		u64 sub_step = mul_u64_u64_div_u64(ctx->rt_ema,
-+				sleep_ns, 160000000ULL);
-+		if (sub_step > ctx->rt_ema)
-+			ctx->rt_ema = 0;
-+		else
-+			ctx->rt_ema -= sub_step;
++		/* Whole half-life shift cycles */
++		ctx->rt_ema >>= periods;
++
++		/* Sub-period residual via Taylor e^-x ≈ 1 - x + x²/2 */
++		if (residual && ctx->rt_ema) {
++			u64 fraction = div64_u64(residual *
++				INFINITY_FP_ONE, 160000000ULL);
++			u64 linear = (ctx->rt_ema * fraction) >>
++				INFINITY_FP_SHIFT;
++			u64 quad = ((linear * fraction) >>
++				INFINITY_FP_SHIFT) >> 1;
++
++			if (linear > quad)
++				ctx->rt_ema -= min(ctx->rt_ema,
++						   linear - quad);
++		}
 +	}
 +}
 +
@@ -911,7 +927,7 @@ index 000000000..e8d9a899f
 +
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..80c472646 100644
+index 0cbee0318..4a4224637 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -5,6 +5,7 @@
@@ -931,7 +947,49 @@ index 0cbee0318..80c472646 100644
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1364,7 +1367,30 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+@@ -1328,7 +1331,31 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+ 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
+ 	struct rt_prio_array *array = &rt_rq->active;
+ 	struct rt_rq *group_rq = group_rt_rq(rt_se);
+-	struct list_head *queue = array->queue + rt_se_prio(rt_se);
++	int prio = rt_se_prio(rt_se);
++	struct list_head *queue;
++
++	/*
++	 * Infinity RT queue placement modulation: apply on every enqueue
++	 * so that a task waking from sleep starts in the correct modulated
++	 * priority queue based on its current rt_ema, rather than only
++	 * being demoted on the next requeue tick.
++	 *
++	 * The effective priority is temporary — p->prio is never mutated,
++	 * preserving Priority Inheritance.  Instead the local 'prio'
++	 * variable is overridden, and rt_prio_allocated records the
++	 * actual queue index for the dequeue path's bitmap cleanup and
++	 * priority accounting.
++	 */
++	if (rt_entity_is_task(rt_se) &&
++	    rt_rq->tg == &root_task_group &&
++	    !(rt_task_of(rt_se)->flags & PF_EXITING)) {
++		struct task_struct *p = rt_task_of(rt_se);
++		prio = infinity_rt_effective_prio(p->normal_prio,
++						  &p->infinity);
++		p->infinity.rt_prio_allocated = prio;
++	}
++
++	queue = array->queue + prio;
+ 
+ 	/*
+ 	 * Don't enqueue the group if its throttled, or when empty.
+@@ -1349,7 +1376,7 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+ 		else
+ 			list_add_tail(&rt_se->run_list, queue);
+ 
+-		__set_bit(rt_se_prio(rt_se), array->bitmap);
++		__set_bit(prio, array->bitmap);
+ 		rt_se->on_list = 1;
+ 	}
+ 	rt_se->on_rq = 1;
+@@ -1364,7 +1391,33 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  
  	if (move_entity(flags)) {
  		WARN_ON_ONCE(!rt_se->on_list);
@@ -950,10 +1008,13 @@ index 0cbee0318..80c472646 100644
 +			if (p->infinity.rt_prio_allocated >= 0) {
 +				int prio = p->infinity.rt_prio_allocated;
 +				p->infinity.rt_prio_allocated = -1;
-+				list_del_init(&rt_se->run_list);
-+				if (list_empty(array->queue + prio))
-+					__clear_bit(prio, array->bitmap);
-+				rt_se->on_list = 0;
++				int saved = p->prio;
++				p->prio = prio;
++				__delist_rt_entity(rt_se, array);
++				dec_rt_tasks(rt_se, rt_rq);
++				p->prio = saved;
++				rt_se->on_rq = 0;
++				return;
 +			} else {
 +				__delist_rt_entity(rt_se, array);
 +			}
@@ -963,7 +1024,7 @@ index 0cbee0318..80c472646 100644
  	}
  	rt_se->on_rq = 0;
  
-@@ -1432,9 +1458,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1432,9 +1485,23 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -988,7 +1049,7 @@ index 0cbee0318..80c472646 100644
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1454,6 +1494,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1521,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -999,7 +1060,7 @@ index 0cbee0318..80c472646 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -1470,6 +1514,85 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
+@@ -1470,6 +1541,85 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
  		struct rt_prio_array *array = &rt_rq->active;
  		struct list_head *queue = array->queue + rt_se_prio(rt_se);
  

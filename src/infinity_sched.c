@@ -203,33 +203,43 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 		ctx->last_hw_wakeup = sched_clock();
 
 	/*
-	 * Exponential shift decay with 24ms half-life.
+	 * Exponential shift decay with 24ms half-life, using a 2nd-order
+	 * Taylor expansion for the sub-period residual to maintain a
+	 * continuous decay curve across the half-life boundary.
 	 *
-	 * For sub-half-life sleeps (< 24ms) the linear approximation is
-	 * accurate (e^-x ≈ 1 - x for small x).  For longer sleeps the
-	 * EMA is right-shifted by the number of elapsed half-life periods,
-	 * giving true exponential decay without the hard clamp at τ that
-	 * the old linear step would produce.
+	 *   whole periods (≥ 24ms):  ema >>= periods  (exact exponential)
+	 *   sub-period (< 24ms):     e^-x ≈ 1 - x + x²/2  (Taylor)
 	 *
-	 *   periods = 0  (< 24ms):   linear subtraction (fine-grained)
-	 *   periods = 1  (24ms):      ema >>= 1  (50% retained)
-	 *   periods = 2  (48ms):      ema >>= 2  (25% retained)
-	 *   periods = 10 (240ms):     ema >>= 10 (~0.1% retained)
+	 * At x = 1.0 (residual = 24ms) the Taylor formula gives
+	 * 1 - 1 + 1/2 = 0.5, matching ema >>= 1 — no discontinuity.
+	 *
+	 * This prevents the catastrophic linear collapse at x ≈ 1 that
+	 * the old first-order formula produced (ema → 0 at 23.99ms vs
+	 * ema/2 retained at 24.01ms).
 	 */
 	{
-		u64 periods = div64_u64(sleep_ns, 24000000ULL);
-		if (periods > 0) {
-			if (periods > 63)
-				ctx->ema = 0;
-			else
-				ctx->ema >>= periods;
+		u64 periods, residual;
+		periods = div64_u64_rem(sleep_ns, 24000000ULL, &residual);
+
+		if (periods > 63) {
+			ctx->ema = 0;
 		} else {
-			u64 sub_step = mul_u64_u64_div_u64(ctx->ema,
-					sleep_ns, 24000000ULL);
-			if (sub_step > ctx->ema)
-				ctx->ema = 0;
-			else
-				ctx->ema -= sub_step;
+			/* Whole half-life shift cycles */
+			ctx->ema >>= periods;
+
+			/* Sub-period residual via Taylor e^-x ≈ 1 - x + x²/2 */
+			if (residual && ctx->ema) {
+				u64 fraction = div64_u64(residual *
+					INFINITY_FP_ONE, 24000000ULL);
+				u64 linear = (ctx->ema * fraction) >>
+					INFINITY_FP_SHIFT;
+				u64 quad = ((linear * fraction) >>
+					INFINITY_FP_SHIFT) >> 1;
+
+				if (linear > quad)
+					ctx->ema -= min(ctx->ema,
+							linear - quad);
+			}
 		}
 	}
 
@@ -354,37 +364,43 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 {
-	u64 periods;
+	u64 periods, residual;
 
 	if (sleep_ns == 0)
 		return;
 
 	/*
-	 * Exponential shift decay with 160ms half-life for RT EMA.
+	 * Exponential shift decay with 160ms half-life, using a 2nd-order
+	 * Taylor expansion for the sub-period residual to maintain a
+	 * continuous decay curve across the half-life boundary.
 	 *
-	 * For sub-half-life sleeps (< 160ms) a linear approximation is
-	 * used (e^-x ≈ 1 - x for small x).  For longer sleeps the RT EMA
-	 * is right-shifted by the number of elapsed half-life periods,
-	 * matching the fair-class wakeup decay and preventing the linear
-	 * collapse that would occur at >= 160ms with the old formula.
+	 *   whole periods (≥ 160ms):  rt_ema >>= periods  (exact)
+	 *   sub-period (< 160ms):     e^-x ≈ 1 - x + x²/2  (Taylor)
 	 *
-	 *   periods = 0  (< 160ms):   linear subtraction (fine-grained)
-	 *   periods = 1  (160ms):      rt_ema >>= 1  (50% retained)
-	 *   periods = 2  (320ms):      rt_ema >>= 2  (25% retained)
+	 * At x = 1.0 (residual = 160ms) the Taylor formula gives
+	 * 1 - 1 + 1/2 = 0.5, matching rt_ema >>= 1 — no discontinuity.
 	 */
-	periods = div64_u64(sleep_ns, 160000000ULL);
-	if (periods > 0) {
-		if (periods > 63)
-			ctx->rt_ema = 0;
-		else
-			ctx->rt_ema >>= periods;
+	periods = div64_u64_rem(sleep_ns, 160000000ULL, &residual);
+
+	if (periods > 63) {
+		ctx->rt_ema = 0;
 	} else {
-		u64 sub_step = mul_u64_u64_div_u64(ctx->rt_ema,
-				sleep_ns, 160000000ULL);
-		if (sub_step > ctx->rt_ema)
-			ctx->rt_ema = 0;
-		else
-			ctx->rt_ema -= sub_step;
+		/* Whole half-life shift cycles */
+		ctx->rt_ema >>= periods;
+
+		/* Sub-period residual via Taylor e^-x ≈ 1 - x + x²/2 */
+		if (residual && ctx->rt_ema) {
+			u64 fraction = div64_u64(residual *
+				INFINITY_FP_ONE, 160000000ULL);
+			u64 linear = (ctx->rt_ema * fraction) >>
+				INFINITY_FP_SHIFT;
+			u64 quad = ((linear * fraction) >>
+				INFINITY_FP_SHIFT) >> 1;
+
+			if (linear > quad)
+				ctx->rt_ema -= min(ctx->rt_ema,
+						   linear - quad);
+		}
 	}
 }
 
