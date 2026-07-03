@@ -5,11 +5,13 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 > [!TIP]
 > **TL;DR — dev-cherrypick**
 > - EMA: asymmetric τ (climb 96ms, decay 24ms), two-pole correction
+> - Wakeup decay: 2nd-order Taylor expansion (e^-x ≈ 1 - x + x²/2), continuous
 > - Slice: ×8/10 slope (max 5×), 50% proportional min, hrtick deadline precision
 > - HW-wakeup detection: threaded IRQ kthread check in infinity_wakeup()
 > - Uclamp: reads sched_util_min from userspace task declarations, no hooks
 > - Safety: 128-bit overflow protection, carriage auto-scales from CPU count
-> - RT: time-proportional decay, priority modulation with full accounting
+> - RT: continuous Taylor decay, priority modulation with full accounting
+> - PI: explicit bypass when p->prio < p->normal_prio
 > - Only two tunables: smt_divisor and running (ro)
 
 ```mermaid
@@ -49,7 +51,7 @@ flowchart TB
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
-            WQ --> DECAY["infinity_wakeup()\n \nema = f(sleep_ns)\n40s cap, 128-bit safety"]
+            WQ --> DECAY["infinity_wakeup()\n \nema = f(sleep_ns)\nperiod-shift bounds tracking\n& 128-bit math safety"]
             DECAY --> WUP["infinity_wakeup_scale()\n \nvslice' = vslice × ema / BUDGET_MAX\n→ 0 as ema → 0, no cap"]
             WUP --> PLACE["place_entity()\ndeadline = vruntime + vslice'"]
             PLACE --> PICK
@@ -64,10 +66,15 @@ flowchart TB
         RT_T["RT task runs"] --> RT_C["infinity_rt_consume()\n \nEMA climbs with runtime"]
         class RT_C rtN
 
-        RT_C --> RT_D["infinity_rt_wakeup()\n \ntime-proportional decay\nsame τ as fair path\ndedicated rt_last_sleep_ns"]
+        RT_C --> RT_D["infinity_rt_wakeup()\n \ntime-proportional decay\n2nd-order Taylor expansion\ndedicated rt_last_sleep_ns"]
         class RT_D rtN
 
-        RT_D --> RT_P["infinity_rt_effective_prio()\n \nrt_ema↑ → priority↓\nmoved to lower RT queue"]
+        RT_D --> RT_GATE["PI Boost Active?\n(prio < normal_prio)"]
+        class RT_GATE rtN
+
+        RT_GATE -- Yes: Bypass Throttling --> RT_STOCK["Execute at boosted priority queue\n(Lock release preservation)"]
+
+        RT_GATE -- No: Modulate --> RT_P["infinity_rt_effective_prio()\n \nrt_ema↑ → priority↓"]
         class RT_P rtN
 
         RT_P --> RT_Q["RT queue placement\ngated to root_task_group"]
@@ -75,7 +82,7 @@ flowchart TB
 
     subgraph INFRA["Scheduler infrastructure"]
         AC["carriage_ns\n \nauto-scaled from CPU count\n1 + ilog min(cpus, 8)"]
-        OF["sleep decay\n \nmul_u64_u64_div_u64\n128-bit overflow safety"]
+        OF["sleep decay\n \n2nd-order Taylor expansion\nperiod-shift bounds < 63\n128-bit math safety"]
         TU["tunables\n \nsmt_divisor\nrunning (ro)"]
     end
     class AC,OF,TU infra
@@ -136,10 +143,10 @@ matching stock EEVDF's CPU-count scaling behaviour.  No user tunable is needed.
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | **EMA (Limitless)** |
 | SMT halving | No | Yes |
-| NULL guard | N/A (BPF) | Yes |
+| EEVDF Invariant Assert | N/A (BPF) | **Yes (WARN_ON_ONCE)** |
 | Wakeup deadline boost | N/A | **Asymptotic vslice** |
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
-| RT-stall immunity | No | Yes |
+| RT-stall / PI immunity | No | **Yes (Explicit PI Bypass)** |
 
 ## License
 
