@@ -1,7 +1,7 @@
 From cf38b32d6063b0425a07e62708fddd349c269d21 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH] v4.5: complete implementation
+Subject: [PATCH 1/2] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -719,6 +719,40 @@ index 7936d4333..a3f69d4d7 100644
 
  	/*
  	 * Requeue to the end of queue if we (and all of our ancestors) are not
+--
+2.55.0
+
+
+From 1526c5de35b9ab391d412edaded6aae99622c07d Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sat, 4 Jul 2026 19:47:17 +0700
+Subject: [PATCH 2/2] add place_entity futex check to 6.18
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index feda5474d..93fbf23c1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5283,7 +5283,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	 * get a shorter vslice, placing their deadline earlier in the
+ 	 * EEVDF tree so they are picked sooner after wakeup.
+ 	 */
+-	/* Infinity: weight handles wakeup priority, no vslice manipulation needed */
++	/*
++	 * Infinity: when a task wakes from a futex (futex_waiting is true),
++	 * halve its vslice so it gets an earlier deadline and runs sooner,
++	 * reducing IPC wakeup latency.
++	 */
++	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
++	    task_of(se)->infinity.futex_waiting)
++		vslice >>= 1;
+
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i/w_i
 --
 2.55.0
 
