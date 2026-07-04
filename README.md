@@ -11,16 +11,21 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb ~0.5ms\nsub-ms instantaneous"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb ~0.5ms\nsub-ms reaction time"]
         class GAUGE fair
 
-        GAUGE --> TWOPOLE["asymmetric two-pole\n \nd>0 (climb): effective = ema\nd<0 (decay): effective = ema − d/2"]
-        class TWOPOLE algo
-
-        TWOPOLE --> WEIGHT["infinity_update_weight()\n \nreweight_entity()\nweight = base × (100 - pct×8/10) / 100\nfloor at base/10"]
+        GAUGE --> WEIGHT["infinity_update_weight()\n \nreweight_entity()\nweight = base × (100 - pct×98/100) / 100\nat EMA=100%: base × 2%"]
         class WEIGHT algo
 
         WEIGHT --> EEVDF["EEVDF\n \ndeadline = vruntime + slice/weight\nweight↑ → earlier deadline"]
+
+        TASK --> FUTEX["futex_do_wait()\n \nsets futex_waiting = true\n→ schedule() → cleared on wakeup"]
+        class FUTEX algo
+
+        FUTEX --> PLACE["place_entity()\n \nif futex_waiting:\nvslice >>= 1\n→ earlier deadline on wakeup"]
+        class PLACE algo
+
+        PLACE --> GAUGE
         class EEVDF algo
 
         EEVDF --> RUN["Task runs\nuntil block or preempt"]
@@ -52,8 +57,8 @@ flowchart TB
     end
 
     subgraph INFRA["Scheduler infrastructure"]
-        AC["carriage_ns\n \nauto-scaled from CPU count\n1 + ilog min(cpus, 8)\nshifts τ_decay"]
-        OF["sleep decay\n \n2nd-order Taylor expansion\nperiod-shift bounds < 63\n128-bit math safety"]
+        AC["EMA ALPHA = 3072\n \nτ_climb ≈ 0.5ms\nfull penalty in sub-ms"]
+        OF["sleep decay\n \n2nd-order Taylor expansion\n24ms shift half-life"]
         TU["tunables\n \nsmt_divisor\nrunning (ro)"]
     end
     class AC,OF,TU infra
@@ -81,7 +86,7 @@ reboot
 # Verify it's running
 uname -r                              # → 7.0.12-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
-sudo dmesg | grep Infinity            # → Infinity scheduler active: carriage=...
+sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 ```
 
 ## Project structure
@@ -104,8 +109,10 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 
-The base fair-share window (`carriage_ns`) is auto-scaled from CPU count at init,
-matching stock EEVDF's CPU-count scaling behaviour.  No user tunable is needed.
+Infinity uses EEVDF's native per-task weight as its control variable — no
+separate fair-share window is needed.  The EMA climb time constant is
+approximately 0.5ms (ALPHA=3072), giving sub-millisecond reaction to
+CPU-bound threads.  No user tunable is needed beyond the SMT divisor.
 
 ## Feature comparison
 
@@ -118,6 +125,7 @@ matching stock EEVDF's CPU-count scaling behaviour.  No user tunable is needed.
 | Wakeup deadline boost | N/A | **Asymptotic vslice** |
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
 | Adaptive RR timeslice | No | **Yes (rt_ema-based, 10–100ms)** |
+| Futex IPC wakeup boost | No | **Yes (vslice halved on futex wakeup)** |
 
 ## License
 
