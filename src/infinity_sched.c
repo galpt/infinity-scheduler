@@ -143,8 +143,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 		return;
 
 	/*
-	 * Exponential shift decay with 32ms effective half-life
-	 * (τ_cimb / DIV = 128ms / 4), using a 2nd-order Taylor
+	 * Exponential shift decay with 12ms effective half-life
+	 * (τ_climb / DIV = 48ms / 4), using a 2nd-order Taylor
 	 * expansion for the sub-period residual to maintain a
 	 * continuous decay curve across the half-life boundary.
 	 *

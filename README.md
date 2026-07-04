@@ -11,10 +11,10 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 128ms\nτ_decay 32ms"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 48ms\nτ_decay 12ms"]
         class GAUGE fair
 
-        GAUGE --> TWOPOLE["two-pole correction\n \neffective = ema − Δema/2\nneutral at wakeup"]
+        GAUGE --> TWOPOLE["asymmetric two-pole\n \nd>0 (climb): effective = ema\nd<0 (decay): effective = ema − d/2"]
         class TWOPOLE algo
 
         TWOPOLE --> WEIGHT["infinity_update_weight()\n \nreweight_entity()\nweight = base × (100 - pct×8/10) / 100\nfloor at base/10"]

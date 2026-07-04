@@ -5,7 +5,7 @@ index ee06cba5c..891a84d18 100644
 @@ -817,6 +817,15 @@ struct kmap_ctrl {
  #endif
  };
-
+ 
 +struct infinity_ctx {
 +	u64		ema;
 +	u64		prev_ema;
@@ -40,7 +40,7 @@ index b5f48ebdc..f7c0a729c 100644
 +				.rt_ema		= 0,
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
-+
++		
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
@@ -60,7 +60,7 @@ index 3ebec186f..59732b03b 100644
 +++ b/kernel/sched/fair.c
 @@ -55,8 +55,26 @@
  #include <uapi/linux/sched/types.h>
-
+ 
  #include "sched.h"
 -#include "stats.h"
 -#include "autogroup.h"
@@ -84,13 +84,13 @@ index 3ebec186f..59732b03b 100644
 +	if (new_weight != se->load.weight)
 +		reweight_entity(cfs_rq, se, new_weight);
 +}
-
+ 
  /*
   * The initial- and re-scaling of tunables is configurable
 @@ -1160,8 +1178,19 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
  	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
  		curr = NULL;
-
+ 
 -	if (curr && protect && protect_slice(curr))
 -		return curr;
 +	if (curr && protect && protect_slice(curr)) {
@@ -106,7 +106,7 @@ index 3ebec186f..59732b03b 100644
 +		else
 +			return curr;
 +	}
-
+ 
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
 @@ -1244,10 +1273,43 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -122,7 +122,7 @@ index 3ebec186f..59732b03b 100644
 -	if (!se->custom_slice)
 +	if (!se->custom_slice) {
  		se->slice = sysctl_sched_base_slice;
-
+ 
 +		if (entity_is_task(se)) {
 +			struct task_struct *p__ = task_of(se);
 +
@@ -157,7 +157,7 @@ index 3ebec186f..59732b03b 100644
 @@ -1424,6 +1486,12 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
-
+ 
 +	/* Infinity: EMA budget consumption */
 +	if (entity_is_task(curr)) {
 +		struct task_struct *p__ = task_of(curr);
@@ -166,11 +166,11 @@ index 3ebec186f..59732b03b 100644
 +
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
-
+ 
 @@ -5507,6 +5575,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
-
+ 
 +	/*
 +	 * Infinity: the task's weight was updated by infinity_maybe_reweight
 +	 * during update_deadline or update_curr.  A low-EMA (interactive)
@@ -183,7 +183,7 @@ index 3ebec186f..59732b03b 100644
  	 */
 @@ -5783,6 +5858,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
-
+ 
  	se = pick_eevdf(cfs_rq, protect);
 +	if (unlikely(!se)) {
 +		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
@@ -229,10 +229,10 @@ index 3ebec186f..59732b03b 100644
 +
  	set_task_max_allowed_capacity(p);
  }
-
+ 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..d5ee0b336
+index 000000000..9bfdc29b8
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
 @@ -0,0 +1,298 @@
@@ -381,8 +381,8 @@ index 000000000..d5ee0b336
 +		return;
 +
 +	/*
-+	 * Exponential shift decay with 32ms effective half-life
-+	 * (τ_cimb / DIV = 128ms / 4), using a 2nd-order Taylor
++	 * Exponential shift decay with 12ms effective half-life
++	 * (τ_climb / DIV = 48ms / 4), using a 2nd-order Taylor
 +	 * expansion for the sub-period residual to maintain a
 +	 * continuous decay curve across the half-life boundary.
 +	 *
@@ -536,10 +536,10 @@ index 000000000..d5ee0b336
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..e8233b73d
+index 000000000..395e54ef1
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,193 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -598,11 +598,13 @@ index 000000000..e8233b73d
 +
 +/**
 + * EMA time constant: τ = BUDGET_MAX × FP_ONE / ALPHA.
-+ * α = 12 gives τ = 6ms × 256 / 12 = 128ms for climb,
-+ * τ_decay = 128 / 4 = 32ms.
-+ * The 32ms decay suits 60-165Hz displays (2–5 frames to clear EMA).
++ * α = 32 gives τ = 6ms × 256 / 32 = 48ms for climb,
++ * τ_decay = 48 / 4 = 12ms.
++ * The 48ms attack catches parallel thread storms (shader compilation)
++ * within ~2 scheduler ticks, isolating them from interactive tasks
++ * before they cause visible stutter.
 + */
-+#define INFINITY_EMA_ALPHA		12
++#define INFINITY_EMA_ALPHA		32
 +
 +/**
 + * Decay divisor: τ_decay = τ_climb / DIV.
@@ -617,12 +619,14 @@ index 000000000..e8233b73d
 +/**
 + * Weight reduction slope versus EMA percentage: × 8/10.
 + * At EMA=100%, weight is reduced by 80%: effective = base × 20/100.
-+ * The minimum effective weight is base/10 (at EMA ≈ 88%).
-+ * Clamp: denom ≥ 10 (i.e. effective_weight ≥ base_weight / 10).
++ * The minimum effective weight is base/50 (2% — denom floor at 2).
++ * This ensures that even a massive thread storm (32+ shader threads)
++ * has less aggregate weight than a single interactive thread, keeping
++ * the mouse responsive during background compilation.
 + */
 +#define INFINITY_WEIGHT_SLOPE_NUM	8
 +#define INFINITY_WEIGHT_SLOPE_DEN	10
-+#define INFINITY_WEIGHT_DENOM_MIN	10ULL
++#define INFINITY_WEIGHT_DENOM_MIN	2ULL
 +
 +/* ------------------------------------------------------------------ */
 +/* SMT divisor bounds                                                  */
@@ -633,17 +637,26 @@ index 000000000..e8233b73d
 +#define INFINITY_SMT_DIVISOR_MAX	16
 +
 +/**
-+ * Effective EMA with two-pole correction.
++ * Effective EMA with asymmetric two-pole correction.
 + *
-+ * Subtracts half the rate-of-change from the raw EMA, so oscillating
-+ * workloads (interactive tasks with alternating compute/sleep) receive
-+ * a systematic boost over sustained CPU-bound tasks.  A CPU-bound task
-+ * at steady state (dEMA ≈ 0) gets no correction — full penalty applies.
++ * When EMA is increasing (task accelerating, d > 0), the effective EMA
++ * equals the raw EMA — no shielding for thread storms.  When EMA is
++ * decreasing (task recovering / sleeping, d < 0), half the rate-of-change
++ * is subtracted, boosting the effective EMA above raw so interactive
++ * tasks recover their priority faster.
++ *
++ * At steady state (d ≈ 0) the correction is negligible.
 + */
 +static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 +{
 +	s64 d = (s64)ctx->ema - (s64)ctx->prev_ema;
-+	s64 effective = (s64)ctx->ema - (d >> 1);
++	s64 effective;
++
++	if (d > 0)
++		effective = (s64)ctx->ema;
++	else
++		effective = (s64)ctx->ema - (d >> 1);
++
 +	if (effective < 0)
 +		return 0;
 +	return (u64)effective;
@@ -725,31 +738,31 @@ index 4ee8faf01..a173005c8 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
-
+ 
  #include "sched.h"
  #include "pelt.h"
 +#include "infinity_sched.h"
-
+ 
  int sched_rr_timeslice = RR_TIMESLICE;
  /* More than 4 hours if BW_SHIFT equals 20. */
 @@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
  	if (unlikely(delta_exec <= 0))
  		return;
-
+ 
 +	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
-
+ 
 @@ -1437,9 +1441,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
-
+ 
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
-
+ 
 +		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
@@ -761,24 +774,24 @@ index 4ee8faf01..a173005c8 100644
 +
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
-
+ 
 @@ -1459,6 +1472,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
-
+ 
 +	/* Infinity: record sleep timestamp for RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
-
+ 
  	return true;
 @@ -2550,7 +2567,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
-
+ 
 -	p->rt.time_slice = sched_rr_timeslice;
 +	p->rt.time_slice = infinity_rr_timeslice(p, sched_rr_timeslice);
-
+ 
  	/*
  	 * Requeue to the end of queue if we (and all of our ancestors) are not

@@ -56,11 +56,13 @@
 
 /**
  * EMA time constant: τ = BUDGET_MAX × FP_ONE / ALPHA.
- * α = 12 gives τ = 6ms × 256 / 12 = 128ms for climb,
- * τ_decay = 128 / 4 = 32ms.
- * The 32ms decay suits 60-165Hz displays (2–5 frames to clear EMA).
+ * α = 32 gives τ = 6ms × 256 / 32 = 48ms for climb,
+ * τ_decay = 48 / 4 = 12ms.
+ * The 48ms attack catches parallel thread storms (shader compilation)
+ * within ~2 scheduler ticks, isolating them from interactive tasks
+ * before they cause visible stutter.
  */
-#define INFINITY_EMA_ALPHA		12
+#define INFINITY_EMA_ALPHA		32
 
 /**
  * Decay divisor: τ_decay = τ_climb / DIV.
@@ -75,12 +77,14 @@
 /**
  * Weight reduction slope versus EMA percentage: × 8/10.
  * At EMA=100%, weight is reduced by 80%: effective = base × 20/100.
- * The minimum effective weight is base/10 (at EMA ≈ 88%).
- * Clamp: denom ≥ 10 (i.e. effective_weight ≥ base_weight / 10).
+ * The minimum effective weight is base/50 (2% — denom floor at 2).
+ * This ensures that even a massive thread storm (32+ shader threads)
+ * has less aggregate weight than a single interactive thread, keeping
+ * the mouse responsive during background compilation.
  */
 #define INFINITY_WEIGHT_SLOPE_NUM	8
 #define INFINITY_WEIGHT_SLOPE_DEN	10
-#define INFINITY_WEIGHT_DENOM_MIN	10ULL
+#define INFINITY_WEIGHT_DENOM_MIN	2ULL
 
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
@@ -91,17 +95,26 @@
 #define INFINITY_SMT_DIVISOR_MAX	16
 
 /**
- * Effective EMA with two-pole correction.
+ * Effective EMA with asymmetric two-pole correction.
  *
- * Subtracts half the rate-of-change from the raw EMA, so oscillating
- * workloads (interactive tasks with alternating compute/sleep) receive
- * a systematic boost over sustained CPU-bound tasks.  A CPU-bound task
- * at steady state (dEMA ≈ 0) gets no correction — full penalty applies.
+ * When EMA is increasing (task accelerating, d > 0), the effective EMA
+ * equals the raw EMA — no shielding for thread storms.  When EMA is
+ * decreasing (task recovering / sleeping, d < 0), half the rate-of-change
+ * is subtracted, boosting the effective EMA above raw so interactive
+ * tasks recover their priority faster.
+ *
+ * At steady state (d ≈ 0) the correction is negligible.
  */
 static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 {
 	s64 d = (s64)ctx->ema - (s64)ctx->prev_ema;
-	s64 effective = (s64)ctx->ema - (d >> 1);
+	s64 effective;
+
+	if (d > 0)
+		effective = (s64)ctx->ema;
+	else
+		effective = (s64)ctx->ema - (d >> 1);
+
 	if (effective < 0)
 		return 0;
 	return (u64)effective;
