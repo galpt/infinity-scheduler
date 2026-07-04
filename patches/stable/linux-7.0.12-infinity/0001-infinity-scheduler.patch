@@ -1,33 +1,32 @@
-From 71019c6361fe5349d3262a45e404a7885dcb259c Mon Sep 17 00:00:00 2001
+From d6bfc05cb107e0758e67e0577f199902194be0de Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 4 Jul 2026 19:12:35 +0700
+Date: Sat, 4 Jul 2026 19:19:16 +0700
 Subject: [PATCH] infinity-scheduler v4.5
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |  12 ++
- init/init_task.c              |   9 +-
+ include/linux/sched.h         |  11 ++
+ init/init_task.c              |   8 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           | 102 +++++++++++-
- kernel/sched/infinity_sched.c | 299 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 186 +++++++++++++++++++++
- kernel/sched/rt.c             |  21 ++-
- 7 files changed, 621 insertions(+), 9 deletions(-)
+ kernel/sched/fair.c           | 102 ++++++++++++++-
+ kernel/sched/infinity_sched.c | 231 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 153 ++++++++++++++++++++++
+ kernel/sched/rt.c             |  21 +++-
+ 7 files changed, 518 insertions(+), 9 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index d41e7a8f9..7128b6241 100644
+index d41e7a8f9..4ed2c9cbf 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -817,6 +817,17 @@ struct kmap_ctrl {
+@@ -817,6 +817,16 @@ struct kmap_ctrl {
  #endif
  };
-
+ 
 +
 +struct infinity_ctx {
 +	u64		ema;
-+	u64		prev_ema;
 +	u64		rt_ema;
 +	u64		last_sleep_ns;
 +	u64		rt_last_sleep_ns;
@@ -38,7 +37,7 @@ index d41e7a8f9..7128b6241 100644
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -871,6 +882,7 @@ struct task_struct {
+@@ -871,6 +881,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -47,7 +46,7 @@ index d41e7a8f9..7128b6241 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/init/init_task.c b/init/init_task.c
-index 5c838757f..b2a212221 100644
+index 5c838757f..2dd22751e 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
 @@ -129,7 +129,6 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
@@ -58,13 +57,12 @@ index 5c838757f..b2a212221 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	.scx		= {
  		.dsq_list.node	= LIST_HEAD_INIT(init_task.scx.dsq_list.node),
-@@ -148,6 +147,14 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -148,6 +147,13 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
 +	.infinity		= {
 +				.ema		= 0,
-+				.prev_ema	= 0,
 +				.rt_ema		= 0,
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
@@ -109,13 +107,13 @@ index 3bce48ad0..9c51d2a59 100644
 +	if (new_weight != se->load.weight)
 +		reweight_entity(cfs_rq, se, new_weight);
 +}
-
+ 
  /*
   * The initial- and re-scaling of tunables is configurable
 @@ -1034,8 +1053,19 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
  	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
  		curr = NULL;
-
+ 
 -	if (curr && protect && protect_slice(curr))
 -		return curr;
 +	if (curr && protect && protect_slice(curr)) {
@@ -131,7 +129,7 @@ index 3bce48ad0..9c51d2a59 100644
 +		else
 +			return curr;
 +	}
-
+ 
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
 @@ -1118,10 +1148,37 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -146,7 +144,7 @@ index 3bce48ad0..9c51d2a59 100644
 -	if (!se->custom_slice)
 +	if (!se->custom_slice) {
  		se->slice = sysctl_sched_base_slice;
-
+ 
 +		if (entity_is_task(se)) {
 +			struct task_struct *p__ = task_of(se);
 +
@@ -176,7 +174,7 @@ index 3bce48ad0..9c51d2a59 100644
 @@ -1298,6 +1355,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
-
+ 
 +	/* Infinity: EMA budget consumption and two-pole correction */
 +	/* Infinity: EMA budget consumption */
 +	if (entity_is_task(curr)) {
@@ -186,11 +184,11 @@ index 3bce48ad0..9c51d2a59 100644
 +
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
-
+ 
 @@ -5258,6 +5322,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
-
+ 
 +	/*
 +	 * Reduce the vslice for wakeups.  Low-EMA (interactive) tasks
 +	 * get a shorter vslice, placing their deadline earlier in the
@@ -203,7 +201,7 @@ index 3bce48ad0..9c51d2a59 100644
  	 */
 @@ -5540,6 +5611,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
-
+ 
  	se = pick_eevdf(cfs_rq, protect);
 +	if (unlikely(!se)) {
 +		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
@@ -241,12 +239,12 @@ index 3bce48ad0..9c51d2a59 100644
 @@ -7184,9 +7271,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
-
+ 
 -	/*
 -	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
 -	 */
 +
-
+ 
  	hrtick_update(rq);
  	return true;
 @@ -13459,6 +13544,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
@@ -260,13 +258,13 @@ index 3bce48ad0..9c51d2a59 100644
 +
  	set_task_max_allowed_capacity(p);
  }
-
+ 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..eb8c2b907
+index 000000000..6e0c590dd
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,231 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -279,23 +277,16 @@ index 000000000..eb8c2b907
 + *   While sleeping:  ema >>= min(sleep_ns / 24000000, 63)
 + *                      Sub-period residual via 2nd-order Taylor expansion
 + *                      (e^-x ≈ 1 - x + x²/2) for continuous decay.
-+ *   Weight:          effective = base × (100 - ema_pct × 8/10) / 100
-+ *                      with floor at base/10.
-+ *
-+ * A two-pole correction (effective EMA = EMA - dEMA/2) distinguishes
-+ * oscillating workloads (interactive: compute-sleep-compute) from
-+ * sustained CPU-bound tasks, giving interactivity a systematic boost.
++ *   Weight:          effective = base × (100 - ema_pct × 98/100) / 100
++ *                      at EMA=100%: base × 2%
 + *
 + * All task classification data is observed within the scheduler
-+ * (uclamp declarations, EMA tracking).  Driver hooks are not used.
-+ * Carriage_ns auto-scales from CPU count.
++ * (uclamp declarations, EMA tracking, futex_waiting flag).
 + */
 +
-+#include <linux/types.h>
-+#include <linux/sched.h>
-+#include <linux/sched/clock.h>
 +#include <linux/math64.h>
 +#include <linux/sysctl.h>
++#include "sched.h"
 +#include "infinity_sched.h"
 +
 +/* ------------------------------------------------------------------ */
@@ -304,9 +295,6 @@ index 000000000..eb8c2b907
 +
 +unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 +static int infinity_running_flag = 1;
-+
-+/* Carriage (base fair-share window), auto-scaled at init. */
-+unsigned long infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS;
 +
 +static int clamp_smt_divisor(const struct ctl_table *table, int write,
 +			     void *buf, size_t *lenp, loff_t *ppos)
@@ -347,20 +335,6 @@ index 000000000..eb8c2b907
 +};
 +
 +/* ------------------------------------------------------------------ */
-+/* Auto-carriage scaling                                               */
-+/* ------------------------------------------------------------------ */
-+
-+static void __init auto_carriage_ns(void)
-+{
-+	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
-+	unsigned int factor = 1 + ilog2(cpus);
-+
-+	infinity_carriage_ns = INFINITY_BASE_CARRIAGE_NS * factor;
-+	pr_info("Infinity: auto-scaled carriage=%lu ns (%u cpus, factor=%u)\n",
-+		infinity_carriage_ns, cpus, factor);
-+}
-+
-+/* ------------------------------------------------------------------ */
 +/* Initialization                                                      */
 +/* ------------------------------------------------------------------ */
 +
@@ -369,8 +343,6 @@ index 000000000..eb8c2b907
 +	__register_sysctl_init("kernel", infinity_sysctl_table,
 +			      "infinity_sysctl_table",
 +			      ARRAY_SIZE(infinity_sysctl_table) - 1);
-+
-+	auto_carriage_ns();
 +
 +	pr_info("Infinity scheduler active: smt_divisor=%lu\n",
 +		infinity_tune_smt_divisor);
@@ -388,13 +360,8 @@ index 000000000..eb8c2b907
 +{
 +	u64 step;
 +
-+	/* Safety clamp: prevent underflow if ema drifts past BUDGET_MAX */
-+	if (ctx->ema >= INFINITY_BUDGET_MAX_NS) {
-+		ctx->prev_ema = ctx->ema;
++	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
 +		return;
-+	}
-+
-+	ctx->prev_ema = ctx->ema;
 +
 +	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
 +			 INFINITY_EMA_ALPHA,
@@ -412,17 +379,9 @@ index 000000000..eb8c2b907
 +		return;
 +
 +	/*
-+	 * Exponential shift decay with 24ms half-life (clone of the climb
-+	 * time constant converted to powers of two), using a 2nd-order
-+	 * Taylor
-+	 * expansion for the sub-period residual to maintain a
++	 * Exponential shift decay with 24ms half-life, using a 2nd-order
++	 * Taylor expansion for the sub-period residual to maintain a
 +	 * continuous decay curve across the half-life boundary.
-+	 *
-+	 *   whole periods (≥ 24ms):  ema >>= periods  (exact exponential)
-+	 *   sub-period (< 24ms):     e^-x ≈ 1 - x + x²/2  (Taylor)
-+	 *
-+	 * At x = 1.0 (residual = 24ms) the Taylor formula gives
-+	 * 1 - 1 + 1/2 = 0.5, matching ema >>= 1 — no discontinuity.
 +	 */
 +	{
 +		u64 periods, residual;
@@ -431,10 +390,8 @@ index 000000000..eb8c2b907
 +		if (periods > 63) {
 +			ctx->ema = 0;
 +		} else {
-+			/* Whole half-life shift cycles */
 +			ctx->ema >>= periods;
 +
-+			/* Sub-period residual via Taylor e^-x ≈ 1 - x + x²/2 */
 +			if (residual && ctx->ema) {
 +				u64 fraction = div64_u64(residual *
 +					INFINITY_FP_ONE, 24000000ULL);
@@ -449,8 +406,6 @@ index 000000000..eb8c2b907
 +			}
 +		}
 +	}
-+
-+	ctx->prev_ema = ctx->ema;
 +}
 +
 +/* ------------------------------------------------------------------ */
@@ -460,41 +415,16 @@ index 000000000..eb8c2b907
 +void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 +{
 +	ctx->ema = 0;
-+	ctx->prev_ema = 0;
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
 +	ctx->rt_last_sleep_ns = 0;
 +}
 +
 +/* ------------------------------------------------------------------ */
-+/* infinity_wakeup_scale — no longer used (replaced by weight)         */
++/* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
++ *  prev_ema, infinity_slice, infinity_vruntime_scale,                  *
++ *  infinity_wakeup_scale.  All subsumed by weight modulation.)         */
 +/* ------------------------------------------------------------------ */
-+
-+/*
-+ * infinity_wakeup_scale was removed in favour of weight modulation.
-+ * The EMA-modulated weight produces the same effect: a low-EMA task
-+ * has a higher weight, gets an earlier deadline, and is picked sooner.
-+ */
-+
-+/* ------------------------------------------------------------------ */
-+/* infinity_slice — no longer used (replaced by weight)                */
-+/* ------------------------------------------------------------------ */
-+
-+/*
-+ * infinity_slice was removed in favour of weight modulation.  EEVDF
-+ * natively computes the slice from the task's weight via calc_delta_fair.
-+ * SMT halving is handled directly in update_deadline.
-+ */
-+
-+/* ------------------------------------------------------------------ */
-+/* infinity_vruntime_scale — no longer used (replaced by weight)       */
-+/* ------------------------------------------------------------------ */
-+
-+/*
-+ * infinity_vruntime_scale was removed in favour of weight modulation.
-+ * Vruntime advances naturally because the weight determines the slice
-+ * and deadline — no separate vruntime scaling is needed.
-+ */
 +
 +/* ------------------------------------------------------------------ */
 +/* infinity_rt_consume — EMA climb on RT runtime                       */
@@ -516,7 +446,7 @@ index 000000000..eb8c2b907
 +}
 +
 +/* ------------------------------------------------------------------ */
-+/* infinity_rt_wakeup — time-proportional RT EMA decay on wakeup       */
++/* infinity_rt_wakeup — RT EMA decay on wakeup                         */
 +/* ------------------------------------------------------------------ */
 +
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
@@ -568,10 +498,10 @@ index 000000000..eb8c2b907
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..29f2b38c0
+index 000000000..6a02d46e8
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,153 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -582,31 +512,29 @@ index 000000000..29f2b38c0
 + *
 + *   fair.c (Linux scheduler)         infinity_sched.c (Infinity algorithm)
 + *   ──────────────────────────       ─────────────────────────────────────
-+ *   update_deadline()        ──call──► infinity_maybe_reweight() — EMA weight
-+ *   update_curr()            ──call──► infinity_consume()        — EMA budget
-+ *   update_curr()            ──call──► infinity_maybe_reweight() — EMA weight
-+ *   enqueue_task_fair()      ──call──► infinity_wakeup()         — EMA decay
-+ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)   — sleep tracking
-+ *   pick_eevdf()             ──check──► futex_waiting            — protect_slice bypass
-+ *   update_curr_rt()         ──call──► infinity_rt_consume()     — RT EMA climb
-+ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()      — RT EMA decay
++ *   update_deadline()        ──call──► infinity_update_weight() — EMA weight
++ *   update_curr()            ──call──► infinity_consume()       — EMA budget
++ *   enqueue_task_fair()      ──call──► infinity_wakeup()        — EMA decay
++ *   place_entity()           ──check──► futex_waiting            — halve vslice on futex wakeup
++ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  — sleep tracking
++ *   update_curr_rt()         ──call──► infinity_rt_consume()    — RT EMA climb
++ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     — RT EMA decay
 + *   dequeue_task_rt()        ──call──► (records rt_last_sleep_ns)
-+ *   task_tick_rt()           ──call──► infinity_rr_timeslice()   — adaptive RR slice
-+ *   task_fork_fair()         ──call──► infinity_fork_init()      — fork init
-+ *   init/init_task.c         ──init──► infinity.{}               — static init
++ *   task_tick_rt()           ──call──► infinity_rr_timeslice()  — adaptive RR slice
++ *   task_fork_fair()         ──call──► infinity_fork_init()     — fork init
++ *   init/init_task.c         ──init──► infinity.{}              — static init
 + *
-+ * The weight-based approach replaces the old slice + vruntime scaling:
-+ * instead of shortening the slice and accelerating vruntime for CPU-bound
-+ * tasks, we modulate the task's EEVDF weight via reweight_entity().
++ * Weight-based modulation: the task's EEVDF weight is modulated by EMA.
 + * EEVDF natively computes a shorter slice and later deadline from a lower
 + * weight — no second level of fairness logic needed.
++ *
++ * The base weight is always derived from the task's static priority (nice),
++ * never from the live weight, so the modulation is idempotent and the nice
++ * value is always honoured.
 + *
 + * Tunables:
 + *   kernel.infinity_smt_divisor   — SMT secondary slice divisor (default 2)
 + *   kernel.infinity_running       — read-only flag, 1 if active
-+ *
-+ * The carriage_ns (base fair-share window) is auto-scaled from CPU count
-+ * at init.  Deadline tracking uses the kernel's built-in hrtick_start().
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -622,18 +550,12 @@ index 000000000..29f2b38c0
 +/* Constants                                                           */
 +/* ------------------------------------------------------------------ */
 +
-+/** Default base fair-share window (2ms, auto-scaled by CPU count). */
-+#define INFINITY_BASE_CARRIAGE_NS	2000000ULL
-+
 +/** Maximum budget ceiling (6ms). */
 +#define INFINITY_BUDGET_MAX_NS		6000000ULL
 +
 +/**
 + * EMA time constant: step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
-+ * α = 3072 gives ~500ns continuous runtime to reach full EMA.
-+ * Thread storms (shader compilation) are penalised within sub-millisecond
-+ * runtime — the cursor stays smooth before the second frame.
-+ * τ_climb ≈ 0.5ms.
++ * α = 3072 gives ~500µs continuous runtime to reach full EMA penalty.
 + */
 +#define INFINITY_EMA_ALPHA		3072
 +
@@ -642,16 +564,12 @@ index 000000000..29f2b38c0
 +#define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
 +
 +/**
-+ * Weight reduction slope versus EMA percentage: × 8/10.
-+ * At EMA=100%, weight is reduced by 80%: effective = base × 20/100.
-+ * The minimum effective weight is base/50 (2% — denom floor at 2).
-+ * This ensures that even a massive thread storm (32+ shader threads)
-+ * has less aggregate weight than a single interactive thread, keeping
-+ * the mouse responsive during background compilation.
++ * Weight reduction slope: effective = base × (100 - pct × 98/100) / 100.
++ * At EMA=100%, denom = 2, weight = base × 2/100 = base × 2% (50× reduction).
++ * With 32 storm threads at 2% = 640 < 1 interactive thread at 1024.
 + */
-+#define INFINITY_WEIGHT_SLOPE_NUM	8
-+#define INFINITY_WEIGHT_SLOPE_DEN	10
-+#define INFINITY_WEIGHT_DENOM_MIN	2ULL
++#define INFINITY_WEIGHT_SLOPE_NUM	98
++#define INFINITY_WEIGHT_SLOPE_DEN	100
 +
 +/* ------------------------------------------------------------------ */
 +/* SMT divisor bounds                                                  */
@@ -661,32 +579,6 @@ index 000000000..29f2b38c0
 +#define INFINITY_SMT_DIVISOR_MIN	1
 +#define INFINITY_SMT_DIVISOR_MAX	16
 +
-+/**
-+ * Effective EMA with asymmetric two-pole correction.
-+ *
-+ * When EMA is increasing (task accelerating, d > 0), the effective EMA
-+ * equals the raw EMA — no shielding for thread storms.  When EMA is
-+ * decreasing (task recovering / sleeping, d < 0), half the rate-of-change
-+ * is subtracted, boosting the effective EMA above raw so interactive
-+ * tasks recover their priority faster.
-+ *
-+ * At steady state (d ≈ 0) the correction is negligible.
-+ */
-+static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
-+{
-+	s64 d = (s64)ctx->ema - (s64)ctx->prev_ema;
-+	s64 effective;
-+
-+	if (d > 0)
-+		effective = (s64)ctx->ema;
-+	else
-+		effective = (s64)ctx->ema - (d >> 1);
-+
-+	if (effective < 0)
-+		return 0;
-+	return (u64)effective;
-+}
-+
 +/* ------------------------------------------------------------------ */
 +/* Weight calculation from EMA                                          */
 +/* ------------------------------------------------------------------ */
@@ -694,12 +586,14 @@ index 000000000..29f2b38c0
 +/**
 + * infinity_calc_weight — Compute EMA-modulated EEVDF weight.
 + * @p:    Task whose weight to compute.
-+ * @ema:  Current effective EMA (from infinity_effective_ema).
++ * @ema:  Raw EMA (clamped to BUDGET_MAX).
 + *
-+ * The base weight comes from @p's static priority (user's nice value).
-+ * The EMA modulates it:
-+ *   effective = base × (100 - pct × 8/10) / 100
-+ * with a floor of base/10 to prevent complete starvation.
++ * The base weight comes from @p's static priority via sched_prio_to_weight[].
++ * This is the nominal nice-derived weight, not the live se.load.weight,
++ * so the modulation is idempotent and the nice value is always honoured.
++ *
++ *   effective = base × (100 - pct × 98/100) / 100
++ *   at EMA=100%: denom = 2, weight = base × 2%
 + *
 + * Tasks with uclamp_min > 0 are bypassed (return their base weight).
 + *
@@ -707,7 +601,8 @@ index 000000000..29f2b38c0
 + */
 +static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 +{
-+	u32 base = p->se.load.weight;
++	int idx = p->static_prio - MAX_RT_PRIO;
++	u32 base = scale_load(sched_prio_to_weight[idx]);
 +
 +#ifdef CONFIG_UCLAMP_TASK
 +	if (p->uclamp_req[UCLAMP_MIN].value > 0)
@@ -721,8 +616,10 @@ index 000000000..29f2b38c0
 +		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 +		u64 denom = 100ULL - pct * INFINITY_WEIGHT_SLOPE_NUM /
 +				      INFINITY_WEIGHT_SLOPE_DEN;
-+		if (denom < INFINITY_WEIGHT_DENOM_MIN)
-+			denom = INFINITY_WEIGHT_DENOM_MIN;
++
++		if (denom < 2ULL)
++			denom = 2ULL;
++
 +		return (u32)max(1ULL, base * denom / 100ULL);
 +	}
 +	return base;
@@ -732,10 +629,10 @@ index 000000000..29f2b38c0
 +/* RT EMA constants                                                    */
 +/* ------------------------------------------------------------------ */
 +
-+/** RT budget ceiling (10ms — larger than fair to give RT tasks runway). */
++/** RT budget ceiling (10ms). */
 +#define INFINITY_RT_BUDGET_NS		10000000ULL
 +
-+/** RT alpha: same time constant as fair path. */
++/** RT alpha. */
 +#define INFINITY_RT_ALPHA		4
 +
 +/* ------------------------------------------------------------------ */
@@ -763,31 +660,31 @@ index 0cbee0318..29307b073 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
-
+ 
  #include "sched.h"
  #include "pelt.h"
 +#include "infinity_sched.h"
-
+ 
  int sched_rr_timeslice = RR_TIMESLICE;
  /* More than 4 hours if BW_SHIFT equals 20. */
 @@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
  	if (unlikely(delta_exec <= 0))
  		return;
-
+ 
 +	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
-
+ 
 @@ -1432,9 +1436,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
-
+ 
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
-
+ 
 +		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
@@ -799,27 +696,27 @@ index 0cbee0318..29307b073 100644
 +
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
-
+ 
 @@ -1454,6 +1467,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
-
+ 
 +	/* Infinity: record sleep timestamp for RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
-
+ 
  	return true;
 @@ -2545,7 +2562,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
-
+ 
 -	p->rt.time_slice = sched_rr_timeslice;
 +	p->rt.time_slice = infinity_rr_timeslice(p, sched_rr_timeslice);
-
+ 
  	/*
  	 * Requeue to the end of queue if we (and all of our ancestors) are not
---
+-- 
 2.55.0
 

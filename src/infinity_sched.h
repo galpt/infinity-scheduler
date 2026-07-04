@@ -8,31 +8,29 @@
  *
  *   fair.c (Linux scheduler)         infinity_sched.c (Infinity algorithm)
  *   ──────────────────────────       ─────────────────────────────────────
- *   update_deadline()        ──call──► infinity_maybe_reweight() — EMA weight
- *   update_curr()            ──call──► infinity_consume()        — EMA budget
- *   update_curr()            ──call──► infinity_maybe_reweight() — EMA weight
- *   enqueue_task_fair()      ──call──► infinity_wakeup()         — EMA decay
- *   dequeue_task_fair()      ──call──► (records last_sleep_ns)   — sleep tracking
- *   pick_eevdf()             ──check──► futex_waiting            — protect_slice bypass
- *   update_curr_rt()         ──call──► infinity_rt_consume()     — RT EMA climb
- *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()      — RT EMA decay
+ *   update_deadline()        ──call──► infinity_update_weight() — EMA weight
+ *   update_curr()            ──call──► infinity_consume()       — EMA budget
+ *   enqueue_task_fair()      ──call──► infinity_wakeup()        — EMA decay
+ *   place_entity()           ──check──► futex_waiting            — halve vslice on futex wakeup
+ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  — sleep tracking
+ *   update_curr_rt()         ──call──► infinity_rt_consume()    — RT EMA climb
+ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     — RT EMA decay
  *   dequeue_task_rt()        ──call──► (records rt_last_sleep_ns)
- *   task_tick_rt()           ──call──► infinity_rr_timeslice()   — adaptive RR slice
- *   task_fork_fair()         ──call──► infinity_fork_init()      — fork init
- *   init/init_task.c         ──init──► infinity.{}               — static init
+ *   task_tick_rt()           ──call──► infinity_rr_timeslice()  — adaptive RR slice
+ *   task_fork_fair()         ──call──► infinity_fork_init()     — fork init
+ *   init/init_task.c         ──init──► infinity.{}              — static init
  *
- * The weight-based approach replaces the old slice + vruntime scaling:
- * instead of shortening the slice and accelerating vruntime for CPU-bound
- * tasks, we modulate the task's EEVDF weight via reweight_entity().
+ * Weight-based modulation: the task's EEVDF weight is modulated by EMA.
  * EEVDF natively computes a shorter slice and later deadline from a lower
  * weight — no second level of fairness logic needed.
+ *
+ * The base weight is always derived from the task's static priority (nice),
+ * never from the live weight, so the modulation is idempotent and the nice
+ * value is always honoured.
  *
  * Tunables:
  *   kernel.infinity_smt_divisor   — SMT secondary slice divisor (default 2)
  *   kernel.infinity_running       — read-only flag, 1 if active
- *
- * The carriage_ns (base fair-share window) is auto-scaled from CPU count
- * at init.  Deadline tracking uses the kernel's built-in hrtick_start().
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -48,18 +46,12 @@
 /* Constants                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Default base fair-share window (2ms, auto-scaled by CPU count). */
-#define INFINITY_BASE_CARRIAGE_NS	2000000ULL
-
 /** Maximum budget ceiling (6ms). */
 #define INFINITY_BUDGET_MAX_NS		6000000ULL
 
 /**
  * EMA time constant: step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
- * α = 3072 gives ~500ns continuous runtime to reach full EMA.
- * Thread storms (shader compilation) are penalised within sub-millisecond
- * runtime — the cursor stays smooth before the second frame.
- * τ_climb ≈ 0.5ms.
+ * α = 3072 gives ~500µs continuous runtime to reach full EMA penalty.
  */
 #define INFINITY_EMA_ALPHA		3072
 
@@ -68,16 +60,12 @@
 #define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
 
 /**
- * Weight reduction slope versus EMA percentage: × 8/10.
- * At EMA=100%, weight is reduced by 80%: effective = base × 20/100.
- * The minimum effective weight is base/50 (2% — denom floor at 2).
- * This ensures that even a massive thread storm (32+ shader threads)
- * has less aggregate weight than a single interactive thread, keeping
- * the mouse responsive during background compilation.
+ * Weight reduction slope: effective = base × (100 - pct × 98/100) / 100.
+ * At EMA=100%, denom = 2, weight = base × 2/100 = base × 2% (50× reduction).
+ * With 32 storm threads at 2% = 640 < 1 interactive thread at 1024.
  */
-#define INFINITY_WEIGHT_SLOPE_NUM	8
-#define INFINITY_WEIGHT_SLOPE_DEN	10
-#define INFINITY_WEIGHT_DENOM_MIN	2ULL
+#define INFINITY_WEIGHT_SLOPE_NUM	98
+#define INFINITY_WEIGHT_SLOPE_DEN	100
 
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
@@ -87,32 +75,6 @@
 #define INFINITY_SMT_DIVISOR_MIN	1
 #define INFINITY_SMT_DIVISOR_MAX	16
 
-/**
- * Effective EMA with asymmetric two-pole correction.
- *
- * When EMA is increasing (task accelerating, d > 0), the effective EMA
- * equals the raw EMA — no shielding for thread storms.  When EMA is
- * decreasing (task recovering / sleeping, d < 0), half the rate-of-change
- * is subtracted, boosting the effective EMA above raw so interactive
- * tasks recover their priority faster.
- *
- * At steady state (d ≈ 0) the correction is negligible.
- */
-static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
-{
-	s64 d = (s64)ctx->ema - (s64)ctx->prev_ema;
-	s64 effective;
-
-	if (d > 0)
-		effective = (s64)ctx->ema;
-	else
-		effective = (s64)ctx->ema - (d >> 1);
-
-	if (effective < 0)
-		return 0;
-	return (u64)effective;
-}
-
 /* ------------------------------------------------------------------ */
 /* Weight calculation from EMA                                          */
 /* ------------------------------------------------------------------ */
@@ -120,12 +82,14 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
 /**
  * infinity_calc_weight — Compute EMA-modulated EEVDF weight.
  * @p:    Task whose weight to compute.
- * @ema:  Current effective EMA (from infinity_effective_ema).
+ * @ema:  Raw EMA (clamped to BUDGET_MAX).
  *
- * The base weight comes from @p's static priority (user's nice value).
- * The EMA modulates it:
- *   effective = base × (100 - pct × 8/10) / 100
- * with a floor of base/10 to prevent complete starvation.
+ * The base weight comes from @p's static priority via sched_prio_to_weight[].
+ * This is the nominal nice-derived weight, not the live se.load.weight,
+ * so the modulation is idempotent and the nice value is always honoured.
+ *
+ *   effective = base × (100 - pct × 98/100) / 100
+ *   at EMA=100%: denom = 2, weight = base × 2%
  *
  * Tasks with uclamp_min > 0 are bypassed (return their base weight).
  *
@@ -133,7 +97,8 @@ static inline u64 infinity_effective_ema(struct infinity_ctx *ctx)
  */
 static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 {
-	u32 base = p->se.load.weight;
+	int idx = p->static_prio - MAX_RT_PRIO;
+	u32 base = scale_load(sched_prio_to_weight[idx]);
 
 #ifdef CONFIG_UCLAMP_TASK
 	if (p->uclamp_req[UCLAMP_MIN].value > 0)
@@ -147,8 +112,10 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 		u64 denom = 100ULL - pct * INFINITY_WEIGHT_SLOPE_NUM /
 				      INFINITY_WEIGHT_SLOPE_DEN;
-		if (denom < INFINITY_WEIGHT_DENOM_MIN)
-			denom = INFINITY_WEIGHT_DENOM_MIN;
+
+		if (denom < 2ULL)
+			denom = 2ULL;
+
 		return (u32)max(1ULL, base * denom / 100ULL);
 	}
 	return base;
@@ -158,10 +125,10 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /* RT EMA constants                                                    */
 /* ------------------------------------------------------------------ */
 
-/** RT budget ceiling (10ms — larger than fair to give RT tasks runway). */
+/** RT budget ceiling (10ms). */
 #define INFINITY_RT_BUDGET_NS		10000000ULL
 
-/** RT alpha: same time constant as fair path. */
+/** RT alpha. */
 #define INFINITY_RT_ALPHA		4
 
 /* ------------------------------------------------------------------ */
