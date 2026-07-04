@@ -1,18 +1,25 @@
-From d29901bbeedf14a60ca47bb80e066d286e06e9ad Mon Sep 17 00:00:00 2001
+From cf38b32d6063b0425a07e62708fddd349c269d21 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 4 Jul 2026 19:19:16 +0700
-Subject: [PATCH] infinity-scheduler v4.5
+Date: Sat, 4 Jul 2026 19:44:19 +0700
+Subject: [PATCH] v4.5: complete implementation
+
+- Weight from static_prio, slope 98/100 (2% floor)
+- Futex bypass: set in waitwake.c, halve vslice in place_entity
+- Remove two-pole/prev_ema, carriage_ns, dead pick_eevdf check
+
+All commits squashed into one cumulative patch.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  include/linux/sched.h         |  11 ++
  init/init_task.c              |   8 +-
+ kernel/futex/waitwake.c       |   5 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/fair.c           | 100 ++++++++++++++-
+ kernel/sched/fair.c           |  87 ++++++++++++-
  kernel/sched/infinity_sched.c | 231 ++++++++++++++++++++++++++++++++++
  kernel/sched/infinity_sched.h | 153 ++++++++++++++++++++++
  kernel/sched/rt.c             |  21 +++-
- 7 files changed, 519 insertions(+), 6 deletions(-)
+ 8 files changed, 512 insertions(+), 5 deletions(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
@@ -23,7 +30,7 @@ index b469878de..ee06284a2 100644
 @@ -816,6 +816,16 @@ struct kmap_ctrl {
  #endif
  };
- 
+
 +
 +struct infinity_ctx {
 +	u64		ema;
@@ -71,6 +78,23 @@ index a55e21892..bd8f5bcca 100644
  	.loginuid	= INVALID_UID,
  	.sessionid	= AUDIT_SID_UNSET,
  #endif
+diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
+index e2bbe5509..56d0258d4 100644
+--- a/kernel/futex/waitwake.c
++++ b/kernel/futex/waitwake.c
+@@ -354,8 +354,11 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
+ 		 * flagged for rescheduling. Only call schedule if there
+ 		 * is no timeout, or if it has yet to expire.
+ 		 */
+-		if (!timeout || timeout->task)
++		if (!timeout || timeout->task) {
++			current->infinity.futex_waiting = true;
+ 			schedule();
++			current->infinity.futex_waiting = false;
++		}
+ 	}
+ 	__set_current_state(TASK_RUNNING);
+ }
 diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
 index 8ae86371d..601556b31 100644
 --- a/kernel/sched/Makefile
@@ -81,10 +105,10 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5b7523242..276aaacfd 100644
+index 5b7523242..feda5474d 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -57,6 +57,25 @@
+@@ -57,6 +57,27 @@
  #include "sched.h"
  #include "stats.h"
  #include "autogroup.h"
@@ -101,38 +125,18 @@ index 5b7523242..276aaacfd 100644
 +	u64 ema;
 +	u32 new_weight;
 +
-+	ema = infinity_effective_ema(&p->infinity);
++	ema = p->infinity.ema;
++	if (ema > INFINITY_BUDGET_MAX_NS)
++		ema = INFINITY_BUDGET_MAX_NS;
 +	new_weight = infinity_calc_weight(p, ema);
 +
 +	if (new_weight != se->load.weight)
 +		reweight_entity(cfs_rq, se, new_weight);
 +}
- 
+
  /*
   * The initial- and re-scaling of tunables is configurable
-@@ -958,8 +977,19 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
- 	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
- 		curr = NULL;
- 
--	if (curr && protect && protect_slice(curr))
--		return curr;
-+	if (curr && protect && protect_slice(curr)) {
-+		/*
-+		 * Bypass slice protection if the current task is waiting
-+		 * on a futex (it called futex_wait() and is about to go
-+		 * to sleep).  Such a task has already released all kernel
-+		 * locks, so preempting it is safe.
-+		 */
-+		if (entity_is_task(curr) &&
-+		    task_of(curr)->infinity.futex_waiting)
-+			; /* yield to eligible interactive tasks */
-+		else
-+			return curr;
-+	}
- 
- 	/* Pick the leftmost entity if it's eligible */
- 	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1047,10 +1077,37 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1047,10 +1068,37 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -144,7 +148,7 @@ index 5b7523242..276aaacfd 100644
 -	if (!se->custom_slice)
 +	if (!se->custom_slice) {
  		se->slice = sysctl_sched_base_slice;
- 
+
 +		if (entity_is_task(se)) {
 +			struct task_struct *p__ = task_of(se);
 +
@@ -171,10 +175,10 @@ index 5b7523242..276aaacfd 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
  	 */
-@@ -1224,6 +1281,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1224,6 +1272,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
- 
+
 +	/* Infinity: EMA budget consumption and two-pole correction */
 +	/* Infinity: EMA budget consumption */
 +	if (entity_is_task(curr)) {
@@ -185,10 +189,10 @@ index 5b7523242..276aaacfd 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  	update_min_vruntime(cfs_rq);
-@@ -5223,6 +5287,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5223,6 +5278,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
- 
+
 +	/*
 +	 * Reduce the vslice for wakeups.  Low-EMA (interactive) tasks
 +	 * get a shorter vslice, placing their deadline earlier in the
@@ -199,9 +203,9 @@ index 5b7523242..276aaacfd 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5523,6 +5594,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+@@ -5523,6 +5585,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	}
- 
+
  	se = pick_eevdf(cfs_rq);
 +	if (unlikely(!se)) {
 +		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
@@ -212,7 +216,7 @@ index 5b7523242..276aaacfd 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -6919,6 +6996,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6919,6 +6987,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -227,7 +231,7 @@ index 5b7523242..276aaacfd 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7160,6 +7245,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7160,6 +7236,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -236,16 +240,16 @@ index 5b7523242..276aaacfd 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7172,6 +7259,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7172,6 +7250,8 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
- 
+
 +
 +
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -13137,6 +13226,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+@@ -13137,6 +13217,11 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
  {
@@ -256,7 +260,7 @@ index 5b7523242..276aaacfd 100644
 +
  	set_task_max_allowed_capacity(p);
  }
- 
+
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
 index 000000000..6e0c590dd
@@ -658,31 +662,31 @@ index 7936d4333..a3f69d4d7 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
- 
+
  #include "sched.h"
  #include "pelt.h"
 +#include "infinity_sched.h"
- 
+
  int sched_rr_timeslice = RR_TIMESLICE;
  /* More than 4 hours if BW_SHIFT equals 20. */
 @@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
  	if (unlikely(delta_exec <= 0))
  		return;
- 
+
 +	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
- 
+
 @@ -1432,9 +1436,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
- 
+
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
- 
+
 +		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
@@ -694,27 +698,27 @@ index 7936d4333..a3f69d4d7 100644
 +
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
- 
+
 @@ -1454,6 +1467,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
- 
+
 +	/* Infinity: record sleep timestamp for RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
- 
+
  	return true;
 @@ -2522,7 +2539,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
- 
+
 -	p->rt.time_slice = sched_rr_timeslice;
 +	p->rt.time_slice = infinity_rr_timeslice(p, sched_rr_timeslice);
- 
+
  	/*
  	 * Requeue to the end of queue if we (and all of our ancestors) are not
--- 
+--
 2.55.0
 
