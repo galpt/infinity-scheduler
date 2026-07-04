@@ -232,10 +232,10 @@ index 3ebec186f..59732b03b 100644
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..9bfdc29b8
+index 000000000..eb8c2b907
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,299 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -381,8 +381,9 @@ index 000000000..9bfdc29b8
 +		return;
 +
 +	/*
-+	 * Exponential shift decay with 12ms effective half-life
-+	 * (τ_climb / DIV = 48ms / 4), using a 2nd-order Taylor
++	 * Exponential shift decay with 24ms half-life (clone of the climb
++	 * time constant converted to powers of two), using a 2nd-order
++	 * Taylor
 +	 * expansion for the sub-period residual to maintain a
 +	 * continuous decay curve across the half-life boundary.
 +	 *
@@ -536,10 +537,10 @@ index 000000000..9bfdc29b8
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..395e54ef1
+index 000000000..29f2b38c0
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,193 @@
+@@ -0,0 +1,186 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
@@ -597,20 +598,13 @@ index 000000000..395e54ef1
 +#define INFINITY_BUDGET_MAX_NS		6000000ULL
 +
 +/**
-+ * EMA time constant: τ = BUDGET_MAX × FP_ONE / ALPHA.
-+ * α = 32 gives τ = 6ms × 256 / 32 = 48ms for climb,
-+ * τ_decay = 48 / 4 = 12ms.
-+ * The 48ms attack catches parallel thread storms (shader compilation)
-+ * within ~2 scheduler ticks, isolating them from interactive tasks
-+ * before they cause visible stutter.
++ * EMA time constant: step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
++ * α = 3072 gives ~500ns continuous runtime to reach full EMA.
++ * Thread storms (shader compilation) are penalised within sub-millisecond
++ * runtime — the cursor stays smooth before the second frame.
++ * τ_climb ≈ 0.5ms.
 + */
-+#define INFINITY_EMA_ALPHA		32
-+
-+/**
-+ * Decay divisor: τ_decay = τ_climb / DIV.
-+ * Kept at 4 for 1:4 climb/decay asymmetry.
-+ */
-+#define INFINITY_EMA_DECAY_DIV		4
++#define INFINITY_EMA_ALPHA		3072
 +
 +/** Fixed-point shift for fractional precision (8 bits). */
 +#define INFINITY_FP_SHIFT		8

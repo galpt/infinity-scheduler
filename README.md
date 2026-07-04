@@ -11,7 +11,7 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb 48ms\nτ_decay 12ms"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb ~0.5ms\nsub-ms instantaneous"]
         class GAUGE fair
 
         GAUGE --> TWOPOLE["asymmetric two-pole\n \nd>0 (climb): effective = ema\nd<0 (decay): effective = ema − d/2"]

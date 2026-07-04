@@ -55,20 +55,13 @@
 #define INFINITY_BUDGET_MAX_NS		6000000ULL
 
 /**
- * EMA time constant: τ = BUDGET_MAX × FP_ONE / ALPHA.
- * α = 32 gives τ = 6ms × 256 / 32 = 48ms for climb,
- * τ_decay = 48 / 4 = 12ms.
- * The 48ms attack catches parallel thread storms (shader compilation)
- * within ~2 scheduler ticks, isolating them from interactive tasks
- * before they cause visible stutter.
+ * EMA time constant: step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
+ * α = 3072 gives ~500ns continuous runtime to reach full EMA.
+ * Thread storms (shader compilation) are penalised within sub-millisecond
+ * runtime — the cursor stays smooth before the second frame.
+ * τ_climb ≈ 0.5ms.
  */
-#define INFINITY_EMA_ALPHA		32
-
-/**
- * Decay divisor: τ_decay = τ_climb / DIV.
- * Kept at 4 for 1:4 climb/decay asymmetry.
- */
-#define INFINITY_EMA_DECAY_DIV		4
+#define INFINITY_EMA_ALPHA		3072
 
 /** Fixed-point shift for fractional precision (8 bits). */
 #define INFINITY_FP_SHIFT		8
