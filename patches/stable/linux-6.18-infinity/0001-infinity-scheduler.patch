@@ -1,4 +1,4 @@
-From cf38b32d6063b0425a07e62708fddd349c269d21 Mon Sep 17 00:00:00 2001
+From d269879977152781d06d37cb6a1b50000f675e75 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
 Subject: [PATCH 1/3] v4.5: complete implementation
@@ -723,7 +723,7 @@ index 7936d4333..a3f69d4d7 100644
 2.55.0
 
 
-From 1526c5de35b9ab391d412edaded6aae99622c07d Mon Sep 17 00:00:00 2001
+From 3f2c14049a7e06c9aabfc226e5692458ee72b3f2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:47:17 +0700
 Subject: [PATCH 2/3] add place_entity futex check to 6.18
@@ -757,7 +757,7 @@ index feda5474d..93fbf23c1 100644
 2.55.0
 
 
-From ccca3bfe88bab01f6a312d9fb8354934ae2ca38f Mon Sep 17 00:00:00 2001
+From 5bbba22e94263cd80d648228d2a7d2fe1b99a872 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
 Subject: [PATCH 3/3] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork

@@ -1,4 +1,4 @@
-From fdad3fe26f0a3eaa81be7f1d8ee75d56ff30b719 Mon Sep 17 00:00:00 2001
+From f06cb1ca01ba7f40afc6d241273a9aa11426d8f8 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:12:35 +0700
 Subject: [PATCH 1/5] infinity-scheduler v4.5
@@ -811,7 +811,7 @@ index 4ee8faf01..a173005c8 100644
 2.55.0
 
 
-From 0cccc63a1ad7de50a259ede1024d8e77c64ac089 Mon Sep 17 00:00:00 2001
+From 12bc0027a0eccbec99bc6b48480116d2f5a85c69 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:16:19 +0700
 Subject: [PATCH 2/5] v4.5: complete implementation
@@ -885,7 +885,7 @@ index 59732b03b..7ff59274f 100644
 2.55.0
 
 
-From 9ecd9064cfaaa808c060deed1f5380faca990ebb Mon Sep 17 00:00:00 2001
+From d8f8220a408900af4e469a18742da3e51a264d5e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:17:50 +0700
 Subject: [PATCH 3/5] v4.5: complete Infinity scheduler
@@ -1276,7 +1276,7 @@ index 29f2b38c0..6a02d46e8 100644
 2.55.0
 
 
-From 271090f7e6970beec50cafc7a45afad412571ba5 Mon Sep 17 00:00:00 2001
+From d274b884a809f469257b94590708d0b7379690fa Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:43:03 +0700
 Subject: [PATCH 4/5] v4.5: add place_entity futex check, remove dead
@@ -1335,7 +1335,7 @@ index 7ff59274f..5aa627c5c 100644
 2.55.0
 
 
-From 2be1de89b71b3447f95c12f679621829c10ef83c Mon Sep 17 00:00:00 2001
+From 805862375423bc8100692cb1242bcbc604ef01a5 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:17 +0700
 Subject: [PATCH 5/5] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
