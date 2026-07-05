@@ -134,12 +134,16 @@ apply_patches() {
 
     # Sanitize patch files: ensure empty context lines have leading space and
     # hunk header counts match body length.  Idempotent — safe to run each time.
-    if [ -f "$INFINITY_DIR/tools/fix-patch-format.py" ]; then
-        python3 "$INFINITY_DIR/tools/fix-patch-format.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
-    fi
-    if [ -f "$INFINITY_DIR/tools/fix-patch-counts.py" ]; then
-        python3 "$INFINITY_DIR/tools/fix-patch-counts.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
-    fi
+    # The patches are generated via git format-patch and require no reformatting.
+    # Running fix-patch-format.py --rewrite here would corrupt diff headers.
+    # if [ -f "$INFINITY_DIR/tools/fix-patch-format.py" ]; then
+    #     python3 "$INFINITY_DIR/tools/fix-patch-format.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
+    # fi
+    # Patches are generated via git format-patch and have correct counts already.
+    # Running fix-patch-counts.py --rewrite here would corrupt the hunk headers.
+    # if [ -f "$INFINITY_DIR/tools/fix-patch-counts.py" ]; then
+    #     python3 "$INFINITY_DIR/tools/fix-patch-counts.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
+    # fi
 
     for p in "$PATCH_DIR"/*.patch; do
         name=$(basename "$p")
