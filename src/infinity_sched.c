@@ -79,8 +79,14 @@ late_initcall(infinity_sched_init);
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
 	u64 step;
+
 	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
 		return;
+
+	/* Prevent u64 overflow in the multiply for large nohz_full deltas */
+	if (delta_ns > INFINITY_BUDGET_MAX_NS)
+		delta_ns = INFINITY_BUDGET_MAX_NS;
+
 	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
 			 INFINITY_EMA_ALPHA,
 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);

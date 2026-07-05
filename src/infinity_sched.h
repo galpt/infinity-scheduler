@@ -86,14 +86,25 @@
  */
 static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 {
-	int idx = p->static_prio - MAX_RT_PRIO;
-	u32 base = scale_load(sched_prio_to_weight[idx]);
+	/*
+	 * SCHED_IDLE tasks have their own weight (WEIGHT_IDLEPRIO = 3)
+	 * that we must not override — they are designed to yield to
+	 * everything else by construction.
+	 */
+	if (task_has_idle_policy(p))
+		return scale_load(WEIGHT_IDLEPRIO);
+
 #ifdef CONFIG_UCLAMP_TASK
 	if (p->uclamp_req[UCLAMP_MIN].value > 0)
-		return base;
+		return scale_load(sched_prio_to_weight[p->static_prio - MAX_RT_PRIO]);
 #endif
+
+	int idx = p->static_prio - MAX_RT_PRIO;
+	u32 base = scale_load(sched_prio_to_weight[idx]);
+
 	if (ema > INFINITY_BUDGET_MAX_NS)
 		ema = INFINITY_BUDGET_MAX_NS;
+
 	if (ema) {
 		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
 		u64 denom = 100ULL - pct * INFINITY_WEIGHT_SLOPE_NUM /
