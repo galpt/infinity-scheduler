@@ -18,77 +18,40 @@
  */
 #include <linux/math64.h>
 #include <linux/sysctl.h>
-#include <linux/llist.h>
 #include <uapi/linux/sched/types.h>
 #include "sched.h"
 #include "infinity_sched.h"
-/* Per-CPU balance_callback slots for deferred RT demotion/restoration */
-DEFINE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
-DEFINE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
-/* Lockless per-CPU queues for tasks needing deferred policy changes */
-DEFINE_PER_CPU(struct llist_head, infinity_rt_demote_list);
-DEFINE_PER_CPU(struct llist_head, infinity_rt_restore_list);
 
-/* Drain the demote list and demote each task to SCHED_NORMAL.
- * balance_callback runs with rq->lock held.  We must drop it before
- * calling sched_setattr_nocheck() which takes task_rq_lock(). */
-void infinity_rt_demote_worker(struct rq *rq)
+/* Called on return to userspace.  IRQs enabled, no scheduler locks held.
+ * Safe to call sched_setattr_nocheck which takes task_rq_lock(). */
+void infinity_rt_demote_cb(struct callback_head *work)
 {
-	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_demote_list, cpu_of(rq)));
+	struct infinity_ctx *ctx = container_of(work, struct infinity_ctx, demote_work);
+	struct task_struct *p = container_of(ctx, struct task_struct, infinity);
 
-	if (!node)
-		return;
+	clear_bit(INFINITY_RT_DEMOTE_PENDING, &ctx->flags);
 
-	/* Drop rq->lock to avoid deadlock in sched_setattr_nocheck()
-	 * (it calls __sched_setscheduler → task_rq_lock which re-acquires
-	 * rq->lock).  Follow the pattern used elsewhere for balance_callback
-	 * workers that need to take inverted locks. */
-	raw_spin_rq_unlock(rq);
-
-	struct infinity_ctx *ctx, *next;
-
-	llist_for_each_entry_safe(ctx, next, node, demote_node) {
-		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
-
-		clear_bit(INFINITY_RT_DEMOTE_PENDING, &ctx->flags);
-
-		struct sched_attr attr = {
-			.sched_policy = SCHED_NORMAL,
-			.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
-		};
-		if (sched_setattr_nocheck(p, &attr) == 0)
-			set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
-	}
-
-	raw_spin_rq_lock(rq);
+	struct sched_attr attr = {
+		.sched_policy = SCHED_NORMAL,
+		.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
+	};
+	if (sched_setattr_nocheck(p, &attr) == 0)
+		set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
 }
 
-/* Drain the restore list and restore each task to its saved RT policy. */
-void infinity_rt_restore_worker(struct rq *rq)
+void infinity_rt_restore_cb(struct callback_head *work)
 {
-	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_restore_list, cpu_of(rq)));
+	struct infinity_ctx *ctx = container_of(work, struct infinity_ctx, restore_work);
+	struct task_struct *p = container_of(ctx, struct task_struct, infinity);
 
-	if (!node)
-		return;
+	clear_bit(INFINITY_RT_RESTORE_PENDING, &ctx->flags);
 
-	raw_spin_rq_unlock(rq);
-
-	struct infinity_ctx *ctx, *next;
-
-	llist_for_each_entry_safe(ctx, next, node, restore_node) {
-		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
-
-		clear_bit(INFINITY_RT_RESTORE_PENDING, &ctx->flags);
-
-		struct sched_attr attr = {
-			.sched_policy = ctx->saved_rt_policy,
-			.sched_priority = ctx->saved_rt_priority,
-		};
-		if (sched_setattr_nocheck(p, &attr) == 0)
-			clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
-	}
-
-	raw_spin_rq_lock(rq);
+	struct sched_attr attr = {
+		.sched_policy = ctx->saved_rt_policy,
+		.sched_priority = ctx->saved_rt_priority,
+	};
+	if (sched_setattr_nocheck(p, &attr) == 0)
+		clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
 }
 /* ------------------------------------------------------------------ */
 /* Sysctl tunables                                                     */
@@ -221,8 +184,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
-	init_llist_node(&ctx->demote_node);
-	init_llist_node(&ctx->restore_node);
+	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
+	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
 }
 /* ------------------------------------------------------------------ */
 /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
