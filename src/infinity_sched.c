@@ -184,6 +184,9 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
+	ctx->flags = 0;
+	ctx->saved_rt_priority = 0;
+	ctx->saved_rt_policy = 0;
 	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
 	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
 }

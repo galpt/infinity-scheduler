@@ -1,7 +1,7 @@
 From 21303e918237e5b8e121a07a3281d81a970e199f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 01/13] v4.5: complete implementation
+Subject: [PATCH 01/14] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -718,7 +718,7 @@ index 0cbee0318..29307b073 100644
 From 8248032de40a30a5433cf3cc618c4bdb972c8c90 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 02/13] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 02/14] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1139,7 +1139,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 906d23883469469c1c12033dba21cb9f0b991cb7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 03/13] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 03/14] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1298,7 +1298,7 @@ index 8fa679a4a..8f96c7554 100644
 From ec51b2e93abd98a00004f1381c4b2e420691260e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
-Subject: [PATCH 04/13] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 04/14] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1356,7 +1356,7 @@ index dfcb7ba0d..832396689 100644
 From 34e12ad487e296af055dc214867032dabaad455c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
-Subject: [PATCH 05/13] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 05/14] v4.5: Infinity EMA-driven migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1393,7 +1393,7 @@ index 832396689..1973f2793 100644
 From e2e996a8dce80ec062fb29730017d92efe408c96 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:13 +0700
-Subject: [PATCH 06/13] v4.5: Infinity cgroup defense + migration hysteresis
+Subject: [PATCH 06/14] v4.5: Infinity cgroup defense + migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1524,7 +1524,7 @@ index 0d068b2f3..7d1933dd8 100644
 From f2615487ce54372d648cb2bf39cea61854b4cb28 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:34:10 +0700
-Subject: [PATCH 07/13] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 07/14] v4.5: Infinity cross-class RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1706,7 +1706,7 @@ index 29307b073..51d64ea7c 100644
 From afe3ffa33e08222a2896cfbfe9d9ee7734f4cded Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:46 +0700
-Subject: [PATCH 08/13] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 08/14] v4.5: Infinity EMA-driven asymmetric core placement
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1749,7 +1749,7 @@ index 2cdeb72f0..64db56230 100644
 From 1d45f38ac32732453f1d54f16ae1ec89620af659 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:07:17 +0700
-Subject: [PATCH 09/13] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 09/14] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1950,7 +1950,7 @@ index 51d64ea7c..58fbea589 100644
 From 559ee7e89428dc2fd3f8fa8ecfe9161a18a4b867 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:23:34 +0700
-Subject: [PATCH 10/13] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
+Subject: [PATCH 10/14] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
  =?UTF-8?q?=E2=80=94=20fork=20llist=20init,=20PF=5FKTHREAD=20guard,=20EEVD?=
  =?UTF-8?q?F=20cgroup=20modulation,=20atomic=20flags?=
 MIME-Version: 1.0
@@ -2139,7 +2139,7 @@ index 58fbea589..133d49a3a 100644
 From 626e1cb53f2cd779f2a53ec467d6a4d821cc69dc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:37:28 +0700
-Subject: [PATCH 11/13] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
+Subject: [PATCH 11/14] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
  =?UTF-8?q?=E2=80=94=20this=5Fcpu=5Fptr=20=E2=86=92=20&per=5Fcpu(...,=20cp?=
  =?UTF-8?q?u=5Fof(rq))?=
 MIME-Version: 1.0
@@ -2185,7 +2185,7 @@ index 133d49a3a..14290663f 100644
 From 5db60264f9b8f825afcdb537e497fdd5aabad9af Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:32:32 +0700
-Subject: [PATCH 12/13] v4.6: fix balance_callback deadlock + CPU 0 starvation
+Subject: [PATCH 12/14] v4.6: fix balance_callback deadlock + CPU 0 starvation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2266,7 +2266,7 @@ index 4b6dd7dd0..9ad7d68ea 100644
 From 2589423566b630fa711cc495b494c3ee8d6e6bf2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:36:41 +0700
-Subject: [PATCH 13/13] v4.6: replace balance_callback/llist with task_work for
+Subject: [PATCH 13/14] v4.6: replace balance_callback/llist with task_work for
  RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2488,6 +2488,38 @@ index 14290663f..613f74413 100644
  	}
  
  #ifdef CONFIG_RT_GROUP_SCHED
+-- 
+2.55.0
+
+
+From 05a9baa8fd7889520c49f76df8df9557eeada1cb Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 7 Jul 2026 00:49:44 +0700
+Subject: [PATCH 14/14] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+
+A demoted RT task inherits stale flags and saved_rt fields via
+dup_task_struct's bit-for-bit copy.  Zero them so the child starts
+clean.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 207b0518d..17844b111 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -185,6 +185,9 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->rt_ema = 0;
+ 	ctx->last_sleep_ns = now;
+ 	ctx->rt_last_sleep_ns = 0;
++	ctx->flags = 0;
++	ctx->saved_rt_priority = 0;
++	ctx->saved_rt_policy = 0;
+ 	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
+ 	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
+ }
 -- 
 2.55.0
 
