@@ -1,7 +1,7 @@
 From fd71f341396802a9c5b914b50936d46df71aba18 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:12:35 +0700
-Subject: [PATCH 01/14] infinity-scheduler v4.5
+Subject: [PATCH 01/15] infinity-scheduler v4.5
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -814,7 +814,7 @@ index 4ee8faf01..a173005c8 100644
 From c16254ac1628eec6ecb5f0513d2780c0ad38d2ad Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:16:19 +0700
-Subject: [PATCH 02/14] v4.5: complete implementation
+Subject: [PATCH 02/15] v4.5: complete implementation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -888,7 +888,7 @@ index 59732b03b..7ff59274f 100644
 From 3295699381ca6bd3ae6c9b13e8f9b989595082b3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:17:50 +0700
-Subject: [PATCH 03/14] v4.5: complete Infinity scheduler
+Subject: [PATCH 03/15] v4.5: complete Infinity scheduler
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -1279,7 +1279,7 @@ index 29f2b38c0..6a02d46e8 100644
 From 045f4fac7e2a21c97e8ec8134ef9fc7244de008c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:43:03 +0700
-Subject: [PATCH 04/14] v4.5: add place_entity futex check, remove dead
+Subject: [PATCH 04/15] v4.5: add place_entity futex check, remove dead
  pick_eevdf bypass
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1338,7 +1338,7 @@ index 7ff59274f..5aa627c5c 100644
 From 74dabaf4ba45819f81e85519cc7eef5d6b2c0f35 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:17 +0700
-Subject: [PATCH 05/14] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 05/15] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1751,7 +1751,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 05e50fff5fd05afcb4ef080c33c2c351e5f236f2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 06/14] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 06/15] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1895,7 +1895,7 @@ index 8fa679a4a..8f96c7554 100644
 From 50f7f0ad95263b2ddeaab8ab2256ae054675bbf7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:26:32 +0700
-Subject: [PATCH 07/14] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 07/15] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1932,7 +1932,7 @@ index fd808d454..2076fb537 100644
 From 92244a42175f0c5596d0008b1f2c7767f7e022b6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:28 +0700
-Subject: [PATCH 08/14] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 08/15] v4.5: Infinity EMA-driven migration hysteresis
 
 Protect interactive (EMA=0) tasks from being migrated by the load
 balancer's idle balance and newly_idle balance.  The check in
@@ -1982,7 +1982,7 @@ index 2076fb537..4d178960b 100644
 From eab3c15d490b376d1f8ab8d037bd87d7ee5b012b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:27:00 +0700
-Subject: [PATCH 09/14] v4.5: Infinity dynamic cgroup defense shields
+Subject: [PATCH 09/15] v4.5: Infinity dynamic cgroup defense shields
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -2142,7 +2142,7 @@ index 9f63b15d3..22f34f7fd 100644
 From 83fdfce5ce34b23f93b689b0f595d1153fdc33b0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:31:01 +0700
-Subject: [PATCH 10/14] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 10/15] v4.5: Infinity cross-class RT safety valve
 
 Implement deferred RT demotion for rogue SCHED_FIFO/SCHED_RR tasks.
 When rt_ema exceeds 95% (>9.5ms continuous runtime), the task is
@@ -2340,7 +2340,7 @@ index a173005c8..3cb6aa116 100644
 From d0e3a46584d274ba859e3724facc386c0d1449cf Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:35:42 +0700
-Subject: [PATCH 11/14] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 11/15] v4.5: Infinity EMA-driven asymmetric core placement
 
 On hybrid topologies (sd_asym_cpucapacity), bias interactive tasks
 (EMA == 0) toward the highest-capacity core during wakeup in
@@ -2401,7 +2401,7 @@ index 68cc59afd..3139f4776 100644
 From 4ad6a16e776673b71637de425c551c0ad50c1347 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:05:47 +0700
-Subject: [PATCH 12/14] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 12/15] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Replace the broken rq->curr approach in balance_callback workers with
@@ -2615,7 +2615,7 @@ index 3cb6aa116..6d952a5fa 100644
 From 4b70622010f6b52a8c7527ec62c3bc0c8b92462c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:22:08 +0700
-Subject: [PATCH 13/14] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
+Subject: [PATCH 13/15] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
  =?UTF-8?q?=E2=80=94=20fork=20llist=20init,=20PF=5FKTHREAD=20guard,=20EEVD?=
  =?UTF-8?q?F=20cgroup=20modulation,=20atomic=20flags?=
 MIME-Version: 1.0
@@ -2832,7 +2832,7 @@ index 6d952a5fa..33bb4eaab 100644
 From 86d80310572cdcead3583b85dcd5f31226e7f721 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:36:39 +0700
-Subject: [PATCH 14/14] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
+Subject: [PATCH 14/15] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
  =?UTF-8?q?=E2=80=94=20this=5Fcpu=5Fptr=20=E2=86=92=20&per=5Fcpu(...,=20cp?=
  =?UTF-8?q?u=5Fof(rq))?=
 MIME-Version: 1.0
@@ -2891,6 +2891,112 @@ index 33bb4eaab..cf29548b2 100644
  			queue_balance_callback(rq,
  				&per_cpu(infinity_rt_demote_cb, cpu_of(rq)),
  				infinity_rt_demote_worker);
+-- 
+2.55.0
+
+
+From 3bf7f2cf1064d0dba922d9931325fef1e8b56ac2 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 23:31:19 +0700
+Subject: [PATCH 15/15] v4.6: fix balance_callback deadlock + CPU 0 starvation
+
+Two boot fixes:
+
+1. balance_callback deadlock: do_balance_callbacks() runs with rq->lock
+   held (lockdep_assert_rq_held in core.c:5016 confirms).  The RT safety
+   valve workers called sched_setattr_nocheck() which calls task_rq_lock()
+   and deadlocks re-acquiring rq->lock.  Fix: drop rq->lock before
+   sched_setattr_nocheck(), re-acquire after.
+
+2. CPU 0 starvation: The can_migrate_task EMA=0 gate blocked ALL newly
+   forked tasks (EMA=0) from migrating off CPU 0 during boot.  systemd
+   forks hundreds of services on CPU 0, all with EMA=0, and the load
+   balancer couldn't spread them.  Fix: add sum_exec_runtime > 2ms
+   guard so only tasks with a real execution history get cache-pinned.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           |  6 +++++-
+ kernel/sched/infinity_sched.c | 28 ++++++++++++++++++++++++----
+ 2 files changed, 29 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index fa46dee33..e4c00138a 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -10038,7 +10038,11 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+ 	 */
+ 	if (!(env->flags & LBF_ACTIVE_LB) &&
+ 	    env->sd->nr_balance_failed <= env->sd->cache_nice_tries &&
+-	    p->infinity.ema == 0) {
++	    READ_ONCE(p->infinity.ema) == 0 &&
++	    /* Only protect tasks with a real runtime history.  Newly forked
++	     * tasks start with EMA=0 and must be free to spread across CPUs
++	     * during boot, otherwise CPU 0 becomes a bottleneck. */
++	    p->se.sum_exec_runtime > 2000000ULL) {
+ 		return 0;
+ 	}
+ 
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 4fe70e858..33da34363 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -30,11 +30,21 @@ DEFINE_PER_CPU(struct llist_head, infinity_rt_demote_list);
+ DEFINE_PER_CPU(struct llist_head, infinity_rt_restore_list);
+ 
+ /* Drain the demote list and demote each task to SCHED_NORMAL.
+- * Called after rq->lock is released via balance_callback — safe to
+- * take task_rq_lock() in sched_setattr_nocheck(). */
++ * balance_callback runs with rq->lock held.  We must drop it before
++ * calling sched_setattr_nocheck() which takes task_rq_lock(). */
+ void infinity_rt_demote_worker(struct rq *rq)
+ {
+-	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_demote_list));
++	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_demote_list, cpu_of(rq)));
++
++	if (!node)
++		return;
++
++	/* Drop rq->lock to avoid deadlock in sched_setattr_nocheck()
++	 * (it calls __sched_setscheduler → task_rq_lock which re-acquires
++	 * rq->lock).  Follow the pattern used elsewhere for balance_callback
++	 * workers that need to take inverted locks. */
++	raw_spin_rq_unlock(rq);
++
+ 	struct infinity_ctx *ctx, *next;
+ 
+ 	llist_for_each_entry_safe(ctx, next, node, demote_node) {
+@@ -49,12 +59,20 @@ void infinity_rt_demote_worker(struct rq *rq)
+ 		if (sched_setattr_nocheck(p, &attr) == 0)
+ 			set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
+ 	}
++
++	raw_spin_rq_lock(rq);
+ }
+ 
+ /* Drain the restore list and restore each task to its saved RT policy. */
+ void infinity_rt_restore_worker(struct rq *rq)
+ {
+-	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_restore_list));
++	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_restore_list, cpu_of(rq)));
++
++	if (!node)
++		return;
++
++	raw_spin_rq_unlock(rq);
++
+ 	struct infinity_ctx *ctx, *next;
+ 
+ 	llist_for_each_entry_safe(ctx, next, node, restore_node) {
+@@ -69,6 +87,8 @@ void infinity_rt_restore_worker(struct rq *rq)
+ 		if (sched_setattr_nocheck(p, &attr) == 0)
+ 			clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
+ 	}
++
++	raw_spin_rq_lock(rq);
+ }
+ /* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
 -- 
 2.55.0
 

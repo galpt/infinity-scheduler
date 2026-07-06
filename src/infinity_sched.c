@@ -30,11 +30,21 @@ DEFINE_PER_CPU(struct llist_head, infinity_rt_demote_list);
 DEFINE_PER_CPU(struct llist_head, infinity_rt_restore_list);
 
 /* Drain the demote list and demote each task to SCHED_NORMAL.
- * Called after rq->lock is released via balance_callback — safe to
- * take task_rq_lock() in sched_setattr_nocheck(). */
+ * balance_callback runs with rq->lock held.  We must drop it before
+ * calling sched_setattr_nocheck() which takes task_rq_lock(). */
 void infinity_rt_demote_worker(struct rq *rq)
 {
-	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_demote_list));
+	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_demote_list, cpu_of(rq)));
+
+	if (!node)
+		return;
+
+	/* Drop rq->lock to avoid deadlock in sched_setattr_nocheck()
+	 * (it calls __sched_setscheduler → task_rq_lock which re-acquires
+	 * rq->lock).  Follow the pattern used elsewhere for balance_callback
+	 * workers that need to take inverted locks. */
+	raw_spin_rq_unlock(rq);
+
 	struct infinity_ctx *ctx, *next;
 
 	llist_for_each_entry_safe(ctx, next, node, demote_node) {
@@ -49,12 +59,20 @@ void infinity_rt_demote_worker(struct rq *rq)
 		if (sched_setattr_nocheck(p, &attr) == 0)
 			set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
 	}
+
+	raw_spin_rq_lock(rq);
 }
 
 /* Drain the restore list and restore each task to its saved RT policy. */
 void infinity_rt_restore_worker(struct rq *rq)
 {
-	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_restore_list));
+	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_restore_list, cpu_of(rq)));
+
+	if (!node)
+		return;
+
+	raw_spin_rq_unlock(rq);
+
 	struct infinity_ctx *ctx, *next;
 
 	llist_for_each_entry_safe(ctx, next, node, restore_node) {
@@ -69,6 +87,8 @@ void infinity_rt_restore_worker(struct rq *rq)
 		if (sched_setattr_nocheck(p, &attr) == 0)
 			clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
 	}
+
+	raw_spin_rq_lock(rq);
 }
 /* ------------------------------------------------------------------ */
 /* Sysctl tunables                                                     */
