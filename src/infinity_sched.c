@@ -39,14 +39,15 @@ void infinity_rt_demote_worker(struct rq *rq)
 
 	llist_for_each_entry_safe(ctx, next, node, demote_node) {
 		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
-		ctx->flags &= ~INFINITY_RT_DEMOTE_PENDING;
+
+		clear_bit(INFINITY_RT_DEMOTE_PENDING, &ctx->flags);
 
 		struct sched_attr attr = {
 			.sched_policy = SCHED_NORMAL,
 			.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
 		};
 		if (sched_setattr_nocheck(p, &attr) == 0)
-			ctx->flags |= INFINITY_RT_DEMOTED;
+			set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
 	}
 }
 
@@ -58,14 +59,15 @@ void infinity_rt_restore_worker(struct rq *rq)
 
 	llist_for_each_entry_safe(ctx, next, node, restore_node) {
 		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
-		ctx->flags &= ~INFINITY_RT_RESTORE_PENDING;
+
+		clear_bit(INFINITY_RT_RESTORE_PENDING, &ctx->flags);
 
 		struct sched_attr attr = {
 			.sched_policy = ctx->saved_rt_policy,
 			.sched_priority = ctx->saved_rt_priority,
 		};
 		if (sched_setattr_nocheck(p, &attr) == 0)
-			ctx->flags &= ~INFINITY_RT_DEMOTED;
+			clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
 	}
 }
 /* ------------------------------------------------------------------ */
@@ -199,6 +201,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
+	init_llist_node(&ctx->demote_node);
+	init_llist_node(&ctx->restore_node);
 }
 /* ------------------------------------------------------------------ */
 /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *

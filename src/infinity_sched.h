@@ -142,10 +142,10 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 #define INFINITY_RT_RESTORE_WATERMARK   5000ULL
 /** Nice value when demoted to SCHED_NORMAL. */
 #define INFINITY_RT_DEMOTE_PRIORITY     0
-/** Infinity RT context flags */
-#define INFINITY_RT_DEMOTED             BIT(0)
-#define INFINITY_RT_DEMOTE_PENDING      BIT(1)
-#define INFINITY_RT_RESTORE_PENDING     BIT(2)
+/** Infinity RT context flags (bit numbers for atomic bitops) */
+#define INFINITY_RT_DEMOTED             0
+#define INFINITY_RT_DEMOTE_PENDING      1
+#define INFINITY_RT_RESTORE_PENDING     2
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
 /* ------------------------------------------------------------------ */
