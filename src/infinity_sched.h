@@ -116,12 +116,36 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 	return base;
 }
 /* ------------------------------------------------------------------ */
+/* Cgroup EMA constants                                                */
+/* ------------------------------------------------------------------ */
+/** Cgroup aggregate EMA ceiling (2ms — groups converge faster). */
+#define INFINITY_CGROUP_EMA_CLIMB_NS	2000000ULL
+/** Cgroup EMA alpha — gentle slope to avoid oscillation. */
+#define INFINITY_CGROUP_EMA_ALPHA	1
+/** Cgroup EMA half-life for idle decay (16ms). */
+#define INFINITY_CGROUP_EMA_HALFLIFE_NS	16000000ULL
+/** Maximum group weight reduction (50% — never fully starves). */
+#define INFINITY_CGROUP_WEIGHT_REDUCE_PCT 50
+/* ------------------------------------------------------------------ */
 /* RT EMA constants                                                    */
 /* ------------------------------------------------------------------ */
 /** RT budget ceiling (10ms). */
 #define INFINITY_RT_BUDGET_NS		10000000ULL
 /** RT alpha. */
 #define INFINITY_RT_ALPHA		4
+/* ------------------------------------------------------------------ */
+/* RT safety valve constants                                           */
+/* ------------------------------------------------------------------ */
+/** rt_ema threshold for demotion (>95% of 10ms ceiling). */
+#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
+/** rt_ema watermark for restoration (<50% of ceiling). */
+#define INFINITY_RT_RESTORE_WATERMARK   5000ULL
+/** Nice value when demoted to SCHED_NORMAL. */
+#define INFINITY_RT_DEMOTE_PRIORITY     0
+/** Infinity RT context flags */
+#define INFINITY_RT_DEMOTED             BIT(0)
+#define INFINITY_RT_DEMOTE_PENDING      BIT(1)
+#define INFINITY_RT_RESTORE_PENDING     BIT(2)
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
 /* ------------------------------------------------------------------ */
@@ -136,4 +160,11 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 unsigned int infinity_rr_timeslice(struct task_struct *p,
 				   unsigned int rr_default);
+/* ------------------------------------------------------------------ */
+/* RT safety valve — balance_callback workers (called from rt.c, fair.c) */
+/* ------------------------------------------------------------------ */
+DECLARE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
+DECLARE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
+void infinity_rt_demote_worker(struct rq *rq);
+void infinity_rt_restore_worker(struct rq *rq);
 #endif /* __INFINITY_SCHED_H */

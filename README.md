@@ -105,8 +105,12 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 ## Tunables
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|
+|---|---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
+| `infinity_cgroup_shield` | 1 (ro) | 0/1 | Enable automatic cgroup defense (reboot to change) |
+| `infinity_migration_protect` | 1 (ro) | 0/1 | Enable EMA-driven migration hysteresis (reboot to change) |
+| `infinity_rt_safety` | 1 (ro) | 0/1 | Enable cross-class RT safety valve (reboot to change) |
+| `infinity_asym_placement` | 1 (ro) | 0/1 | Enable EMA-driven P/E core placement (reboot to change) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
@@ -117,7 +121,7 @@ CPU-bound threads.  No user tunable is needed beyond the SMT divisor.
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
-|---|---|---|
+|---|---|---|---|
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | **EMA (Limitless)** |
 | SMT halving | No | Yes |
@@ -127,6 +131,10 @@ CPU-bound threads.  No user tunable is needed beyond the SMT divisor.
 | Adaptive RR timeslice | No | **Yes (rt_ema-based, 10–100ms)** |
 | Hardware-adaptive alpha | No | **Yes (2048–4096 via cpu_capacity)** |
 | Futex IPC wakeup boost | No | **Yes (vslice halved on futex wakeup)** |
+| Migration hysteresis | No | **Yes (EMA-driven cache pinning)** |
+| Cgroup defense shield | No | **Yes (aggregate group EMA)** |
+| RT cross-class safety | No | **Yes (balance_callback demotion)** |
+| Asymmetric core placement | No | **Yes (EMA-guided P/E core bias)** |
 
 ## License
 

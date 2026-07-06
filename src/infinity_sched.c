@@ -18,8 +18,49 @@
  */
 #include <linux/math64.h>
 #include <linux/sysctl.h>
+#include <uapi/linux/sched/types.h>
 #include "sched.h"
 #include "infinity_sched.h"
+/* Per-CPU balance_callback slots for deferred RT demotion/restoration */
+DEFINE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
+DEFINE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
+
+/* Called after rq->lock is released — safe to take locks in order. */
+void infinity_rt_demote_worker(struct rq *rq)
+{
+	struct task_struct *p = rq->curr;
+
+	if (!(p->infinity.flags & INFINITY_RT_DEMOTE_PENDING))
+		return;
+
+	p->infinity.flags &= ~INFINITY_RT_DEMOTE_PENDING;
+
+	struct sched_attr attr = {
+		.sched_policy = SCHED_NORMAL,
+		.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
+	};
+
+	if (sched_setattr_nocheck(p, &attr) == 0)
+		p->infinity.flags |= INFINITY_RT_DEMOTED;
+}
+
+void infinity_rt_restore_worker(struct rq *rq)
+{
+	struct task_struct *p = rq->curr;
+
+	if (!(p->infinity.flags & INFINITY_RT_RESTORE_PENDING))
+		return;
+
+	p->infinity.flags &= ~INFINITY_RT_RESTORE_PENDING;
+
+	struct sched_attr attr = {
+		.sched_policy = p->infinity.saved_rt_policy,
+		.sched_priority = p->infinity.saved_rt_priority,
+	};
+
+	if (sched_setattr_nocheck(p, &attr) == 0)
+		p->infinity.flags &= ~INFINITY_RT_DEMOTED;
+}
 /* ------------------------------------------------------------------ */
 /* Sysctl tunables                                                     */
 /* ------------------------------------------------------------------ */

@@ -1,0 +1,58 @@
+From 045f4fac7e2a21c97e8ec8134ef9fc7244de008c Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sat, 4 Jul 2026 19:43:03 +0700
+Subject: [PATCH 04/11] v4.5: add place_entity futex check, remove dead
+ pick_eevdf bypass
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 25 ++++++++-----------------
+ 1 file changed, 8 insertions(+), 17 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 7ff59274f..5aa627c5c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1180,19 +1180,8 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq, bool protect)
+ 	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
+ 		curr = NULL;
+ 
+-	if (curr && protect && protect_slice(curr)) {
+-		/*
+-		 * Bypass slice protection if the current task is waiting
+-		 * on a futex (it called futex_wait() and is about to go
+-		 * to sleep).  Such a task has already released all kernel
+-		 * locks, so preempting it is safe.
+-		 */
+-		if (entity_is_task(curr) &&
+-		    task_of(curr)->infinity.futex_waiting)
+-			; /* yield to eligible interactive tasks */
+-		else
+-			return curr;
+-	}
++	if (curr && protect && protect_slice(curr))
++		return curr;
+ 
+ 	/* Pick the leftmost entity if it's eligible */
+ 	if (se && entity_eligible(cfs_rq, se)) {
+@@ -5578,11 +5567,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 		vslice /= 2;
+ 
+ 	/*
+-	 * Infinity: the task's weight was updated by infinity_maybe_reweight
+-	 * during update_deadline or update_curr.  A low-EMA (interactive)
+-	 * task naturally has a higher weight and earlier deadline — no
+-	 * separate vslice manipulation is needed.
++	 * Infinity: when a task wakes from a futex (futex_waiting is true),
++	 * halve its vslice so it gets an earlier deadline and runs sooner,
++	 * reducing IPC wakeup latency.
+ 	 */
++	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
++	    task_of(se)->infinity.futex_waiting)
++		vslice >>= 1;
+ 
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i/w_i
+-- 
+2.55.0
+

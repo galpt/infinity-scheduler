@@ -1,0 +1,60 @@
+From d0e3a46584d274ba859e3724facc386c0d1449cf Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 19:35:42 +0700
+Subject: [PATCH 11/11] v4.5: Infinity EMA-driven asymmetric core placement
+
+On hybrid topologies (sd_asym_cpucapacity), bias interactive tasks
+(EMA == 0) toward the highest-capacity core during wakeup in
+select_task_rq_fair().  This prevents latency-sensitive tasks from
+being placed on E-cores when EAS is unavailable (overutilized root
+domain) or when the standard wake-affine path is used.
+
+READ_ONCE guards the lockless ema read (only pi_lock held here).
+
+No-op on homogeneous systems where sd_asym_cpucapacity is NULL.
+
+Link: https://github.com/galpt/infinity-scheduler
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 68cc59afd..3139f4776 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -9017,6 +9017,31 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		    cpumask_test_cpu(cpu, p->cpus_ptr))
+ 			return cpu;
+ 
++		/*
++		 * Infinity: on asymmetric topologies (Intel hybrid, ARM
++		 * big.LITTLE), bias interactive tasks (EMA == 0) toward the
++		 * highest-capacity P-cores.  This avoids placing latency-
++		 * sensitive tasks on E-cores during wakeup.
++		 *
++		 * Lockless read of p->infinity.ema: only p->pi_lock is held
++		 * here, not rq->lock.  READ_ONCE prevents compiler tearing
++		 * on 32-bit architectures.
++		 */
++		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
++			struct asym_cap_data *entry;
++			int best_cpu;
++
++			rcu_read_lock();
++			list_for_each_entry_rcu(entry, &asym_cap_list, link) {
++				best_cpu = cpumask_first_and(cpu_capacity_span(entry), p->cpus_ptr);
++				if (best_cpu < nr_cpu_ids) {
++					rcu_read_unlock();
++					return best_cpu;
++				}
++			}
++			rcu_read_unlock();
++		}
++
+ 		if (!is_rd_overutilized(this_rq()->rd)) {
+ 			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
+ 			if (new_cpu >= 0)
+-- 
+2.55.0
+
