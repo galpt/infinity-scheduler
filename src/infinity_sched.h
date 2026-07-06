@@ -161,10 +161,13 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 unsigned int infinity_rr_timeslice(struct task_struct *p,
 				   unsigned int rr_default);
 /* ------------------------------------------------------------------ */
-/* RT safety valve — balance_callback workers (called from rt.c, fair.c) */
+/* RT safety valve — balance_callback + llist workers                  */
+/* (Called from rt.c, fair.c — entries are in infinity_sched.c)       */
 /* ------------------------------------------------------------------ */
 DECLARE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
 DECLARE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
+DECLARE_PER_CPU(struct llist_head, infinity_rt_demote_list);
+DECLARE_PER_CPU(struct llist_head, infinity_rt_restore_list);
 void infinity_rt_demote_worker(struct rq *rq);
 void infinity_rt_restore_worker(struct rq *rq);
 #endif /* __INFINITY_SCHED_H */

@@ -18,48 +18,55 @@
  */
 #include <linux/math64.h>
 #include <linux/sysctl.h>
+#include <linux/llist.h>
 #include <uapi/linux/sched/types.h>
 #include "sched.h"
 #include "infinity_sched.h"
 /* Per-CPU balance_callback slots for deferred RT demotion/restoration */
 DEFINE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
 DEFINE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
+/* Lockless per-CPU queues for tasks needing deferred policy changes */
+DEFINE_PER_CPU(struct llist_head, infinity_rt_demote_list);
+DEFINE_PER_CPU(struct llist_head, infinity_rt_restore_list);
 
-/* Called after rq->lock is released — safe to take locks in order. */
+/* Drain the demote list and demote each task to SCHED_NORMAL.
+ * Called after rq->lock is released via balance_callback — safe to
+ * take task_rq_lock() in sched_setattr_nocheck(). */
 void infinity_rt_demote_worker(struct rq *rq)
 {
-	struct task_struct *p = rq->curr;
+	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_demote_list));
+	struct infinity_ctx *ctx, *next;
 
-	if (!(p->infinity.flags & INFINITY_RT_DEMOTE_PENDING))
-		return;
+	llist_for_each_entry_safe(ctx, next, node, demote_node) {
+		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
+		ctx->flags &= ~INFINITY_RT_DEMOTE_PENDING;
 
-	p->infinity.flags &= ~INFINITY_RT_DEMOTE_PENDING;
-
-	struct sched_attr attr = {
-		.sched_policy = SCHED_NORMAL,
-		.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
-	};
-
-	if (sched_setattr_nocheck(p, &attr) == 0)
-		p->infinity.flags |= INFINITY_RT_DEMOTED;
+		struct sched_attr attr = {
+			.sched_policy = SCHED_NORMAL,
+			.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
+		};
+		if (sched_setattr_nocheck(p, &attr) == 0)
+			ctx->flags |= INFINITY_RT_DEMOTED;
+	}
 }
 
+/* Drain the restore list and restore each task to its saved RT policy. */
 void infinity_rt_restore_worker(struct rq *rq)
 {
-	struct task_struct *p = rq->curr;
+	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_restore_list));
+	struct infinity_ctx *ctx, *next;
 
-	if (!(p->infinity.flags & INFINITY_RT_RESTORE_PENDING))
-		return;
+	llist_for_each_entry_safe(ctx, next, node, restore_node) {
+		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
+		ctx->flags &= ~INFINITY_RT_RESTORE_PENDING;
 
-	p->infinity.flags &= ~INFINITY_RT_RESTORE_PENDING;
-
-	struct sched_attr attr = {
-		.sched_policy = p->infinity.saved_rt_policy,
-		.sched_priority = p->infinity.saved_rt_priority,
-	};
-
-	if (sched_setattr_nocheck(p, &attr) == 0)
-		p->infinity.flags &= ~INFINITY_RT_DEMOTED;
+		struct sched_attr attr = {
+			.sched_policy = ctx->saved_rt_policy,
+			.sched_priority = ctx->saved_rt_priority,
+		};
+		if (sched_setattr_nocheck(p, &attr) == 0)
+			ctx->flags &= ~INFINITY_RT_DEMOTED;
+	}
 }
 /* ------------------------------------------------------------------ */
 /* Sysctl tunables                                                     */

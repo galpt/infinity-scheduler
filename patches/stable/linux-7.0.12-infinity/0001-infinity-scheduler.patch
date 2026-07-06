@@ -1,7 +1,7 @@
 From 21303e918237e5b8e121a07a3281d81a970e199f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 1/8] v4.5: complete implementation
+Subject: [PATCH 1/9] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -718,7 +718,7 @@ index 0cbee0318..29307b073 100644
 From 8248032de40a30a5433cf3cc618c4bdb972c8c90 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 2/8] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
+Subject: [PATCH 2/9] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
  init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1139,7 +1139,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 906d23883469469c1c12033dba21cb9f0b991cb7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 3/8] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 3/9] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1298,7 +1298,7 @@ index 8fa679a4a..8f96c7554 100644
 From ec51b2e93abd98a00004f1381c4b2e420691260e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
-Subject: [PATCH 4/8] fix futex freq boost: check futex_waiting, not in_iowait
+Subject: [PATCH 4/9] fix futex freq boost: check futex_waiting, not in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1355,7 +1355,7 @@ index dfcb7ba0d..832396689 100644
 From 34e12ad487e296af055dc214867032dabaad455c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
-Subject: [PATCH 5/8] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 5/9] v4.5: Infinity EMA-driven migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1392,7 +1392,7 @@ index 832396689..1973f2793 100644
 From e2e996a8dce80ec062fb29730017d92efe408c96 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:13 +0700
-Subject: [PATCH 6/8] v4.5: Infinity cgroup defense + migration hysteresis
+Subject: [PATCH 6/9] v4.5: Infinity cgroup defense + migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1523,7 +1523,7 @@ index 0d068b2f3..7d1933dd8 100644
 From f2615487ce54372d648cb2bf39cea61854b4cb28 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:34:10 +0700
-Subject: [PATCH 7/8] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 7/9] v4.5: Infinity cross-class RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1705,7 +1705,7 @@ index 29307b073..51d64ea7c 100644
 From afe3ffa33e08222a2896cfbfe9d9ee7734f4cded Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:46 +0700
-Subject: [PATCH 8/8] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 8/9] v4.5: Infinity EMA-driven asymmetric core placement
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1741,6 +1741,206 @@ index 2cdeb72f0..64db56230 100644
  		if (!is_rd_overutilized(this_rq()->rd)) {
  			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
  			if (new_cpu >= 0)
+-- 
+2.55.0
+
+
+From 1d45f38ac32732453f1d54f16ae1ec89620af659 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 20:07:17 +0700
+Subject: [PATCH 9/9] v4.5: RT safety valve: fix rq->curr context bug via llist
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ include/linux/sched.h         |  4 +++
+ kernel/sched/fair.c           | 13 +++++---
+ kernel/sched/infinity_sched.c | 57 ++++++++++++++++++++---------------
+ kernel/sched/infinity_sched.h | 10 +++---
+ kernel/sched/rt.c             | 12 ++++++--
+ 5 files changed, 60 insertions(+), 36 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 9c88417a9..87d9e3bbb 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -35,6 +35,7 @@
+ #include <linux/sched/types.h>
+ #include <linux/signal_types.h>
+ #include <linux/spinlock.h>
++#include <linux/llist.h>
+ #include <linux/syscall_user_dispatch_types.h>
+ #include <linux/mm_types_task.h>
+ #include <linux/netdevice_xmit.h>
+@@ -826,6 +827,9 @@ struct infinity_ctx {
+ 	u32		flags;
+ 	u32		saved_rt_priority;
+ 	u32		saved_rt_policy;
++	/* Lockless list nodes for deferred RT demotion/restoration callbacks */
++	struct llist_node	demote_node;
++	struct llist_node	restore_node;
+ };
+ 
+ struct task_struct {
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 64db56230..fd87d357c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7140,14 +7140,19 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		p->infinity.futex_waiting = false;
+ 
+ 		/* Infinity: restore RT scheduling if the task was demoted
+-		 * and its rt_ema has decayed below the restoration watermark. */
++		 * and its rt_ema has decayed below the restoration watermark.
++		 * llist_add returns true if the list was previously empty —
++		 * queue balance_callback only once per batch. */
+ 		if ((p->infinity.flags & INFINITY_RT_DEMOTED) &&
+ 		    p->infinity.rt_ema < INFINITY_RT_RESTORE_WATERMARK &&
+ 		    !(p->infinity.flags & INFINITY_RT_RESTORE_PENDING)) {
+ 			p->infinity.flags |= INFINITY_RT_RESTORE_PENDING;
+-			queue_balance_callback(rq,
+-				&per_cpu(infinity_rt_restore_cb, cpu_of(rq)),
+-				infinity_rt_restore_worker);
++			if (llist_add(&p->infinity.restore_node,
++				      this_cpu_ptr(&infinity_rt_restore_list))) {
++				queue_balance_callback(rq,
++					&per_cpu(infinity_rt_restore_cb, cpu_of(rq)),
++					infinity_rt_restore_worker);
++			}
+ 		}
+ 
+ 		if (p->in_iowait)
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 0dbf75a64..238ff0ed8 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -18,6 +18,7 @@
+  */
+ #include <linux/math64.h>
+ #include <linux/sysctl.h>
++#include <linux/llist.h>
+ #include <uapi/linux/sched/types.h>
+ #include "sched.h"
+ #include "infinity_sched.h"
+@@ -25,42 +26,48 @@
+ /* Per-CPU balance_callback slots for deferred RT demotion/restoration */
+ DEFINE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
+ DEFINE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
++/* Lockless per-CPU queues for tasks needing deferred policy changes */
++DEFINE_PER_CPU(struct llist_head, infinity_rt_demote_list);
++DEFINE_PER_CPU(struct llist_head, infinity_rt_restore_list);
+ 
+-/* Called after rq->lock is released — safe to take locks in order. */
++/* Drain the demote list and demote each task to SCHED_NORMAL.
++ * Called after rq->lock is released via balance_callback — safe to
++ * take task_rq_lock() in sched_setattr_nocheck(). */
+ void infinity_rt_demote_worker(struct rq *rq)
+ {
+-	struct task_struct *p = rq->curr;
++	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_demote_list));
++	struct infinity_ctx *ctx, *next;
+ 
+-	if (!(p->infinity.flags & INFINITY_RT_DEMOTE_PENDING))
+-		return;
+-
+-	p->infinity.flags &= ~INFINITY_RT_DEMOTE_PENDING;
++	llist_for_each_entry_safe(ctx, next, node, demote_node) {
++		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
++		ctx->flags &= ~INFINITY_RT_DEMOTE_PENDING;
+ 
+-	struct sched_attr attr = {
+-		.sched_policy = SCHED_NORMAL,
+-		.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
+-	};
+-
+-	if (sched_setattr_nocheck(p, &attr) == 0)
+-		p->infinity.flags |= INFINITY_RT_DEMOTED;
++		struct sched_attr attr = {
++			.sched_policy = SCHED_NORMAL,
++			.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
++		};
++		if (sched_setattr_nocheck(p, &attr) == 0)
++			ctx->flags |= INFINITY_RT_DEMOTED;
++	}
+ }
+ 
++/* Drain the restore list and restore each task to its saved RT policy. */
+ void infinity_rt_restore_worker(struct rq *rq)
+ {
+-	struct task_struct *p = rq->curr;
++	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_restore_list));
++	struct infinity_ctx *ctx, *next;
+ 
+-	if (!(p->infinity.flags & INFINITY_RT_RESTORE_PENDING))
+-		return;
+-
+-	p->infinity.flags &= ~INFINITY_RT_RESTORE_PENDING;
++	llist_for_each_entry_safe(ctx, next, node, restore_node) {
++		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
++		ctx->flags &= ~INFINITY_RT_RESTORE_PENDING;
+ 
+-	struct sched_attr attr = {
+-		.sched_policy = p->infinity.saved_rt_policy,
+-		.sched_priority = p->infinity.saved_rt_priority,
+-	};
+-
+-	if (sched_setattr_nocheck(p, &attr) == 0)
+-		p->infinity.flags &= ~INFINITY_RT_DEMOTED;
++		struct sched_attr attr = {
++			.sched_policy = ctx->saved_rt_policy,
++			.sched_priority = ctx->saved_rt_priority,
++		};
++		if (sched_setattr_nocheck(p, &attr) == 0)
++			ctx->flags &= ~INFINITY_RT_DEMOTED;
++	}
+ }
+ 
+ /* ------------------------------------------------------------------ */
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index d2985f801..59f55e9ab 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -147,12 +147,14 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+ #define INFINITY_RT_DEMOTE_PENDING      BIT(1)
+ #define INFINITY_RT_RESTORE_PENDING     BIT(2)
+ 
+-/* balance_callback workers — need extern for rt.c and fair.c access */
+-extern void infinity_rt_demote_worker(struct rq *rq);
+-extern void infinity_rt_restore_worker(struct rq *rq);
+-/* Per-CPU callback slots */
++/* RT safety valve — balance_callback + llist workers                  */
++/* (Called from rt.c, fair.c — entries are in infinity_sched.c)       */
+ DECLARE_PER_CPU(struct balance_callback, infinity_rt_demote_cb);
+ DECLARE_PER_CPU(struct balance_callback, infinity_rt_restore_cb);
++DECLARE_PER_CPU(struct llist_head, infinity_rt_demote_list);
++DECLARE_PER_CPU(struct llist_head, infinity_rt_restore_list);
++void infinity_rt_demote_worker(struct rq *rq);
++void infinity_rt_restore_worker(struct rq *rq);
+ 
+ /* ------------------------------------------------------------------ */
+ /* External sysctl tunables                                            */
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 51d64ea7c..58fbea589 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -995,9 +995,15 @@ static void update_curr_rt(struct rq *rq)
+ 		donor->infinity.flags |= INFINITY_RT_DEMOTE_PENDING;
+ 		donor->infinity.saved_rt_policy = donor->policy;
+ 		donor->infinity.saved_rt_priority = donor->rt_priority;
+-		queue_balance_callback(rq,
+-			&per_cpu(infinity_rt_demote_cb, cpu_of(rq)),
+-			infinity_rt_demote_worker);
++		/* llist_add returns true if the list was previously empty.
++		 * Queue the balance_callback only on the first addition to
++		 * avoid redundant callbacks — the worker drains the entire list. */
++		if (llist_add(&donor->infinity.demote_node,
++			      this_cpu_ptr(&infinity_rt_demote_list))) {
++			queue_balance_callback(rq,
++				&per_cpu(infinity_rt_demote_cb, cpu_of(rq)),
++				infinity_rt_demote_worker);
++		}
+ 	}
+ 
+ #ifdef CONFIG_RT_GROUP_SCHED
 -- 
 2.55.0
 
