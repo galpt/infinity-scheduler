@@ -30,7 +30,7 @@ index d41e7a8f9..5c99a27bd 100644
 @@ -817,6 +817,14 @@ struct kmap_ctrl {
  #endif
  };
- 
+
 +struct infinity_ctx {
 +	u64		ema;
 +	u64		rt_ema;		/* RT EMA: tracks RT CPU burstiness */
@@ -101,7 +101,7 @@ index 3bce48ad0..caa687843 100644
 +++ b/kernel/sched/fair.c
 @@ -55,8 +55,28 @@
  #include <uapi/linux/sched/types.h>
- 
+
  #include "sched.h"
 -#include "stats.h"
 -#include "autogroup.h"
@@ -127,7 +127,7 @@ index 3bce48ad0..caa687843 100644
 +	if (new_weight != se->load.weight)
 +		reweight_entity(cfs_rq, se, new_weight);
 +}
- 
+
  /*
   * The initial- and re-scaling of tunables is configurable
 @@ -1118,10 +1138,43 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -143,7 +143,7 @@ index 3bce48ad0..caa687843 100644
 -	if (!se->custom_slice)
 +	if (!se->custom_slice) {
  		se->slice = sysctl_sched_base_slice;
- 
+
 +		if (entity_is_task(se)) {
 +			struct task_struct *p__ = task_of(se);
 +
@@ -178,7 +178,7 @@ index 3bce48ad0..caa687843 100644
 @@ -1298,6 +1351,12 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
- 
+
 +	/* Infinity: EMA budget consumption */
 +	if (entity_is_task(curr)) {
 +		struct task_struct *p__ = task_of(curr);
@@ -187,11 +187,11 @@ index 3bce48ad0..caa687843 100644
 +
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
- 
+
 @@ -5258,6 +5317,15 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
- 
+
 +	/*
 +	 * Infinity: when a task wakes from a futex (futex_waiting is true),
 +	 * halve its vslice so it gets an earlier deadline and runs sooner,
@@ -206,7 +206,7 @@ index 3bce48ad0..caa687843 100644
  	 */
 @@ -5540,6 +5608,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
- 
+
  	se = pick_eevdf(cfs_rq, protect);
 +	if (unlikely(!se)) {
 +		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
@@ -252,7 +252,7 @@ index 3bce48ad0..caa687843 100644
 +
  	set_task_max_allowed_capacity(p);
  }
- 
+
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
 index 000000000..6e0c590dd
@@ -654,31 +654,31 @@ index 0cbee0318..29307b073 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
- 
+
  #include "sched.h"
  #include "pelt.h"
 +#include "infinity_sched.h"
- 
+
  int sched_rr_timeslice = RR_TIMESLICE;
  /* More than 4 hours if BW_SHIFT equals 20. */
 @@ -983,6 +984,9 @@ static void update_curr_rt(struct rq *rq)
  	if (unlikely(delta_exec <= 0))
  		return;
- 
+
 +	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
 +	infinity_rt_consume(&donor->infinity, delta_exec);
 +
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
- 
+
 @@ -1432,9 +1436,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
- 
+
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		rt_se->timeout = 0;
- 
+
 +		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
@@ -690,28 +690,28 @@ index 0cbee0318..29307b073 100644
 +
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
- 
+
 @@ -1454,6 +1467,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
- 
+
 +	/* Infinity: record sleep timestamp for RR EMA decay */
 +	if ((flags & DEQUEUE_SLEEP) && p)
 +		p->infinity.rt_last_sleep_ns = rq_clock(rq);
 +
  	dequeue_pushable_task(rq, p);
- 
+
  	return true;
 @@ -2545,7 +2562,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
- 
+
 -	p->rt.time_slice = sched_rr_timeslice;
 +	p->rt.time_slice = infinity_rr_timeslice(p, sched_rr_timeslice);
- 
+
  	/*
  	 * Requeue to the end of queue if we (and all of our ancestors) are not
--- 
+--
 2.55.0
 
 
@@ -734,12 +734,12 @@ index 567b1b1ef..d086f85fd 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -93,6 +93,7 @@
- 
+
  #include "autogroup.h"
  #include "pelt.h"
 +#include "infinity_sched.h"
  #include "smp.h"
- 
+
  #include "../workqueue_internal.h"
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index caa687843..ffcf88e53 100644
@@ -757,7 +757,7 @@ index caa687843..ffcf88e53 100644
 @@ -7012,12 +7012,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
- 
+
 -	/* Infinity: EMA decay on wakeup and futex clear */
 +	/* Infinity: EMA decay on wakeup */
  	if (flags & ENQUEUE_WAKEUP) {
@@ -771,33 +771,33 @@ index caa687843..ffcf88e53 100644
 @@ -7083,6 +7082,9 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  		flags = ENQUEUE_WAKEUP;
  	}
- 
+
 +	if (flags & ENQUEUE_WAKEUP)
 +		p->infinity.futex_waiting = false;
 +
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
- 
+
 @@ -7161,6 +7163,9 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
  			h_nr_runnable = 1;
  	}
- 
+
 +	if (flags & ENQUEUE_WAKEUP)
 +		p->infinity.futex_waiting = false;
 +
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
- 
+
 @@ -7200,6 +7205,9 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
  		flags &= ~(DEQUEUE_DELAYED | DEQUEUE_SPECIAL);
  	}
- 
+
 +	if (flags & ENQUEUE_WAKEUP)
 +		p->infinity.futex_waiting = false;
 +
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
- 
+
 @@ -13543,11 +13551,6 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
   */
  static void task_fork_fair(struct task_struct *p)
@@ -809,7 +809,7 @@ index caa687843..ffcf88e53 100644
 -
  	set_task_max_allowed_capacity(p);
  }
- 
+
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 index 6e0c590dd..d5c3f655e 100644
 --- a/kernel/sched/infinity_sched.c
@@ -882,7 +882,7 @@ index 6e0c590dd..d5c3f655e 100644
 @@ -96,21 +83,22 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
  	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
  		return;
- 
+
 +	/* Prevent u64 overflow in the multiply for large nohz_full deltas */
 +	if (delta_ns > INFINITY_BUDGET_MAX_NS)
 +		delta_ns = INFINITY_BUDGET_MAX_NS;
@@ -1076,19 +1076,19 @@ index 6a02d46e8..8fa679a4a 100644
 +	 */
 +	if (task_has_idle_policy(p))
 +		return scale_load(WEIGHT_IDLEPRIO);
- 
+
  #ifdef CONFIG_UCLAMP_TASK
  	if (p->uclamp_req[UCLAMP_MIN].value > 0)
 -		return base;
 +		return scale_load(sched_prio_to_weight[p->static_prio - MAX_RT_PRIO]);
  #endif
- 
+
 +	int idx = p->static_prio - MAX_RT_PRIO;
 +	u32 base = scale_load(sched_prio_to_weight[idx]);
 +
  	if (ema > INFINITY_BUDGET_MAX_NS)
  		ema = INFINITY_BUDGET_MAX_NS;
- 
+
 @@ -112,42 +109,31 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
  		u64 pct = ema * 100ULL / INFINITY_BUDGET_MAX_NS;
  		u64 denom = 100ULL - pct * INFINITY_WEIGHT_SLOPE_NUM /
@@ -1132,7 +1132,7 @@ index 6a02d46e8..8fa679a4a 100644
  				   unsigned int rr_default);
 -
  #endif /* __INFINITY_SCHED_H */
--- 
+--
 2.55.0
 
 
@@ -1175,7 +1175,7 @@ index ffcf88e53..dfcb7ba0d 100644
 +		infinity_consume(&p__->infinity, delta_exec,
 +				 rq_of(cfs_rq)->cpu_capacity);
  	}
- 
+
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
 @@ -5621,6 +5622,17 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  		 */
@@ -1194,44 +1194,44 @@ index ffcf88e53..dfcb7ba0d 100644
 +
  	return se;
  }
- 
+
 @@ -7082,8 +7094,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  		flags = ENQUEUE_WAKEUP;
  	}
- 
+
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		p->infinity.futex_waiting = false;
 +		if (p->in_iowait)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 +	}
- 
+
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
 @@ -7163,8 +7178,11 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
  			h_nr_runnable = 1;
  	}
- 
+
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		p->infinity.futex_waiting = false;
 +		if (p->in_iowait)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 +	}
- 
+
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
 @@ -7205,8 +7223,11 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
  		flags &= ~(DEQUEUE_DELAYED | DEQUEUE_SPECIAL);
  	}
- 
+
 -	if (flags & ENQUEUE_WAKEUP)
 +	if (flags & ENQUEUE_WAKEUP) {
  		p->infinity.futex_waiting = false;
 +		if (p->in_iowait)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 +	}
- 
+
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
@@ -1264,14 +1264,14 @@ index d5c3f655e..0321bf44e 100644
 +	else
 +		alpha = 2048 + (u32)div64_u64(2048ULL * cpu_capacity,
 +					      SCHED_CAPACITY_SCALE);
- 
+
  	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
  		return;
- 
+
 -	/* Prevent u64 overflow in the multiply for large nohz_full deltas */
  	if (delta_ns > INFINITY_BUDGET_MAX_NS)
  		delta_ns = INFINITY_BUDGET_MAX_NS;
- 
+
  	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
 -			 INFINITY_EMA_ALPHA,
 +			 alpha,
@@ -1291,6 +1291,6 @@ index 8fa679a4a..8f96c7554 100644
  void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
  void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
--- 
+--
 2.55.0
 
