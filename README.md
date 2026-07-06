@@ -1,4 +1,4 @@
-# infinity-scheduler (v4.5)
+# infinity-scheduler (v4.6)
 
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
 
@@ -53,7 +53,7 @@ flowchart TB
         RT_D --> RT_S["infinity_rr_timeslice()\n \nrt_ema↑ → timeslice↓\n100ms → 10ms"]
         class RT_S rtN
 
-        RT_S --> RT_Q["Task stays in\noriginal priority queue\n(no priority demotion)"]
+        RT_S --> RT_Q["Task stays in\noriginal priority queue\n(safety valve demotes\nrogue FIFO at >95% rt_ema)"]
     end
 
     subgraph INFRA["Scheduler infrastructure"]
@@ -67,8 +67,8 @@ flowchart TB
 ## Quick start
 
 ```bash
-# 1. Clone the v4.5 branch
-git clone -b v4.5 https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the repo (v4.6 has latest features; v4.5 is stable baseline)
+git clone -b v4.6 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -84,7 +84,7 @@ reboot
 
 ```bash
 # Verify it's running
-uname -r                              # → 7.0.12-infinity
+uname -r                              # → 7.1-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 ```
@@ -100,7 +100,9 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divis
 └── LICENSE
 ```
 
-Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
+Each `0001-infinity-scheduler.patch` is a `git format-patch` cumulative series
+applicable via `git am` on the matching upstream kernel tag.  `patch -F 3` works
+but `git am` preserves commit metadata (author, date, sign-off).
 
 ## Tunables
 
@@ -115,8 +117,10 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
 separate fair-share window is needed.  The EMA climb time constant is
-approximately 0.5ms (ALPHA=3072), giving sub-millisecond reaction to
-CPU-bound threads.  No user tunable is needed beyond the SMT divisor.
+approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
+(alpha 4096 at max cpu_capacity) to 0.67ms (alpha 2048 at low capacity).
+This gives sub-millisecond reaction to CPU-bound threads on any hardware.
+No user tunable is needed beyond the SMT divisor.
 
 ## Feature comparison
 
