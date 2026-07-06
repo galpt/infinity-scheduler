@@ -137,7 +137,7 @@ No user tunable is needed beyond the SMT divisor.
 | Futex IPC wakeup boost | No | **Yes (vslice halved on futex wakeup)** |
 | Migration hysteresis | No | **Yes (EMA-driven cache pinning)** |
 | Cgroup defense shield | No | **Yes (aggregate group EMA)** |
-| RT cross-class safety | No | **Yes (task_work demotion)** |
+| RT cross-class safety | No | **Yes (native requeue throttling)** |
 | Asymmetric core placement | No | **Yes (EMA-guided P/E core bias)** |
 
 ## License
