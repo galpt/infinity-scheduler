@@ -76,19 +76,36 @@ late_initcall(infinity_sched_init);
 /* ------------------------------------------------------------------ */
 /* infinity_consume — EMA budget consumption                           */
 /* ------------------------------------------------------------------ */
-void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
+void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+		      unsigned long cpu_capacity)
 {
 	u64 step;
+	u32 alpha;
+
+	/*
+	 * Hardware-adaptive alpha: scale reactivity by the core's physical
+	 * capacity.  At max capacity (1024) the alpha reaches 4096 for
+	 * sub-millisecond thread storm detection; at reduced capacity
+	 * (power saving, thermal throttle) it backs down to 2048.
+	 *
+	 *   cap=1024 (max perf) → α = 4096  (τ_climb ≈ 0.38ms)
+	 *   cap= 512 (mid)      → α = 3072  (τ_climb ≈ 0.5ms,  current default)
+	 *   cap= 256 (low)      → α = 2560  (τ_climb ≈ 0.6ms)
+	 */
+	if (cpu_capacity >= SCHED_CAPACITY_SCALE)
+		alpha = 4096;
+	else
+		alpha = 2048 + (u32)div64_u64(2048ULL * cpu_capacity,
+					      SCHED_CAPACITY_SCALE);
 
 	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
 		return;
 
-	/* Prevent u64 overflow in the multiply for large nohz_full deltas */
 	if (delta_ns > INFINITY_BUDGET_MAX_NS)
 		delta_ns = INFINITY_BUDGET_MAX_NS;
 
 	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
-			 INFINITY_EMA_ALPHA,
+			 alpha,
 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
 	ctx->ema += step;
 }

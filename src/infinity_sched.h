@@ -129,7 +129,7 @@ extern unsigned long infinity_tune_smt_divisor;
 /* ------------------------------------------------------------------ */
 /* API — called from fair.c and rt.c                                   */
 /* ------------------------------------------------------------------ */
-void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
+void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
