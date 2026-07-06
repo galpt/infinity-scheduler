@@ -43,7 +43,7 @@ flowchart TB
         RUN --> GAUGE
     end
 
-    subgraph RT["RT tasks (SCHED_RR only)"]
+    subgraph RT["RT tasks (SCHED_RR / SCHED_FIFO)"]
         RT_T["SCHED_RR task runs"] --> RT_C["infinity_rt_consume()\n \nrt_ema climbs with runtime"]
         class RT_C rtN
 
@@ -105,7 +105,7 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 ## Tunables
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|---|
+|---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_cgroup_shield` | 1 (ro) | 0/1 | Enable automatic cgroup defense (reboot to change) |
 | `infinity_migration_protect` | 1 (ro) | 0/1 | Enable EMA-driven migration hysteresis (reboot to change) |
@@ -121,7 +121,7 @@ CPU-bound threads.  No user tunable is needed beyond the SMT divisor.
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
-|---|---|---|---|
+|---|---|---|
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | **EMA (Limitless)** |
 | SMT halving | No | Yes |
