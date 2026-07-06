@@ -1,7 +1,7 @@
-From 51deaff6289405d5d1cb9458a33f7feca9034029 Mon Sep 17 00:00:00 2001
+From fd71f341396802a9c5b914b50936d46df71aba18 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:12:35 +0700
-Subject: [PATCH 1/6] infinity-scheduler v4.5
+Subject: [PATCH 1/7] infinity-scheduler v4.5
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -811,10 +811,10 @@ index 4ee8faf01..a173005c8 100644
 2.55.0
 
 
-From 43d134987a04aabfd91dd3e3cfc79ac3308941e8 Mon Sep 17 00:00:00 2001
+From c16254ac1628eec6ecb5f0513d2780c0ad38d2ad Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:16:19 +0700
-Subject: [PATCH 2/6] v4.5: complete implementation
+Subject: [PATCH 2/7] v4.5: complete implementation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -885,10 +885,10 @@ index 59732b03b..7ff59274f 100644
 2.55.0
 
 
-From ee665c4f9ade89bd3dd7eabccdc3090946b9c721 Mon Sep 17 00:00:00 2001
+From 3295699381ca6bd3ae6c9b13e8f9b989595082b3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:17:50 +0700
-Subject: [PATCH 3/6] v4.5: complete Infinity scheduler
+Subject: [PATCH 3/7] v4.5: complete Infinity scheduler
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -1276,10 +1276,10 @@ index 29f2b38c0..6a02d46e8 100644
 2.55.0
 
 
-From 9b8b025ed582a0db46dc19c768990207d04b08ef Mon Sep 17 00:00:00 2001
+From 045f4fac7e2a21c97e8ec8134ef9fc7244de008c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:43:03 +0700
-Subject: [PATCH 4/6] v4.5: add place_entity futex check, remove dead
+Subject: [PATCH 4/7] v4.5: add place_entity futex check, remove dead
  pick_eevdf bypass
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1335,10 +1335,10 @@ index 7ff59274f..5aa627c5c 100644
 2.55.0
 
 
-From 70642487d6f4297753a3b4209f373db2c7cb000a Mon Sep 17 00:00:00 2001
+From 74dabaf4ba45819f81e85519cc7eef5d6b2c0f35 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:17 +0700
-Subject: [PATCH 5/6] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
+Subject: [PATCH 5/7] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
  init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1748,10 +1748,10 @@ index 6a02d46e8..8fa679a4a 100644
 2.55.0
 
 
-From a3513cb7b6857d054b0c16823e413a210604c806 Mon Sep 17 00:00:00 2001
+From 05e50fff5fd05afcb4ef080c33c2c351e5f236f2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 6/6] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 6/7] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1888,6 +1888,42 @@ index 8fa679a4a..8f96c7554 100644
  void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
  void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
+--
+2.55.0
+
+
+From 50f7f0ad95263b2ddeaab8ab2256ae054675bbf7 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 09:26:32 +0700
+Subject: [PATCH 7/7] fix futex freq boost: check futex_waiting, not in_iowait
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index fd808d454..2076fb537 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7376,13 +7376,12 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	}
+
+ 	if (flags & ENQUEUE_WAKEUP) {
++		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
++		if (p->infinity.futex_waiting)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
+ 		p->infinity.futex_waiting = false;
+
+-		/*
+-		 * Immediately request maximum frequency when a futex-woken
+-		 * task is enqueued, bypassing PELT ramp delay for IPC
+-		 * wakeups.
+-		 */
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 	}
 --
 2.55.0
 

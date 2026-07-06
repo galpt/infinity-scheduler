@@ -1,7 +1,7 @@
-From 4f249536dbc75b83adfb1f336ef3491a5cc5ae2c Mon Sep 17 00:00:00 2001
+From d1b78f328fa58d09123b66236f5b9a25080577a7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 1/4] v4.5: complete implementation
+Subject: [PATCH 1/5] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -723,10 +723,10 @@ index 7936d4333..a3f69d4d7 100644
 2.55.0
 
 
-From 72f808f94ba1c695010a67b3956ee9058d3924a1 Mon Sep 17 00:00:00 2001
+From 69fd8b89375f5a65aa4cc6846622709a7f3ef2a9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:47:17 +0700
-Subject: [PATCH 2/4] add place_entity futex check to 6.18
+Subject: [PATCH 2/5] add place_entity futex check to 6.18
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -757,10 +757,10 @@ index feda5474d..93fbf23c1 100644
 2.55.0
 
 
-From 7c44ae45faa5dd24fc65e36ef845cca8953e2737 Mon Sep 17 00:00:00 2001
+From 487e7fbb7cf26c83cc04bb0acb77298289469ea0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 3/4] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
+Subject: [PATCH 3/5] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow, fork
  init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1195,10 +1195,10 @@ index 6a02d46e8..8fa679a4a 100644
 2.55.0
 
 
-From ba42055ef69c7bd07f56665a9edcc1015d08a292 Mon Sep 17 00:00:00 2001
+From d5ecb90274a4b1eced314d8b01cda114c5ce3241 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 4/4] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 4/5] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1350,6 +1350,63 @@ index 8fa679a4a..8f96c7554 100644
  void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
  void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
  void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
+--
+2.55.0
+
+
+From 69dda635be6625f0fd421ee4038545ac6b971407 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 09:28:47 +0700
+Subject: [PATCH 5/5] fix futex freq boost: check futex_waiting, not in_iowait
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 8f761839e..ffa8ae45f 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7078,7 +7078,12 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	}
+
+ 	if (flags & ENQUEUE_WAKEUP) {
++		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
++		if (p->infinity.futex_waiting)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
+ 		p->infinity.futex_waiting = false;
++
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 	}
+@@ -7168,7 +7173,12 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+ 	}
+
+ 	if (flags & ENQUEUE_WAKEUP) {
++		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
++		if (p->infinity.futex_waiting)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
+ 		p->infinity.futex_waiting = false;
++
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 	}
+@@ -7213,7 +7223,12 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+ 	}
+
+ 	if (flags & ENQUEUE_WAKEUP) {
++		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
++		if (p->infinity.futex_waiting)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
+ 		p->infinity.futex_waiting = false;
++
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 	}
 --
 2.55.0
 
