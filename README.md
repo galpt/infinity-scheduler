@@ -11,7 +11,7 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nτ_climb ~0.5ms\nsub-ms reaction time"]
+        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nα = 2048–4096\n(scales with cpu_capacity)"]
         class GAUGE fair
 
         GAUGE --> WEIGHT["infinity_update_weight()\n \nreweight_entity()\nweight = base × (100 - pct×98/100) / 100\nat EMA=100%: base × 2%"]
@@ -57,7 +57,7 @@ flowchart TB
     end
 
     subgraph INFRA["Scheduler infrastructure"]
-        AC["EMA ALPHA = 3072\n \nτ_climb ≈ 0.5ms\nfull penalty in sub-ms"]
+        AC["α = 2048 + 2048 × cap/1024\n \nmax (1024) → α = 4096\nmid  (512)  → α = 3072\nlow  (256)  → α = 2560"]
         OF["sleep decay\n \n2nd-order Taylor expansion\n24ms shift half-life"]
         TU["tunables\n \nsmt_divisor\nrunning (ro)"]
     end
@@ -125,6 +125,7 @@ CPU-bound threads.  No user tunable is needed beyond the SMT divisor.
 | Wakeup deadline boost | N/A | **Asymptotic vslice** |
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
 | Adaptive RR timeslice | No | **Yes (rt_ema-based, 10–100ms)** |
+| Hardware-adaptive alpha | No | **Yes (2048–4096 via cpu_capacity)** |
 | Futex IPC wakeup boost | No | **Yes (vslice halved on futex wakeup)** |
 
 ## License
