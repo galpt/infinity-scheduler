@@ -22,37 +22,7 @@
 #include "sched.h"
 #include "infinity_sched.h"
 
-/* Called on return to userspace.  IRQs enabled, no scheduler locks held.
- * Safe to call sched_setattr_nocheck which takes task_rq_lock(). */
-void infinity_rt_demote_cb(struct callback_head *work)
-{
-	struct infinity_ctx *ctx = container_of(work, struct infinity_ctx, demote_work);
-	struct task_struct *p = container_of(ctx, struct task_struct, infinity);
 
-	clear_bit(INFINITY_RT_DEMOTE_PENDING, &ctx->flags);
-
-	struct sched_attr attr = {
-		.sched_policy = SCHED_NORMAL,
-		.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
-	};
-	if (sched_setattr_nocheck(p, &attr) == 0)
-		set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
-}
-
-void infinity_rt_restore_cb(struct callback_head *work)
-{
-	struct infinity_ctx *ctx = container_of(work, struct infinity_ctx, restore_work);
-	struct task_struct *p = container_of(ctx, struct task_struct, infinity);
-
-	clear_bit(INFINITY_RT_RESTORE_PENDING, &ctx->flags);
-
-	struct sched_attr attr = {
-		.sched_policy = ctx->saved_rt_policy,
-		.sched_priority = ctx->saved_rt_priority,
-	};
-	if (sched_setattr_nocheck(p, &attr) == 0)
-		clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
-}
 /* ------------------------------------------------------------------ */
 /* Sysctl tunables                                                     */
 /* ------------------------------------------------------------------ */
@@ -184,11 +154,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_ema = 0;
 	ctx->last_sleep_ns = now;
 	ctx->rt_last_sleep_ns = 0;
-	ctx->flags = 0;
-	ctx->saved_rt_priority = 0;
-	ctx->saved_rt_policy = 0;
-	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
-	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
+
 }
 /* ------------------------------------------------------------------ */
 /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *

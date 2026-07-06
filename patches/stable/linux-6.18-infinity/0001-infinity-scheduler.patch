@@ -1,7 +1,7 @@
 From d1b78f328fa58d09123b66236f5b9a25080577a7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 01/15] v4.5: complete implementation
+Subject: [PATCH 01/16] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -726,7 +726,7 @@ index 7936d4333..a3f69d4d7 100644
 From 69fd8b89375f5a65aa4cc6846622709a7f3ef2a9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:47:17 +0700
-Subject: [PATCH 02/15] add place_entity futex check to 6.18
+Subject: [PATCH 02/16] add place_entity futex check to 6.18
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -760,7 +760,7 @@ index feda5474d..93fbf23c1 100644
 From 487e7fbb7cf26c83cc04bb0acb77298289469ea0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 03/15] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 03/16] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1198,7 +1198,7 @@ index 6a02d46e8..8fa679a4a 100644
 From d5ecb90274a4b1eced314d8b01cda114c5ce3241 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 04/15] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 04/16] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1357,7 +1357,7 @@ index 8fa679a4a..8f96c7554 100644
 From 69dda635be6625f0fd421ee4038545ac6b971407 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
-Subject: [PATCH 05/15] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 05/16] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1415,7 +1415,7 @@ index 8f761839e..ffa8ae45f 100644
 From a2e9dcc7025b92b8d0b1e1f60bb3a5056968ebcc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
-Subject: [PATCH 06/15] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 06/16] v4.5: Infinity EMA-driven migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1452,7 +1452,7 @@ index ffa8ae45f..2680dd535 100644
 From 0a8fd01f66f9e486c353de5c510e5b5cde6e4a01 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:19 +0700
-Subject: [PATCH 07/15] v4.5: Infinity cgroup defense + migration hysteresis
+Subject: [PATCH 07/16] v4.5: Infinity cgroup defense + migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1583,7 +1583,7 @@ index adfb6e340..131790813 100644
 From 0e1f37b306d9de36635a32f0352f68369da4abf7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:36:22 +0700
-Subject: [PATCH 08/15] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 08/16] v4.5: Infinity cross-class RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1751,7 +1751,7 @@ index a3f69d4d7..c22df24f1 100644
 From 1271a067a6dca4142b4add19f19227eda62824f0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:41 +0700
-Subject: [PATCH 09/15] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 09/16] v4.5: Infinity EMA-driven asymmetric core placement
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1796,7 +1796,7 @@ index 6bca1665c..5dfcd5599 100644
 From 65ba20a53d72c838fd598d47613af0fadc9b6949 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:07:17 +0700
-Subject: [PATCH 10/15] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 10/16] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1961,7 +1961,7 @@ index c22df24f1..01de70f1f 100644
 From a86b7a401cff64de4a80534f318b83fe2dac82a6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:24:49 +0700
-Subject: [PATCH 11/15] v4.6: adversarial review fixes
+Subject: [PATCH 11/16] v4.6: adversarial review fixes
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2130,7 +2130,7 @@ index 01de70f1f..b9cabe5d1 100644
 From c91828bb3a34c12bd9aa21474b46774f5c72f263 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:37:32 +0700
-Subject: [PATCH 12/15] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
+Subject: [PATCH 12/16] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
  =?UTF-8?q?=E2=80=94=20this=5Fcpu=5Fptr=20=E2=86=92=20&per=5Fcpu(...,=20cp?=
  =?UTF-8?q?u=5Fof(rq))?=
 MIME-Version: 1.0
@@ -2176,7 +2176,7 @@ index b9cabe5d1..b46bca11a 100644
 From 3b3a7c0d046a953c01a6374d216f049b5aedea62 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:32:12 +0700
-Subject: [PATCH 13/15] v4.6: fix balance_callback deadlock + CPU 0 starvation
+Subject: [PATCH 13/16] v4.6: fix balance_callback deadlock + CPU 0 starvation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2248,7 +2248,7 @@ index 20a141b16..385df8d30 100644
 From ca54b2c7096660598290b95b36642d53bb8672c7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:37:58 +0700
-Subject: [PATCH 14/15] v4.6: replace balance_callback/llist with task_work for
+Subject: [PATCH 14/16] v4.6: replace balance_callback/llist with task_work for
  RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2443,7 +2443,7 @@ index b46bca11a..91d6c19bc 100644
 From ad3d973ebae3f6ce832fb4edb73f4e7b95ab383a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:49:44 +0700
-Subject: [PATCH 15/15] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+Subject: [PATCH 15/16] v4.6: zero infinity_ctx flags/saved_rt in fork_init
 
 A demoted RT task inherits stale flags and saved_rt fields via
 dup_task_struct's bit-for-bit copy.  Zero them so the child starts
@@ -2468,6 +2468,261 @@ index 582291f8b..8b41809fb 100644
  	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
  	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
  }
+-- 
+2.55.0
+
+
+From c895ad1202980edee6bcccf09e944e47b69649f7 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 7 Jul 2026 06:13:35 +0700
+Subject: [PATCH 16/16] =?UTF-8?q?v4.6:=20native=20implementation=20?=
+ =?UTF-8?q?=E2=80=94=20requeue=5Ftask=5Frt=20FIFO=20throttle=20+=20update?=
+ =?UTF-8?q?=5Fcfs=5Fgroup=20cgroup=20modulation?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ include/linux/sched.h         |  6 +-----
+ init/init_task.c              |  3 ---
+ kernel/sched/fair.c           | 38 +++++++++++++----------------------
+ kernel/sched/infinity_sched.c | 32 -----------------------------
+ kernel/sched/infinity_sched.h | 25 +++++------------------
+ kernel/sched/rt.c             | 21 ++++++++++---------
+ 6 files changed, 31 insertions(+), 94 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index ba10dfead..40f3c1426 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -824,11 +824,7 @@ struct infinity_ctx {
+ 	u64		last_sleep_ns;
+ 	u64		rt_last_sleep_ns;
+ 	bool		futex_waiting;
+-	unsigned long		flags;
+-	u32		saved_rt_priority;
+-	u32		saved_rt_policy;
+-	struct callback_head	demote_work;
+-	struct callback_head	restore_work;
++
+ };
+ 
+ 
+diff --git a/init/init_task.c b/init/init_task.c
+index e9bd2f9ee..8f6e46713 100644
+--- a/init/init_task.c
++++ b/init/init_task.c
+@@ -127,9 +127,6 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+ 				.rt_ema		= 0,
+ 				.last_sleep_ns	= 0,
+ 				.rt_last_sleep_ns = 0,
+-				.flags		= 0,
+-				.saved_rt_priority = 0,
+-				.saved_rt_policy = 0,
+ 
+ 	},
+ 	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 79cef3904..bf4cd1917 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1096,21 +1096,6 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ #endif
+ 
+ 			infinity_update_weight(cfs_rq, se, p__);
+-		} else {
+-#ifdef CONFIG_FAIR_GROUP_SCHED
+-			struct cfs_rq *gcfs_rq = group_cfs_rq(se);
+-			if (gcfs_rq && gcfs_rq->group_ema > 0) {
+-				u64 ema_pct = div64_u64(gcfs_rq->group_ema * 100ULL,
+-							INFINITY_CGROUP_EMA_CLIMB_NS);
+-				if (ema_pct > 50) {
+-					unsigned long new_w = se->load.weight;
+-					new_w = new_w * (100 - INFINITY_CGROUP_WEIGHT_REDUCE_PCT) / 100;
+-					new_w = max(new_w, (unsigned long)MIN_SHARES);
+-					if (new_w != se->load.weight)
+-						reweight_entity(cfs_rq, se, new_w);
+-				}
+-			}
+-#endif
+ 		}
+ 	}
+ 
+@@ -4042,6 +4027,20 @@ static void update_cfs_group(struct sched_entity *se)
+ 
+ 	shares = calc_group_shares(gcfs_rq);
+ 
++	/* Infinity: reduce group shares when aggregate EMA is elevated.
++	 * This feeds directly into the PELT-aware reweight_entity(), so the
++	 * load balancer sees the reduced weight consistently — unlike the old
++	 * update_deadline() approach which created a tug-of-war with
++	 * update_cfs_group() on every tick. */
++	if (gcfs_rq->group_ema > 0) {
++		u64 ema_pct = div64_u64(gcfs_rq->group_ema * 100ULL,
++					INFINITY_CGROUP_EMA_CLIMB_NS);
++		if (ema_pct > 50) {
++			long reduced = shares * (100 - INFINITY_CGROUP_WEIGHT_REDUCE_PCT) / 100;
++			shares = max(reduced, (long)MIN_SHARES);
++		}
++	}
++
+ 	if (unlikely(se->load.weight != shares))
+ 		reweight_entity(cfs_rq_of(se), se, shares);
+ }
+@@ -7127,15 +7126,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 
+ 		p->infinity.futex_waiting = false;
+ 
+-		/* Infinity: restore RT scheduling if the task was demoted
+-		 * and its rt_ema has decayed below the restoration watermark. */
+-		if (test_bit(INFINITY_RT_DEMOTED, &p->infinity.flags) &&
+-		    p->infinity.rt_ema < INFINITY_RT_RESTORE_WATERMARK &&
+-		    !test_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags)) {
+-			set_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags);
+-		task_work_add(p, &p->infinity.restore_work, TWA_RESUME);
+-		}
+-
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 	}
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 8b41809fb..ad43fe57e 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -22,33 +22,6 @@
+ #include "sched.h"
+ #include "infinity_sched.h"
+ 
+-void infinity_rt_demote_cb(struct callback_head *work)
+-{
+-	struct infinity_ctx *ctx = container_of(work, struct infinity_ctx, demote_work);
+-	struct task_struct *p = container_of(ctx, struct task_struct, infinity);
+-
+-	clear_bit(INFINITY_RT_DEMOTE_PENDING, &ctx->flags);
+-	struct sched_attr attr = {
+-		.sched_policy = SCHED_NORMAL,
+-		.sched_nice = INFINITY_RT_DEMOTE_PRIORITY,
+-	};
+-	if (sched_setattr_nocheck(p, &attr) == 0)
+-		set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
+-}
+-
+-void infinity_rt_restore_cb(struct callback_head *work)
+-{
+-	struct infinity_ctx *ctx = container_of(work, struct infinity_ctx, restore_work);
+-	struct task_struct *p = container_of(ctx, struct task_struct, infinity);
+-
+-	clear_bit(INFINITY_RT_RESTORE_PENDING, &ctx->flags);
+-	struct sched_attr attr = {
+-		.sched_policy = ctx->saved_rt_policy,
+-		.sched_priority = ctx->saved_rt_priority,
+-	};
+-	if (sched_setattr_nocheck(p, &attr) == 0)
+-		clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
+-}
+ /* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
+ /* ------------------------------------------------------------------ */
+@@ -180,11 +153,6 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->rt_ema = 0;
+ 	ctx->last_sleep_ns = now;
+ 	ctx->rt_last_sleep_ns = 0;
+-	ctx->flags = 0;
+-	ctx->saved_rt_priority = 0;
+-	ctx->saved_rt_policy = 0;
+-	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
+-	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
+ }
+ /* ------------------------------------------------------------------ */
+ /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 60b34cd53..3eef63c4a 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -39,7 +39,6 @@
+ #ifndef __INFINITY_SCHED_H
+ #define __INFINITY_SCHED_H
+ #include <linux/sched.h>
+-#include <linux/task_work.h>
+ /* ------------------------------------------------------------------ */
+ /* Constants                                                           */
+ /* ------------------------------------------------------------------ */
+@@ -135,25 +134,6 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+ /** RT alpha. */
+ #define INFINITY_RT_ALPHA		4
+ /* ------------------------------------------------------------------ */
+-/* RT safety valve constants                                           */
+-/* ------------------------------------------------------------------ */
+-/** rt_ema threshold for demotion (>95% of 10ms ceiling). */
+-#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
+-/** rt_ema watermark for restoration (<50% of ceiling). */
+-#define INFINITY_RT_RESTORE_WATERMARK   5000ULL
+-/** Nice value when demoted to SCHED_NORMAL. */
+-#define INFINITY_RT_DEMOTE_PRIORITY     0
+-/** Infinity RT context flags */
+-#define INFINITY_RT_DEMOTED             0
+-#define INFINITY_RT_DEMOTE_PENDING      1
+-#define INFINITY_RT_RESTORE_PENDING     2
+-
+-/* ------------------------------------------------------------------ */
+-/* RT safety valve — task_work callbacks                                */
+-/* ------------------------------------------------------------------ */
+-void infinity_rt_demote_cb(struct callback_head *work);
+-void infinity_rt_restore_cb(struct callback_head *work);
+-/* ------------------------------------------------------------------ */
+ /* External sysctl tunables                                            */
+ /* ------------------------------------------------------------------ */
+ extern unsigned long infinity_tune_smt_divisor;
+@@ -167,4 +147,9 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
+ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
+ unsigned int infinity_rr_timeslice(struct task_struct *p,
+ 				   unsigned int rr_default);
++/* ------------------------------------------------------------------ */
++/* RT safety valve constants                                           */
++/* ------------------------------------------------------------------ */
++/** rt_ema threshold: force rogue FIFO to yield. */
++#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
+ #endif /* __INFINITY_SCHED_H */
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 91d6c19bc..c3ad990ff 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -987,16 +987,6 @@ static void update_curr_rt(struct rq *rq)
+ 	/* Infinity: RT EMA climbs with runtime for adaptive RR timeslice */
+ 	infinity_rt_consume(&donor->infinity, delta_exec);
+ 
+-	/* Infinity: RT safety valve — defer demotion via balance_callback */
+-	if (!(donor->flags & PF_KTHREAD) &&
+-	    donor->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD &&
+-	    !test_bit(INFINITY_RT_DEMOTED, &donor->infinity.flags) &&
+-	    !test_bit(INFINITY_RT_DEMOTE_PENDING, &donor->infinity.flags)) {
+-		set_bit(INFINITY_RT_DEMOTE_PENDING, &donor->infinity.flags);
+-		donor->infinity.saved_rt_policy = donor->policy;
+-		donor->infinity.saved_rt_priority = donor->rt_priority;
+-		task_work_add(donor, &donor->infinity.demote_work, TWA_RESUME);
+-	}
+ 
+ #ifdef CONFIG_RT_GROUP_SCHED
+ 	struct sched_rt_entity *rt_se = &donor->rt;
+@@ -2540,6 +2530,17 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 
+ 	watchdog(rq, p);
+ 
++	/* Infinity: force a rogue SCHED_FIFO (>95% rt_ema) to yield natively
++	 * within the RT class — no cross-class demotion needed.  Kernel
++	 * threads (migration, watchdog, IRQ handlers) are exempt. */
++	if (p->policy != SCHED_RR &&
++	    !(p->flags & PF_KTHREAD) &&
++	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
++		requeue_task_rt(rq, p, 0);
++		resched_curr(rq);
++		return;
++	}
++
+ 	/*
+ 	 * RR tasks need a special form of time-slice management.
+ 	 * FIFO tasks have no timeslices.
 -- 
 2.55.0
 

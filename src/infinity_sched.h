@@ -39,7 +39,6 @@
 #ifndef __INFINITY_SCHED_H
 #define __INFINITY_SCHED_H
 #include <linux/sched.h>
-#include <linux/task_work.h>
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
 /* ------------------------------------------------------------------ */
@@ -139,14 +138,7 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /* ------------------------------------------------------------------ */
 /** rt_ema threshold for demotion (>95% of 10ms ceiling). */
 #define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
-/** rt_ema watermark for restoration (<50% of ceiling). */
-#define INFINITY_RT_RESTORE_WATERMARK   5000ULL
-/** Nice value when demoted to SCHED_NORMAL. */
-#define INFINITY_RT_DEMOTE_PRIORITY     0
-/** Infinity RT context flags (bit numbers for atomic bitops) */
-#define INFINITY_RT_DEMOTED             0
-#define INFINITY_RT_DEMOTE_PENDING      1
-#define INFINITY_RT_RESTORE_PENDING     2
+
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
 /* ------------------------------------------------------------------ */
@@ -162,9 +154,8 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 unsigned int infinity_rr_timeslice(struct task_struct *p,
 				   unsigned int rr_default);
 /* ------------------------------------------------------------------ */
-/* RT safety valve — task_work callbacks                                */
-/* (Called from rt.c, fair.c — implementations in infinity_sched.c)    */
+/* RT safety valve constants                                           */
 /* ------------------------------------------------------------------ */
-void infinity_rt_demote_cb(struct callback_head *work);
-void infinity_rt_restore_cb(struct callback_head *work);
+/** rt_ema threshold: force rogue FIFO to yield. */
+#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
 #endif /* __INFINITY_SCHED_H */
