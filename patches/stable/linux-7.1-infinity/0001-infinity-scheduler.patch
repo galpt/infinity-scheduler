@@ -1,7 +1,7 @@
 From fd71f341396802a9c5b914b50936d46df71aba18 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:12:35 +0700
-Subject: [PATCH 01/13] infinity-scheduler v4.5
+Subject: [PATCH 01/14] infinity-scheduler v4.5
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -814,7 +814,7 @@ index 4ee8faf01..a173005c8 100644
 From c16254ac1628eec6ecb5f0513d2780c0ad38d2ad Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:16:19 +0700
-Subject: [PATCH 02/13] v4.5: complete implementation
+Subject: [PATCH 02/14] v4.5: complete implementation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -888,7 +888,7 @@ index 59732b03b..7ff59274f 100644
 From 3295699381ca6bd3ae6c9b13e8f9b989595082b3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:17:50 +0700
-Subject: [PATCH 03/13] v4.5: complete Infinity scheduler
+Subject: [PATCH 03/14] v4.5: complete Infinity scheduler
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -1279,7 +1279,7 @@ index 29f2b38c0..6a02d46e8 100644
 From 045f4fac7e2a21c97e8ec8134ef9fc7244de008c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:43:03 +0700
-Subject: [PATCH 04/13] v4.5: add place_entity futex check, remove dead
+Subject: [PATCH 04/14] v4.5: add place_entity futex check, remove dead
  pick_eevdf bypass
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1338,7 +1338,7 @@ index 7ff59274f..5aa627c5c 100644
 From 74dabaf4ba45819f81e85519cc7eef5d6b2c0f35 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:17 +0700
-Subject: [PATCH 05/13] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 05/14] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1751,7 +1751,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 05e50fff5fd05afcb4ef080c33c2c351e5f236f2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 06/13] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 06/14] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1895,7 +1895,7 @@ index 8fa679a4a..8f96c7554 100644
 From 50f7f0ad95263b2ddeaab8ab2256ae054675bbf7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:26:32 +0700
-Subject: [PATCH 07/13] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 07/14] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1932,7 +1932,7 @@ index fd808d454..2076fb537 100644
 From 92244a42175f0c5596d0008b1f2c7767f7e022b6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:28 +0700
-Subject: [PATCH 08/13] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 08/14] v4.5: Infinity EMA-driven migration hysteresis
 
 Protect interactive (EMA=0) tasks from being migrated by the load
 balancer's idle balance and newly_idle balance.  The check in
@@ -1982,7 +1982,7 @@ index 2076fb537..4d178960b 100644
 From eab3c15d490b376d1f8ab8d037bd87d7ee5b012b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:27:00 +0700
-Subject: [PATCH 09/13] v4.5: Infinity dynamic cgroup defense shields
+Subject: [PATCH 09/14] v4.5: Infinity dynamic cgroup defense shields
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -2142,7 +2142,7 @@ index 9f63b15d3..22f34f7fd 100644
 From 83fdfce5ce34b23f93b689b0f595d1153fdc33b0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:31:01 +0700
-Subject: [PATCH 10/13] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 10/14] v4.5: Infinity cross-class RT safety valve
 
 Implement deferred RT demotion for rogue SCHED_FIFO/SCHED_RR tasks.
 When rt_ema exceeds 95% (>9.5ms continuous runtime), the task is
@@ -2340,7 +2340,7 @@ index a173005c8..3cb6aa116 100644
 From d0e3a46584d274ba859e3724facc386c0d1449cf Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:35:42 +0700
-Subject: [PATCH 11/13] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 11/14] v4.5: Infinity EMA-driven asymmetric core placement
 
 On hybrid topologies (sd_asym_cpucapacity), bias interactive tasks
 (EMA == 0) toward the highest-capacity core during wakeup in
@@ -2401,7 +2401,7 @@ index 68cc59afd..3139f4776 100644
 From 4ad6a16e776673b71637de425c551c0ad50c1347 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:05:47 +0700
-Subject: [PATCH 12/13] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 12/14] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Replace the broken rq->curr approach in balance_callback workers with
@@ -2615,7 +2615,7 @@ index 3cb6aa116..6d952a5fa 100644
 From 4b70622010f6b52a8c7527ec62c3bc0c8b92462c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:22:08 +0700
-Subject: [PATCH 13/13] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
+Subject: [PATCH 13/14] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
  =?UTF-8?q?=E2=80=94=20fork=20llist=20init,=20PF=5FKTHREAD=20guard,=20EEVD?=
  =?UTF-8?q?F=20cgroup=20modulation,=20atomic=20flags?=
 MIME-Version: 1.0
@@ -2825,6 +2825,72 @@ index 6d952a5fa..33bb4eaab 100644
  		donor->infinity.saved_rt_policy = donor->policy;
  		donor->infinity.saved_rt_priority = donor->rt_priority;
  		/* llist_add returns true if the list was previously empty.
+-- 
+2.55.0
+
+
+From 86d80310572cdcead3583b85dcd5f31226e7f721 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 22:36:39 +0700
+Subject: [PATCH 14/14] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
+ =?UTF-8?q?=E2=80=94=20this=5Fcpu=5Fptr=20=E2=86=92=20&per=5Fcpu(...,=20cp?=
+ =?UTF-8?q?u=5Fof(rq))?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The restoration trigger in enqueue_task_fair used this_cpu_ptr() to
+select the llist head, but queue_balance_callback used cpu_of(rq).
+During a cross-CPU wakeup (e.g., try_to_wake_up on CPU A waking a task
+destined for CPU B), these point to different CPUs.  The llist node
+was added to CPU A's list but the worker only drained CPU B's list.
+
+Kill chain (confirmed by review-007):
+1. Plymouth (initramfs) runs SCHED_FIFO, exceeds 9.5ms rt_ema
+2. Safety valve demotes it to SCHED_NORMAL
+3. Plymouth sleeps/wakes across CPUs; restoration node stranded
+4. Plymouth exits → task_struct freed while node still on wrong CPU's list
+5. Later RT task triggers balance_callback → iterates freed node → UAF panic
+
+Also fix rt.c (demotion) for consistency, though it was technically
+safe there since update_curr_rt always runs on the current CPU.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 5 ++++-
+ kernel/sched/rt.c   | 2 +-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ae82906ba..fa46dee33 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7445,8 +7445,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		    p->infinity.rt_ema < INFINITY_RT_RESTORE_WATERMARK &&
+ 		    !test_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags)) {
+ 			set_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags);
++			/* llist_add target must match cpu_of(rq) — during a
++			 * cross-CPU wakeup the current CPU (this_cpu_ptr)
++			 * may differ from the target runqueue's CPU. */
+ 			if (llist_add(&p->infinity.restore_node,
+-				      this_cpu_ptr(&infinity_rt_restore_list))) {
++				      &per_cpu(infinity_rt_restore_list, cpu_of(rq)))) {
+ 				queue_balance_callback(rq,
+ 					&per_cpu(infinity_rt_restore_cb, cpu_of(rq)),
+ 					infinity_rt_restore_worker);
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 33bb4eaab..cf29548b2 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -1003,7 +1003,7 @@ static void update_curr_rt(struct rq *rq)
+ 		 * Queue the balance_callback only on the first addition to
+ 		 * avoid redundant callbacks — the worker drains the entire list. */
+ 		if (llist_add(&donor->infinity.demote_node,
+-			      this_cpu_ptr(&infinity_rt_demote_list))) {
++			      &per_cpu(infinity_rt_demote_list, cpu_of(rq)))) {
+ 			queue_balance_callback(rq,
+ 				&per_cpu(infinity_rt_demote_cb, cpu_of(rq)),
+ 				infinity_rt_demote_worker);
 -- 
 2.55.0
 

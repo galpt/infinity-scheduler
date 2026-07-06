@@ -1,7 +1,7 @@
 From d1b78f328fa58d09123b66236f5b9a25080577a7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 01/11] v4.5: complete implementation
+Subject: [PATCH 01/12] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -726,7 +726,7 @@ index 7936d4333..a3f69d4d7 100644
 From 69fd8b89375f5a65aa4cc6846622709a7f3ef2a9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:47:17 +0700
-Subject: [PATCH 02/11] add place_entity futex check to 6.18
+Subject: [PATCH 02/12] add place_entity futex check to 6.18
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -760,7 +760,7 @@ index feda5474d..93fbf23c1 100644
 From 487e7fbb7cf26c83cc04bb0acb77298289469ea0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 03/11] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 03/12] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1198,7 +1198,7 @@ index 6a02d46e8..8fa679a4a 100644
 From d5ecb90274a4b1eced314d8b01cda114c5ce3241 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 04/11] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 04/12] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1357,7 +1357,7 @@ index 8fa679a4a..8f96c7554 100644
 From 69dda635be6625f0fd421ee4038545ac6b971407 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
-Subject: [PATCH 05/11] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 05/12] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1415,7 +1415,7 @@ index 8f761839e..ffa8ae45f 100644
 From a2e9dcc7025b92b8d0b1e1f60bb3a5056968ebcc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
-Subject: [PATCH 06/11] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 06/12] v4.5: Infinity EMA-driven migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1452,7 +1452,7 @@ index ffa8ae45f..2680dd535 100644
 From 0a8fd01f66f9e486c353de5c510e5b5cde6e4a01 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:19 +0700
-Subject: [PATCH 07/11] v4.5: Infinity cgroup defense + migration hysteresis
+Subject: [PATCH 07/12] v4.5: Infinity cgroup defense + migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1583,7 +1583,7 @@ index adfb6e340..131790813 100644
 From 0e1f37b306d9de36635a32f0352f68369da4abf7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:36:22 +0700
-Subject: [PATCH 08/11] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 08/12] v4.5: Infinity cross-class RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1751,7 +1751,7 @@ index a3f69d4d7..c22df24f1 100644
 From 1271a067a6dca4142b4add19f19227eda62824f0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:41 +0700
-Subject: [PATCH 09/11] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 09/12] v4.5: Infinity EMA-driven asymmetric core placement
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1796,7 +1796,7 @@ index 6bca1665c..5dfcd5599 100644
 From 65ba20a53d72c838fd598d47613af0fadc9b6949 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:07:17 +0700
-Subject: [PATCH 10/11] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 10/12] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1961,7 +1961,7 @@ index c22df24f1..01de70f1f 100644
 From a86b7a401cff64de4a80534f318b83fe2dac82a6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:24:49 +0700
-Subject: [PATCH 11/11] v4.6: adversarial review fixes
+Subject: [PATCH 11/12] v4.6: adversarial review fixes
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2123,6 +2123,52 @@ index 01de70f1f..b9cabe5d1 100644
  		donor->infinity.saved_rt_policy = donor->policy;
  		donor->infinity.saved_rt_priority = donor->rt_priority;
  		if (llist_add(&donor->infinity.demote_node,
+-- 
+2.55.0
+
+
+From c91828bb3a34c12bd9aa21474b46774f5c72f263 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 22:37:32 +0700
+Subject: [PATCH 12/12] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
+ =?UTF-8?q?=E2=80=94=20this=5Fcpu=5Fptr=20=E2=86=92=20&per=5Fcpu(...,=20cp?=
+ =?UTF-8?q?u=5Fof(rq))?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 2 +-
+ kernel/sched/rt.c   | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 19d61fdd9..4d65cb9c1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7134,7 +7134,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		    !test_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags)) {
+ 			set_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags);
+ 			if (llist_add(&p->infinity.restore_node,
+-				      this_cpu_ptr(&infinity_rt_restore_list))) {
++				      &per_cpu(infinity_rt_restore_list, cpu_of(rq)))) {
+ 				queue_balance_callback(rq,
+ 					&per_cpu(infinity_rt_restore_cb, cpu_of(rq)),
+ 					infinity_rt_restore_worker);
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index b9cabe5d1..b46bca11a 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -996,7 +996,7 @@ static void update_curr_rt(struct rq *rq)
+ 		donor->infinity.saved_rt_policy = donor->policy;
+ 		donor->infinity.saved_rt_priority = donor->rt_priority;
+ 		if (llist_add(&donor->infinity.demote_node,
+-			      this_cpu_ptr(&infinity_rt_demote_list))) {
++			      &per_cpu(infinity_rt_demote_list, cpu_of(rq)))) {
+ 			queue_balance_callback(rq,
+ 				&per_cpu(infinity_rt_demote_cb, cpu_of(rq)),
+ 				infinity_rt_demote_worker);
 -- 
 2.55.0
 
