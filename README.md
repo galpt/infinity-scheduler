@@ -107,10 +107,10 @@ Patches for version X.Y apply to all X.Y.Z point releases with `patch -F 3`.
 | Parameter | Default | Range | Description |
 |---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
-| `infinity_cgroup_shield` | 1 (ro) | 0/1 | Enable automatic cgroup defense (reboot to change) |
-| `infinity_migration_protect` | 1 (ro) | 0/1 | Enable EMA-driven migration hysteresis (reboot to change) |
-| `infinity_rt_safety` | 1 (ro) | 0/1 | Enable cross-class RT safety valve (reboot to change) |
-| `infinity_asym_placement` | 1 (ro) | 0/1 | Enable EMA-driven P/E core placement (reboot to change) |
+| `infinity_cgroup_shield` | 1 (ro) | — | Automatic cgroup defense shield |
+| `infinity_migration_protect` | 1 (ro) | — | EMA-driven migration hysteresis |
+| `infinity_rt_safety` | 1 (ro) | — | Cross-class RT safety valve |
+| `infinity_asym_placement` | 1 (ro) | — | EMA-driven P/E core placement |
 | `infinity_running` | 1 (ro) | — | Active flag |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
