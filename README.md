@@ -118,12 +118,6 @@ approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
 This gives sub-millisecond reaction to CPU-bound threads on any hardware.
 No user tunable is needed beyond the SMT divisor.
 
-Additional features are always active and require no configuration:
-- **Migration hysteresis** — EMA-driven cache pinning for interactive tasks
-- **Cgroup defense shield** — aggregate group EMA graduates noisy cgroups
-- **RT safety valve** — native `requeue_task_rt` throttling for rogue FIFO
-- **Asymmetric core placement** — EMA-guided P/E core bias on hybrid CPUs
-
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
