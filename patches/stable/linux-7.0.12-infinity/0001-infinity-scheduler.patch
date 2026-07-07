@@ -1,7 +1,7 @@
 From 0bc0943d08a49da10952159130fad30a0149a67f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 01/20] v4.5: complete implementation
+Subject: [PATCH 01/21] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -718,7 +718,7 @@ index 0cbee0318..29307b073 100644
 From 500b4bbfa81f23cb49a5b2edacf50a870a8ab791 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 02/20] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 02/21] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1139,7 +1139,7 @@ index 6a02d46e8..8fa679a4a 100644
 From cd549efcae65bfa4570ad5be4d73b87bc3fcfa13 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 03/20] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 03/21] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 
 - infinity_consume now takes cpu_capacity and computes a dynamic alpha
@@ -1295,7 +1295,7 @@ index 8fa679a4a..8f96c7554 100644
 From 06941712c5b45f511d2f3d75e95e15e762103540 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
-Subject: [PATCH 04/20] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 04/21] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1353,7 +1353,7 @@ index dfcb7ba0d..832396689 100644
 From beaf9191847adaade365781da38c68cba3bc87da Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
-Subject: [PATCH 05/20] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 05/21] v4.5: Infinity EMA-driven migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1390,7 +1390,7 @@ index 832396689..1973f2793 100644
 From 0b99342d10dde64d8098c1d76ad6900ebdc6e53a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:13 +0700
-Subject: [PATCH 06/20] v4.5: Infinity cgroup defense + migration hysteresis
+Subject: [PATCH 06/21] v4.5: Infinity cgroup defense + migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1521,7 +1521,7 @@ index 0d068b2f3..7d1933dd8 100644
 From b2c07d7193b29fdcf20b09b4f3e403398b22661e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:34:10 +0700
-Subject: [PATCH 07/20] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 07/21] v4.5: Infinity cross-class RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1703,7 +1703,7 @@ index 29307b073..51d64ea7c 100644
 From d5008e74552c9b277cf248fe67c7fac5f68c986a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:46 +0700
-Subject: [PATCH 08/20] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 08/21] v4.5: Infinity EMA-driven asymmetric core placement
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1746,7 +1746,7 @@ index 2cdeb72f0..64db56230 100644
 From 2c8d2f615542813712eb5b2b7cf9bcf2eedec767 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:07:17 +0700
-Subject: [PATCH 09/20] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 09/21] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1947,7 +1947,7 @@ index 51d64ea7c..58fbea589 100644
 From a7eda0d31885aa9c4c7401ccef49acccdc44e69a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:23:34 +0700
-Subject: [PATCH 10/20] v4.6: adversarial review fixes -- fork llist init,
+Subject: [PATCH 10/21] v4.6: adversarial review fixes -- fork llist init,
  PF_KTHREAD guard, EEVDF cgroup modulation, atomic flags
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2132,7 +2132,7 @@ index 58fbea589..133d49a3a 100644
 From e104c7c98c573b5fca5f9a839295847b4f1d90db Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:37:28 +0700
-Subject: [PATCH 11/20] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
+Subject: [PATCH 11/21] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
  &per_cpu(..., cpu_of(rq))
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2174,7 +2174,7 @@ index 133d49a3a..14290663f 100644
 From 9b6695c5a2ac61a328ef2239e777bca4fb03bac4 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:32:32 +0700
-Subject: [PATCH 12/20] v4.6: fix balance_callback deadlock + CPU 0 starvation
+Subject: [PATCH 12/21] v4.6: fix balance_callback deadlock + CPU 0 starvation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2255,7 +2255,7 @@ index 4b6dd7dd0..9ad7d68ea 100644
 From e27526c99dd172e40c983777741da4cdcf0e138e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:36:41 +0700
-Subject: [PATCH 13/20] v4.6: replace balance_callback/llist with task_work for
+Subject: [PATCH 13/21] v4.6: replace balance_callback/llist with task_work for
  RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2484,7 +2484,7 @@ index 14290663f..613f74413 100644
 From 29631fd36bae88608cd31102857dfcc3a302792c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:49:44 +0700
-Subject: [PATCH 14/20] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+Subject: [PATCH 14/21] v4.6: zero infinity_ctx flags/saved_rt in fork_init
 
 A demoted RT task inherits stale flags and saved_rt fields via
 dup_task_struct's bit-for-bit copy.  Zero them so the child starts
@@ -2516,7 +2516,7 @@ index 207b0518d..17844b111 100644
 From e2062843ba3865aa9a59fec1d8651ba31dbc6bcd Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:06 +0700
-Subject: [PATCH 15/20] v4.6: native implementation -- requeue_task_rt FIFO
+Subject: [PATCH 15/21] v4.6: native implementation -- requeue_task_rt FIFO
  throttle + update_cfs_group cgroup modulation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2785,7 +2785,7 @@ index 613f74413..f01d005a5 100644
 From 24d4106eaa77ae2f4d366538c05ee8efbbaecca1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:06 +0700
-Subject: [PATCH 16/20] v4.6: update comments -- v4.5->v4.6, sched_fork not
+Subject: [PATCH 16/21] v4.6: update comments -- v4.5->v4.6, sched_fork not
  task_fork_fair, deduplicate RT threshold
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2855,7 +2855,7 @@ index 908537b5f..eafd09f05 100644
 From 10a379c34be5e2ad1f5b34c8c68e8e2ffc62ab53 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:19:02 +0700
-Subject: [PATCH 17/20] v4.6-gpu: Infinity GPU scheduler extension
+Subject: [PATCH 17/21] v4.6-gpu: Infinity GPU scheduler extension
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -3240,7 +3240,7 @@ index 78e07c250..fcd2d9f06 100644
 From 08beef9cda4af6480b6f763fa46e588fb9864502 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:29:13 +0700
-Subject: [PATCH 18/20] v4.6-gpu: update heading comments to v4.6-gpu
+Subject: [PATCH 18/21] v4.6-gpu: update heading comments to v4.6-gpu
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -3281,7 +3281,7 @@ index eafd09f05..ab9c4d50d 100644
 From 4b08ec963664fb92e6897dced8f0699b878a799f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:32:12 +0700
-Subject: [PATCH 19/20] v4.6-gpu: make INFINITY the default GPU scheduling
+Subject: [PATCH 19/21] v4.6-gpu: make INFINITY the default GPU scheduling
  policy
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -3309,7 +3309,7 @@ index 157a6dd70..f67461b9a 100644
 From 26553e24df1527c0f650155a759c004ed6d6cf28 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:40:45 +0700
-Subject: [PATCH 20/20] v4.6-gpu: add missing EMA idle decay to prevent sticky
+Subject: [PATCH 20/21] v4.6-gpu: add missing EMA idle decay to prevent sticky
  throttle
 
 The gpu_time_ema only climbed on job completion but never decayed
@@ -3354,6 +3354,91 @@ index f67461b9a..b12d70cbf 100644
  		entity->cached_gpu_vtime = drm_sched_entity_calc_vtime(entity);
  		entity->normalized_base = entity->gpu_time_total;
  		rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
+-- 
+2.55.0
+
+
+From fc98eaf1a9d5b64a7e9ad8d2097a89dd199a8935 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 8 Jul 2026 00:39:25 +0700
+Subject: [PATCH 21/21] v4.6-gpu: fix ERR_PTR dereference and num_rqs
+ out-of-bounds boot panics
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c | 20 ++++++++++++++------
+ drivers/gpu/drm/scheduler/sched_main.c   | 12 ++++++------
+ 2 files changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index e542beb20..a6211fc7b 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -98,9 +98,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 						 (s32) DRM_SCHED_PRIORITY_KERNEL);
+ 		}
+ 		if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
+-		    entity->priority != DRM_SCHED_PRIORITY_KERNEL)
+-			entity->rq = sched_list[0]->sched_rq[DRM_SCHED_PRIORITY_HIGH];
+-		else
++		    entity->priority != DRM_SCHED_PRIORITY_KERNEL) {
++			u32 target_prio = sched_list[0]->num_rqs > 1 ?
++				sched_list[0]->num_rqs - 1 : 0;
++			if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++				target_prio--;
++			entity->rq = sched_list[0]->sched_rq[target_prio];
++		} else
+ 			entity->rq = sched_list[0]->sched_rq[entity->priority];
+ 	}
+ 
+@@ -565,9 +569,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+ 	spin_lock(&entity->lock);
+ 	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
+ 	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
+-	    entity->priority != DRM_SCHED_PRIORITY_KERNEL)
+-		rq = sched ? sched->sched_rq[DRM_SCHED_PRIORITY_HIGH] : NULL;
+-	else
++	    entity->priority != DRM_SCHED_PRIORITY_KERNEL) {
++		u32 target_prio = sched && sched->num_rqs > 1 ?
++			sched->num_rqs - 1 : 0;
++		if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++			target_prio--;
++		rq = sched ? sched->sched_rq[target_prio] : NULL;
++	} else
+ 		rq = sched ? sched->sched_rq[entity->priority] : NULL;
+ 	if (rq != entity->rq) {
+ 		drm_sched_rq_remove_entity(entity->rq, entity);
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index b12d70cbf..27ec7aad7 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -443,10 +443,7 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 		entity = rb_entry(rb, struct drm_sched_entity, rb_tree_node);
+ 		if (!drm_sched_entity_is_ready(entity))
+ 			continue;
+-		if (!drm_sched_can_queue(sched, entity)) {
+-			spin_unlock(&rq->lock);
+-			return ERR_PTR(-ENOSPC);
+-		}
++		/* Credit flow handled by caller -- do not return ERR_PTR here */
+ 		reinit_completion(&entity->entity_idle);
+ 		rq->current_entity = entity;
+ 
+@@ -1247,9 +1244,12 @@ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ 		return entity;
+ 
+ 	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
+-		/* Unified queue: HIGH, NORMAL, LOW all in rq[DRM_SCHED_PRIORITY_HIGH] */
++		/* Unified queue dynamically bounds to the highest available user queue */
++		u32 target_prio = sched->num_rqs > 1 ? sched->num_rqs - 1 : 0;
++		if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++			target_prio--;
+ 		return drm_sched_rq_select_entity_infinity(sched,
+-				sched->sched_rq[DRM_SCHED_PRIORITY_HIGH]);
++				sched->sched_rq[target_prio]);
+ 	}
+ 
+ 	/* Legacy: per-priority queues */
 -- 
 2.55.0
 
