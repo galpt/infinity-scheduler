@@ -109,10 +109,6 @@ but `git am` preserves commit metadata (author, date, sign-off).
 | Parameter | Default | Range | Description |
 |---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
-| `infinity_cgroup_shield` | 1 (ro) | — | Automatic cgroup defense shield |
-| `infinity_migration_protect` | 1 (ro) | — | EMA-driven migration hysteresis |
-| `infinity_rt_safety` | 1 (ro) | — | Cross-class RT safety valve |
-| `infinity_asym_placement` | 1 (ro) | — | EMA-driven P/E core placement |
 | `infinity_running` | 1 (ro) | — | Active flag |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
@@ -121,6 +117,12 @@ approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
 (alpha 4096 at max cpu_capacity) to 0.67ms (alpha 2048 at low capacity).
 This gives sub-millisecond reaction to CPU-bound threads on any hardware.
 No user tunable is needed beyond the SMT divisor.
+
+Additional features are always active and require no configuration:
+- **Migration hysteresis** — EMA-driven cache pinning for interactive tasks
+- **Cgroup defense shield** — aggregate group EMA graduates noisy cgroups
+- **RT safety valve** — native `requeue_task_rt` throttling for rogue FIFO
+- **Asymmetric core placement** — EMA-guided P/E core bias on hybrid CPUs
 
 ## Feature comparison
 
