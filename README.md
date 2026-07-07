@@ -124,6 +124,107 @@ To revert to the stock FIFO, add `drm.sched_policy=0` to the kernel command
 line.  CPU-side interactivity signals (futex_waiting, EMA) automatically
 feed into GPU scheduling decisions — no configuration needed.
 
+## GPU scheduling
+
+```mermaid
+flowchart TB
+    classDef ent fill:#0000,stroke:#818cf8,stroke-width:2
+    classDef algo fill:#0000,stroke:#14b8a6,stroke-width:2
+    classDef dec fill:#0000,stroke:#d97706,stroke-width:2
+    classDef sig fill:#0000,stroke:#ef4444,stroke-width:2
+
+    subgraph GPU["GPU scheduling (DRM + Infinity)"]
+        ENTITY["drm_sched_entity
+─────────────────
+gpu_time_total  (cumulative ns)
+gpu_time_ema    (burstiness EMA)
+cached_gpu_vtime(snapshotted sort key)
+last_user_pid   (owning process)"]
+        class ENTITY ent
+
+        ENTITY --> VTIME["drm_sched_entity_calc_vtime()
+─────────────────────────────
+1. normalize:    max(gpu_time_total,
+                 min_gpu_vtime - catchup_bonus)
+2. priority:     HIGH=1x, NORMAL=1.5x, LOW=3x
+3. EMA boost:    vtime += ema_pct/2
+──► cached_gpu_vtime (immutable in rbtree)"]
+        class VTIME algo
+
+        VTIME --> QUEUE["drm_sched_rq.unified rbtree
+────────────────────────
+sorted by cached_gpu_vtime
+O(log n) insertion  |  O(1) selection
+min_gpu_vtime advances on each pick"]
+        class QUEUE dec
+
+        SELFIFO["drm_sched_rq[KERNEL]
+───────────────────
+Always checked first
+Standalone FIFO
+Never enters fair queue
+Prevents TDR hardware reset"]
+        class SELFIFO dec
+
+        KERNEL["KERNEL priority jobs
+(VM page tables, buffer evictions)"]
+        USER["HIGH / NORMAL / LOW priority jobs
+(rendering, compute, compositing)"]
+        class KERNEL sig
+        class USER ent
+
+        KERNEL --> SELFIFO
+        USER --> QUEUE
+
+        SELECT["drm_sched_select_entity()
+───────────────────────────
+KERNEL FIFO → entity found? return it
+INFINITY   → unified rq → first ready
+LEGACY     → per-priority FIFO/RR queues"]
+        class SELECT algo
+
+        SELFIFO --> SELECT
+        QUEUE --> SELECT
+    end
+
+    subgraph CPU["CPU Infinity scheduler (signals)"]
+        TASK["task_struct.infinity_ctx
+───────────────────
+futex_waiting    (IPC round-trip)
+ema              (CPU burstiness)"]
+        class TASK sig
+    end
+
+    TASK -. "pid_task(last_user_pid)
+    under rcu_read_lock()
+    futex_waiting?  → vtime >>= 1
+    ema == 0?       → vtime >>= 1" .-> VTIME
+
+    SELECT --> HW["GPU hardware ring → job submitted"]
+    class HW ent
+
+    HW --> DONE["drm_sched_job_done()
+─────────────────
+gpu_time_total += job_delta
+gpu_time_ema  += climb(delta)
+(EMA decay on next submission via
+ drm_sched_rq_update_fifo_locked)"]
+    class DONE algo
+
+    DONE -. "credit_count -= credits" .-> SELECT
+```
+
+The Infinity GPU extension hooks into the DRM scheduler via
+`DRM_SCHED_POLICY_INFINITY` (default).  Each GPU context (entity) tracks its
+GPU time via EMA — climbing on job completion, decaying on idle.  Virtual
+GPU time replaces the stock submit-timestamp sort key, scaled by entity
+priority and burstiness.  The CPU-side interactivity signals (futex_waiting,
+CPU EMA) are resolved from the owning process via `pid_task()` under an RCU
+read lock and directly affect the entity's GPU vtime — no manual configuration
+needed.
+
+To revert to stock FIFO: add `drm.sched_policy=0` to the kernel command line.
+
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
