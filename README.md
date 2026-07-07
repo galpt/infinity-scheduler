@@ -118,12 +118,6 @@ approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
 This gives sub-millisecond reaction to CPU-bound threads on any hardware.
 No user tunable is needed beyond the SMT divisor.
 
-The GPU scheduler is extended with the Infinity virtual time algorithm
-(`DRM_SCHED_POLICY_INFINITY`), enabled by default on supported DRM drivers.
-To revert to the stock FIFO, add `drm.sched_policy=0` to the kernel command
-line.  CPU-side interactivity signals (futex_waiting, EMA) automatically
-feed into GPU scheduling decisions — no configuration needed.
-
 ## GPU scheduling
 
 ```mermaid
