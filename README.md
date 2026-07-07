@@ -1,4 +1,4 @@
-# infinity-scheduler (v4.6)
+# infinity-scheduler (v4.6-gpu)
 
 A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
 
@@ -68,7 +68,7 @@ flowchart TB
 
 ```bash
 # 1. Clone the repo (v4.6 has latest features; v4.5 is stable baseline)
-git clone -b v4.6 https://github.com/galpt/infinity-scheduler.git
+git clone -b v4.6-gpu https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -135,6 +135,10 @@ No user tunable is needed beyond the SMT divisor.
 | Cgroup defense shield | No | **Yes (aggregate group EMA)** |
 | RT cross-class safety | No | **Yes (native requeue throttling)** |
 | Asymmetric core placement | No | **Yes (EMA-guided P/E core bias)** |
+| GPU time tracking | No | **Yes (EMA per DRM entity)** |
+| Virtual GPU time scheduling | No | **Yes (DRM_SCHED_POLICY_INFINITY)** |
+| Soft priority (anti-starvation) | No | **Yes (proportional vtime scaling)** |
+| Cross-scheduler interactivity | No | **Yes (CPU EMA feeds GPU vtime)** |
 
 ## License
 

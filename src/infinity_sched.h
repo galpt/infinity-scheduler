@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.h — Infinity scheduler API (v4.6).
+ * infinity_sched.h — Infinity scheduler API (v4.6-gpu).
  *
  * Architecture:
  *
