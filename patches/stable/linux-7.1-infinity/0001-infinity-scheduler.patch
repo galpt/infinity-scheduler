@@ -1,7 +1,7 @@
 From faab8b27541be10d80e919593e168b894bc0c2ef Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:12:35 +0700
-Subject: [PATCH 01/19] infinity-scheduler v4.5
+Subject: [PATCH 01/20] infinity-scheduler v4.5
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -814,7 +814,7 @@ index 4ee8faf01..a173005c8 100644
 From 468cd5aa6816cc77ba2f3e8a505017a0846c1cee Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:16:19 +0700
-Subject: [PATCH 02/19] v4.5: complete implementation
+Subject: [PATCH 02/20] v4.5: complete implementation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -888,7 +888,7 @@ index 59732b03b..7ff59274f 100644
 From ef6b48636849d285f09670412c395bc69c445457 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:17:50 +0700
-Subject: [PATCH 03/19] v4.5: complete Infinity scheduler
+Subject: [PATCH 03/20] v4.5: complete Infinity scheduler
 
 - Fix weight ratchet: base from static_prio (not live weight)
 - Slope 98/100: at EMA=100% weight = base x 2%
@@ -1276,7 +1276,7 @@ index 29f2b38c0..6a02d46e8 100644
 From 06095c7d4a2145a3a5838ad9a13ebe339150cc0f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:43:03 +0700
-Subject: [PATCH 04/19] v4.5: add place_entity futex check, remove dead
+Subject: [PATCH 04/20] v4.5: add place_entity futex check, remove dead
  pick_eevdf bypass
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1335,7 +1335,7 @@ index 7ff59274f..5aa627c5c 100644
 From d7b3cd03fef3e7c01f57dd12601a7e9c7060050e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:17 +0700
-Subject: [PATCH 05/19] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 05/20] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1748,7 +1748,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 9956ddc64084ab1c1efb80bc231329ecd9a00599 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 06/19] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 06/20] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 
 - infinity_consume now takes cpu_capacity and computes a dynamic alpha
@@ -1889,7 +1889,7 @@ index 8fa679a4a..8f96c7554 100644
 From 8c70ba279e8360388f963d2f711696553b79d356 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:26:32 +0700
-Subject: [PATCH 07/19] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 07/20] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1926,7 +1926,7 @@ index fd808d454..2076fb537 100644
 From 069d2e1fd96c8c0620bab4434b3b8a6dfa8c6283 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:28 +0700
-Subject: [PATCH 08/19] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 08/20] v4.5: Infinity EMA-driven migration hysteresis
 
 Protect interactive (EMA=0) tasks from being migrated by the load
 balancer's idle balance and newly_idle balance.  The check in
@@ -1976,7 +1976,7 @@ index 2076fb537..4d178960b 100644
 From a9732f29923095f168bc1516a317256127d7f812 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:27:00 +0700
-Subject: [PATCH 09/19] v4.5: Infinity dynamic cgroup defense shields
+Subject: [PATCH 09/20] v4.5: Infinity dynamic cgroup defense shields
 
 Introduce aggregate group EMA at the cfs_rq level for graduated,
 automatic cgroup weight modulation:
@@ -2133,7 +2133,7 @@ index 9f63b15d3..22f34f7fd 100644
 From fe13b6a45419b2b672cf5d6dde85a1f1b205e85c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:31:01 +0700
-Subject: [PATCH 10/19] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 10/20] v4.5: Infinity cross-class RT safety valve
 
 Implement deferred RT demotion for rogue SCHED_FIFO/SCHED_RR tasks.
 When rt_ema exceeds 95% (>9.5ms continuous runtime), the task is
@@ -2331,7 +2331,7 @@ index a173005c8..3cb6aa116 100644
 From d87b35625d209ce4a2a780af3d61b907f5007f7a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:35:42 +0700
-Subject: [PATCH 11/19] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 11/20] v4.5: Infinity EMA-driven asymmetric core placement
 
 On hybrid topologies (sd_asym_cpucapacity), bias interactive tasks
 (EMA == 0) toward the highest-capacity core during wakeup in
@@ -2392,7 +2392,7 @@ index 68cc59afd..3139f4776 100644
 From 1b0aa6dfbb869abde5cd0a7d01e808b3c8daff28 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:05:47 +0700
-Subject: [PATCH 12/19] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 12/20] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Replace the broken rq->curr approach in balance_callback workers with
@@ -2606,7 +2606,7 @@ index 3cb6aa116..6d952a5fa 100644
 From 4f207cb06144c152cc51ca8bd00211aefa7e0d22 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:22:08 +0700
-Subject: [PATCH 13/19] v4.6: adversarial review fixes -- fork llist init,
+Subject: [PATCH 13/20] v4.6: adversarial review fixes -- fork llist init,
  PF_KTHREAD guard, EEVDF cgroup modulation, atomic flags
 
 Four fixes addressing findings from adversarial code review:
@@ -2819,7 +2819,7 @@ index 6d952a5fa..33bb4eaab 100644
 From 061c3dd056f7b81ff40bdc8cb964d56b755395f1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:36:39 +0700
-Subject: [PATCH 14/19] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
+Subject: [PATCH 14/20] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
  &per_cpu(..., cpu_of(rq))
 
 The restoration trigger in enqueue_task_fair used this_cpu_ptr() to
@@ -2881,7 +2881,7 @@ index 33bb4eaab..cf29548b2 100644
 From 76bedc0acf51becfa6ec8cc09b58acefd040cb83 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:31:19 +0700
-Subject: [PATCH 15/19] v4.6: fix balance_callback deadlock + CPU 0 starvation
+Subject: [PATCH 15/20] v4.6: fix balance_callback deadlock + CPU 0 starvation
 
 Two boot fixes:
 
@@ -2987,7 +2987,7 @@ index 4fe70e858..33da34363 100644
 From 94421c46617fde6ee2629d598448be06f78e6902 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:35:12 +0700
-Subject: [PATCH 16/19] v4.6: replace balance_callback/llist with task_work for
+Subject: [PATCH 16/20] v4.6: replace balance_callback/llist with task_work for
  RT safety valve
 
 The balance_callback infrastructure used for RT demotion and restoration
@@ -3248,7 +3248,7 @@ index cf29548b2..abb0c6679 100644
 From 91609383998e9ee932e7d724702667953650e38c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:49:44 +0700
-Subject: [PATCH 17/19] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+Subject: [PATCH 17/20] v4.6: zero infinity_ctx flags/saved_rt in fork_init
 
 A demoted RT task inherits stale flags and saved_rt fields via
 dup_task_struct's bit-for-bit copy.  Zero them so the child starts
@@ -3280,7 +3280,7 @@ index b2edf5705..1faa08d57 100644
 From 4932801332698ad816feef2a2c12f3ebfb9edd4b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:06 +0700
-Subject: [PATCH 18/19] v4.6: native implementation -- requeue_task_rt FIFO
+Subject: [PATCH 18/20] v4.6: native implementation -- requeue_task_rt FIFO
  throttle + update_cfs_group cgroup modulation
 
 Replace the over-engineered task_work/callback_head/sched_setattr cross-class
@@ -3567,7 +3567,7 @@ index abb0c6679..14135c532 100644
 From 9d7d3410ea75352fbcd81957eee3993f995b67eb Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:06 +0700
-Subject: [PATCH 19/19] v4.6: update comments -- v4.5->v4.6, sched_fork not
+Subject: [PATCH 19/20] v4.6: update comments -- v4.5->v4.6, sched_fork not
  task_fork_fair, deduplicate RT threshold
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -3633,6 +3633,413 @@ index ab77fc26e..bb1c3df2d 100644
 -/** rt_ema threshold: force rogue FIFO to yield. */
 -#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
  #endif /* __INFINITY_SCHED_H */
+-- 
+2.55.0
+
+
+From 76dd27a5c6cd292c2c243e85bac805afc68bd0bc Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 7 Jul 2026 23:15:09 +0700
+Subject: [PATCH 20/20] v4.6-gpu: Infinity GPU scheduler extension
+
+Implement all 4 features from PRD-001:
+
+1. GPU Time Tracking: gpu_time_ema, gpu_time_total, gpu_time_last_active
+   fields on drm_sched_entity. EMA climbs on job completion, decays on idle.
+   Captures PID at entity_init via get_task_pid().
+
+2. Virtual GPU Time: drm_sched_entity_calc_vtime() replaces submit
+   timestamp with normalized vtime scaled by priority and EMA burstiness.
+   min_gpu_vtime on drm_sched_rq prevents catch-up starvation trap.
+   DRM_SCHED_POLICY_INFINITY selects the scheduler.
+
+3. Soft Priority: KERNEL priority is always serviced first via standalone
+   FIFO. HIGH/NORMAL/LOW get proportional share via vtime scaling factors
+   (no strict starvation).
+
+4. Cross-Scheduler Coupling: entity->last_user_pid resolves to task_struct
+   under RCU read lock. futex_waiting halves vtime, EMA=0 halves vtime
+   again -- interactive CPU tasks get GPU priority.
+
+Backward compatible: oldest_job_waiting (ktime_t) is preserved untouched.
+Switching sched_policy=0 restores stock FIFO behaviour.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c   |  25 +++-
+ drivers/gpu/drm/scheduler/sched_internal.h |   1 +
+ drivers/gpu/drm/scheduler/sched_main.c     | 151 +++++++++++++++++++--
+ include/drm/gpu_scheduler.h                |  52 +++++++
+ 4 files changed, 216 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index fe174a485..e542beb20 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -97,7 +97,11 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 			entity->priority = max_t(s32, (s32) sched_list[0]->num_rqs - 1,
+ 						 (s32) DRM_SCHED_PRIORITY_KERNEL);
+ 		}
+-		entity->rq = sched_list[0]->sched_rq[entity->priority];
++		if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
++		    entity->priority != DRM_SCHED_PRIORITY_KERNEL)
++			entity->rq = sched_list[0]->sched_rq[DRM_SCHED_PRIORITY_HIGH];
++		else
++			entity->rq = sched_list[0]->sched_rq[entity->priority];
+ 	}
+ 
+ 	init_completion(&entity->entity_idle);
+@@ -111,6 +115,8 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 	atomic_set(&entity->fence_seq, 0);
+ 	entity->fence_context = dma_fence_context_alloc(2);
+ 
++	entity->last_user_pid = get_task_pid(current->group_leader, PIDTYPE_PID);
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(drm_sched_entity_init);
+@@ -328,6 +334,11 @@ EXPORT_SYMBOL(drm_sched_entity_flush);
+  */
+ void drm_sched_entity_fini(struct drm_sched_entity *entity)
+ {
++	if (entity->last_user_pid) {
++		put_pid(entity->last_user_pid);
++		entity->last_user_pid = NULL;
++	}
++
+ 	/*
+ 	 * If consumption of existing jobs wasn't completed forcefully remove
+ 	 * them. Also makes sure that the scheduler won't touch this entity any
+@@ -496,7 +507,8 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+ 	 * Update the entity's location in the min heap according to
+ 	 * the timestamp of the next job, if any.
+ 	 */
+-	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO) {
++	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO ||
++	    drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
+ 		struct drm_sched_job *next;
+ 
+ 		next = drm_sched_entity_queue_peek(entity);
+@@ -552,7 +564,11 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+ 
+ 	spin_lock(&entity->lock);
+ 	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
+-	rq = sched ? sched->sched_rq[entity->priority] : NULL;
++	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
++	    entity->priority != DRM_SCHED_PRIORITY_KERNEL)
++		rq = sched ? sched->sched_rq[DRM_SCHED_PRIORITY_HIGH] : NULL;
++	else
++		rq = sched ? sched->sched_rq[entity->priority] : NULL;
+ 	if (rq != entity->rq) {
+ 		drm_sched_rq_remove_entity(entity->rq, entity);
+ 		entity->rq = rq;
+@@ -619,8 +635,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
+ 		spin_lock(&rq->lock);
+ 		drm_sched_rq_add_entity(rq, entity);
+ 
+-		if (drm_sched_policy == DRM_SCHED_POLICY_FIFO)
+-			drm_sched_rq_update_fifo_locked(entity, rq, submit_ts);
++		drm_sched_rq_update_fifo_locked(entity, rq, submit_ts);
+ 
+ 		spin_unlock(&rq->lock);
+ 		spin_unlock(&entity->lock);
+diff --git a/drivers/gpu/drm/scheduler/sched_internal.h b/drivers/gpu/drm/scheduler/sched_internal.h
+index 7ea5a6736..fe1be08d5 100644
+--- a/drivers/gpu/drm/scheduler/sched_internal.h
++++ b/drivers/gpu/drm/scheduler/sched_internal.h
+@@ -9,6 +9,7 @@ extern int drm_sched_policy;
+ 
+ #define DRM_SCHED_POLICY_RR    0
+ #define DRM_SCHED_POLICY_FIFO  1
++#define DRM_SCHED_POLICY_INFINITY 2
+ 
+ void drm_sched_wakeup(struct drm_gpu_scheduler *sched);
+ 
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index 21dc82c75..cbe2fb29b 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -90,7 +90,7 @@ int drm_sched_policy = DRM_SCHED_POLICY_FIFO;
+  * DOC: sched_policy (int)
+  * Used to override default entities scheduling policy in a run queue.
+  */
+-MODULE_PARM_DESC(sched_policy, "Specify the scheduling policy for entities on a run-queue, " __stringify(DRM_SCHED_POLICY_RR) " = Round Robin, " __stringify(DRM_SCHED_POLICY_FIFO) " = FIFO (default).");
++MODULE_PARM_DESC(sched_policy, "Specify the scheduling policy for entities on a run-queue, " __stringify(DRM_SCHED_POLICY_RR) " = Round Robin, " __stringify(DRM_SCHED_POLICY_FIFO) " = FIFO (default), " __stringify(DRM_SCHED_POLICY_INFINITY) " = Infinity vGPU.");
+ module_param_named(sched_policy, drm_sched_policy, int, 0444);
+ 
+ static u32 drm_sched_available_credits(struct drm_gpu_scheduler *sched)
+@@ -142,6 +142,74 @@ static __always_inline bool drm_sched_entity_compare_before(struct rb_node *a,
+ 	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
+ }
+ 
++static __always_inline bool
++drm_sched_entity_compare_vtime(struct rb_node *a,
++			       const struct rb_node *b)
++{
++	struct drm_sched_entity *ent_a = rb_entry(a, struct drm_sched_entity, rb_tree_node);
++	struct drm_sched_entity *ent_b = rb_entry(b, struct drm_sched_entity, rb_tree_node);
++	return ent_a->cached_gpu_vtime < ent_b->cached_gpu_vtime;
++}
++
++static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
++{
++	struct drm_sched_rq *rq = entity->rq;
++	u64 effective_total;
++	u64 vtime;
++
++	if (entity->gpu_time_total < rq->min_gpu_vtime) {
++		if (rq->min_gpu_vtime < INFINITY_GPU_CATCHUP_BONUS_NS)
++			effective_total = 0;
++		else
++			effective_total = rq->min_gpu_vtime - INFINITY_GPU_CATCHUP_BONUS_NS;
++	} else {
++		effective_total = entity->gpu_time_total;
++	}
++
++	vtime = effective_total;
++
++	switch (entity->priority) {
++	case DRM_SCHED_PRIORITY_HIGH:
++		break;
++	case DRM_SCHED_PRIORITY_NORMAL:
++		vtime = vtime * 3 / 2;
++		break;
++	case DRM_SCHED_PRIORITY_LOW:
++		vtime *= 3;
++		break;
++	default:
++		break;
++	}
++
++	if (entity->gpu_time_ema > 0) {
++		u64 ema_pct = div64_u64(entity->gpu_time_ema * 100ULL,
++					INFINITY_GPU_EMA_CLIMB_NS);
++		u64 boost = vtime * ema_pct / 100;
++		vtime += boost >> 1;
++	}
++
++	/*
++	 * Cross-scheduler coupling: if the owning task is waiting on a futex
++	 * or has zero CPU EMA, it is likely interactive -- halve vtime so it
++	 * gets GPU priority.
++	 */
++	if (entity->last_user_pid) {
++		struct task_struct *inf_p;
++
++		rcu_read_lock();
++		inf_p = pid_task(entity->last_user_pid, PIDTYPE_PID);
++		if (inf_p) {
++			if (READ_ONCE(inf_p->infinity.futex_waiting))
++				vtime >>= 1;
++			if (READ_ONCE(inf_p->infinity.ema) == 0)
++				vtime >>= 1;
++		}
++		rcu_read_unlock();
++	}
++
++	return vtime;
++}
++
+ static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
+ 					    struct drm_sched_rq *rq)
+ {
+@@ -167,8 +235,15 @@ void drm_sched_rq_update_fifo_locked(struct drm_sched_entity *entity,
+ 
+ 	entity->oldest_job_waiting = ts;
+ 
+-	rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
+-		      drm_sched_entity_compare_before);
++	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
++		entity->cached_gpu_vtime = drm_sched_entity_calc_vtime(entity);
++		entity->normalized_base = entity->gpu_time_total;
++		rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
++			      drm_sched_entity_compare_vtime);
++	} else {
++		rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
++			      drm_sched_entity_compare_before);
++	}
+ }
+ 
+ /**
+@@ -234,7 +309,8 @@ void drm_sched_rq_remove_entity(struct drm_sched_rq *rq,
+ 	if (rq->current_entity == entity)
+ 		rq->current_entity = NULL;
+ 
+-	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO)
++	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO ||
++	    drm_sched_policy == DRM_SCHED_POLICY_INFINITY)
+ 		drm_sched_rq_remove_fifo_locked(entity, rq);
+ 
+ 	spin_unlock(&rq->lock);
+@@ -338,6 +414,38 @@ drm_sched_rq_select_entity_fifo(struct drm_gpu_scheduler *sched,
+ 	return rb ? rb_entry(rb, struct drm_sched_entity, rb_tree_node) : NULL;
+ }
+ 
++static struct drm_sched_entity *
++drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
++				    struct drm_sched_rq *rq)
++{
++	struct rb_node *rb;
++
++	spin_lock(&rq->lock);
++
++	for (rb = rb_first_cached(&rq->rb_tree_root); rb; rb = rb_next(rb)) {
++		struct drm_sched_entity *entity;
++
++		entity = rb_entry(rb, struct drm_sched_entity, rb_tree_node);
++		if (!drm_sched_entity_is_ready(entity))
++			continue;
++		if (!drm_sched_can_queue(sched, entity)) {
++			spin_unlock(&rq->lock);
++			return ERR_PTR(-ENOSPC);
++		}
++		reinit_completion(&entity->entity_idle);
++		rq->current_entity = entity;
++
++		if (entity->cached_gpu_vtime > rq->min_gpu_vtime)
++			rq->min_gpu_vtime = entity->cached_gpu_vtime;
++
++		spin_unlock(&rq->lock);
++		return entity;
++	}
++
++	spin_unlock(&rq->lock);
++	return NULL;
++}
++
+ /**
+  * drm_sched_run_job_queue - enqueue run-job work
+  * @sched: scheduler instance
+@@ -373,6 +481,23 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
+ 	atomic_sub(s_job->credits, &sched->credit_count);
+ 	atomic_dec(sched->score);
+ 
++	/* Infinity: GPU time EMA tracking */
++	if (s_job->entity && s_job->entity->rq) {
++		struct drm_sched_entity *inf_entity = s_job->entity;
++		u64 gpu_ns;
++
++		/* Use host-side delta between submit and completion */
++		gpu_ns = ktime_to_ns(ktime_sub(ktime_get(),
++				     s_job->submit_ts));
++		if (gpu_ns > INFINITY_GPU_EMA_CLIMB_NS)
++			gpu_ns = INFINITY_GPU_EMA_CLIMB_NS;
++		inf_entity->gpu_time_total += gpu_ns;
++		inf_entity->gpu_time_ema += div64_u64(
++			(INFINITY_GPU_EMA_CLIMB_NS - inf_entity->gpu_time_ema) *
++			gpu_ns * INFINITY_GPU_EMA_ALPHA,
++			INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
++	}
++
+ 	trace_drm_sched_job_done(s_fence);
+ 
+ 	dma_fence_get(&s_fence->finished);
+@@ -1100,16 +1225,26 @@ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ 	struct drm_sched_entity *entity;
+ 	int i;
+ 
+-	/* Start with the highest priority.
+-	 */
+-	for (i = DRM_SCHED_PRIORITY_KERNEL; i < sched->num_rqs; i++) {
++	/* Always exhaust KERNEL priority first -- GPU memory management */
++	entity = drm_sched_rq_select_entity_fifo(sched,
++				sched->sched_rq[DRM_SCHED_PRIORITY_KERNEL]);
++	if (entity)
++		return entity;
++
++	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
++		/* Unified queue: HIGH, NORMAL, LOW all in rq[DRM_SCHED_PRIORITY_HIGH] */
++		return drm_sched_rq_select_entity_infinity(sched,
++				sched->sched_rq[DRM_SCHED_PRIORITY_HIGH]);
++	}
++
++	/* Legacy: per-priority queues */
++	for (i = DRM_SCHED_PRIORITY_HIGH; i < sched->num_rqs; i++) {
+ 		entity = drm_sched_policy == DRM_SCHED_POLICY_FIFO ?
+ 			drm_sched_rq_select_entity_fifo(sched, sched->sched_rq[i]) :
+ 			drm_sched_rq_select_entity_rr(sched, sched->sched_rq[i]);
+ 		if (entity)
+ 			break;
+ 	}
+-
+ 	return IS_ERR(entity) ? NULL : entity;
+ }
+ 
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index 78e07c250..fcd2d9f06 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -233,6 +233,40 @@ struct drm_sched_entity {
+ 	 */
+ 	struct rb_node			rb_tree_node;
+ 
++	/**
++	 * @gpu_time_ema: Infinity EMA of GPU time consumed.
++	 * Unit: ns, ceiling ~10ms. Protected by rq->lock.
++	 */
++	u64				gpu_time_ema;
++
++	/**
++	 * @gpu_time_total: Total GPU time consumed (cumulative). Protected by rq->lock.
++	 */
++	u64				gpu_time_total;
++
++	/**
++	 * @gpu_time_last_active: ktime when entity last had a job submitted.
++	 * Used for EMA decay on idle. Protected by rq->lock.
++	 */
++	ktime_t				gpu_time_last_active;
++
++	/**
++	 * @cached_gpu_vtime: Snapshotted vtime, immutable while in rbtree.
++	 * Protected by rq->lock.
++	 */
++	u64				cached_gpu_vtime;
++
++	/**
++	 * @normalized_base: gpu_time_total used for cached_gpu_vtime snapshot.
++	 * Protected by rq->lock.
++	 */
++	u64				normalized_base;
++
++	/**
++	 * @last_user_pid: PID of the owning process.
++	 * Captured in entity_init, released in entity_fini. No mid-life changes.
++	 */
++	struct pid			*last_user_pid;
+ };
+ 
+ /**
+@@ -256,6 +290,13 @@ struct drm_sched_rq {
+ 	struct drm_sched_entity		*current_entity;
+ 	struct list_head		entities;
+ 	struct rb_root_cached		rb_tree_root;
++
++	/**
++	 * @min_gpu_vtime: Minimum virtual GPU time across all entities.
++	 * Monotonic, only advances forward on entity selection.
++	 * Protected by @lock.
++	 */
++	u64				min_gpu_vtime;
+ };
+ 
+ /**
+@@ -750,4 +791,15 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+ 		list_for_each_entry((__job), &(__sched)->pending_list, list)	\
+ 			for_each_if(!(__entity) || (__job)->entity == (__entity))
+ 
++/* ------------------------------------------------------------------ */
++/* Infinity GPU scheduling constants                                   */
++/* ------------------------------------------------------------------ */
++#define INFINITY_GPU_EMA_CLIMB_NS       10000000ULL
++#define INFINITY_GPU_EMA_ALPHA          4
++#define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
++#define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
++#define INFINITY_GPU_WEIGHT_REDUCE_PCT  50
++/* Infinity scheduling policy value */
++#define DRM_SCHED_POLICY_INFINITY       2
++
+ #endif
 -- 
 2.55.0
 
