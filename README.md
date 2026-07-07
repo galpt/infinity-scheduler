@@ -11,18 +11,18 @@ flowchart TB
     classDef infra fill:#0000,stroke:#94a3b8,stroke-width:2
 
     subgraph FAIR["Fair tasks (SCHED_OTHER)"]
-        TASK["Task"] --> GAUGE["EMA gauge\n \n0 → BUDGET_MAX\nα = 2048–4096\n(scales with cpu_capacity)"]
+        TASK["Task"] --> GAUGE["EMA gauge\n───\n0 → BUDGET_MAX\nα = 2048–4096\n(scales with cpu_capacity)"]
         class GAUGE fair
 
-        GAUGE --> WEIGHT["infinity_update_weight()\n \nreweight_entity()\nweight = base × (100 - pct×98/100) / 100\nat EMA=100%: base × 2%"]
+        GAUGE --> WEIGHT["infinity_update_weight()\n───\nreweight_entity()\nweight = base × (100 - pct×98/100) / 100\nat EMA=100%: base × 2%"]
         class WEIGHT algo
 
-        WEIGHT --> EEVDF["EEVDF\n \ndeadline = vruntime + slice/weight\nweight↑ → earlier deadline"]
+        WEIGHT --> EEVDF["EEVDF\n───\ndeadline = vruntime + slice/weight\nweight↑ → earlier deadline"]
 
-        TASK --> FUTEX["futex_do_wait()\n \nsets futex_waiting = true\n→ schedule() → cleared on wakeup"]
+        TASK --> FUTEX["futex_do_wait()\n───\nsets futex_waiting = true\n→ schedule() → cleared on wakeup"]
         class FUTEX algo
 
-        FUTEX --> PLACE["place_entity()\n \nif futex_waiting:\nvslice >>= 1\n→ earlier deadline on wakeup"]
+        FUTEX --> PLACE["place_entity()\n───\nif futex_waiting:\nvslice >>= 1\n→ earlier deadline on wakeup"]
         class PLACE algo
 
         PLACE --> GAUGE
@@ -33,7 +33,7 @@ flowchart TB
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
-            WQ --> DECAY["infinity_wakeup()\n \nema = f(sleep_ns)\nperiod-shift bounds tracking\n& 128-bit math safety"]
+            WQ --> DECAY["infinity_wakeup()\n───\nema = f(sleep_ns)\nperiod-shift bounds tracking\n& 128-bit math safety"]
             DECAY --> WAKE["Waking task\nhas higher weight →\nnaturally earlier deadline"]
             WAKE --> RUN
         end
@@ -44,22 +44,22 @@ flowchart TB
     end
 
     subgraph RT["RT tasks (SCHED_RR / SCHED_FIFO)"]
-        RT_T["SCHED_RR task runs"] --> RT_C["infinity_rt_consume()\n \nrt_ema climbs with runtime"]
+        RT_T["SCHED_RR task runs"] --> RT_C["infinity_rt_consume()\n───\nrt_ema climbs with runtime"]
         class RT_C rtN
 
-        RT_C --> RT_D["infinity_rt_wakeup()\n \ntime-proportional decay\n2nd-order Taylor expansion\ndedicated rt_last_sleep_ns"]
+        RT_C --> RT_D["infinity_rt_wakeup()\n───\ntime-proportional decay\n2nd-order Taylor expansion\ndedicated rt_last_sleep_ns"]
         class RT_D rtN
 
-        RT_D --> RT_S["infinity_rr_timeslice()\n \nrt_ema↑ → timeslice↓\n100ms → 10ms"]
+        RT_D --> RT_S["infinity_rr_timeslice()\n───\nrt_ema↑ → timeslice↓\n100ms → 10ms"]
         class RT_S rtN
 
         RT_S --> RT_Q["Task stays in\noriginal priority queue\n(safety valve demotes\nrogue FIFO at >95% rt_ema)"]
     end
 
     subgraph INFRA["Scheduler infrastructure"]
-        AC["α = 2048 + 2048 × cap/1024\n \nmax (1024) → α = 4096\nmid  (512)  → α = 3072\nlow  (256)  → α = 2560"]
-        OF["sleep decay\n \n2nd-order Taylor expansion\n24ms shift half-life"]
-        TU["tunables\n \nsmt_divisor\nrunning (ro)"]
+        AC["α = 2048 + 2048 × cap/1024\n───\nmax (1024) → α = 4096\nmid  (512)  → α = 3072\nlow  (256)  → α = 2560"]
+        OF["sleep decay\n───\n2nd-order Taylor expansion\n24ms shift half-life"]
+        TU["tunables\n───\nsmt_divisor\nrunning (ro)"]
     end
     class AC,OF,TU infra
 ```
