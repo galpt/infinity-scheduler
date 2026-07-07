@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.c — Infinity scheduler algorithm (v4.5).
+ * infinity_sched.c — Infinity scheduler algorithm (v4.6).
  *
  * Fully continuous limit-based scheduling:
  *

@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.h — Infinity scheduler API (v4.5).
+ * infinity_sched.h — Infinity scheduler API (v4.6).
  *
  * Architecture:
  *
@@ -17,7 +17,7 @@
  *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     — RT EMA decay
  *   dequeue_task_rt()        ──call──► (records rt_last_sleep_ns)
  *   task_tick_rt()           ──call──► infinity_rr_timeslice()  — adaptive RR slice
- *   task_fork_fair()         ──call──► infinity_fork_init()     — fork init
+ *   sched_fork()             ──call──► infinity_fork_init()     — fork init
  *   init/init_task.c         ──init──► infinity.{}              — static init
  *
  * Weight-based modulation: the task's EEVDF weight is modulated by EMA.
@@ -134,9 +134,9 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /** RT alpha. */
 #define INFINITY_RT_ALPHA		4
 /* ------------------------------------------------------------------ */
-/* RT safety valve constants                                           */
+/* RT safety valve — requeue throttle threshold                        */
 /* ------------------------------------------------------------------ */
-/** rt_ema threshold for demotion (>95% of 10ms ceiling). */
+/** rt_ema threshold: force rogue SCHED_FIFO to yield (>95% of 10ms). */
 #define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
 
 /* ------------------------------------------------------------------ */
@@ -153,9 +153,4 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 unsigned int infinity_rr_timeslice(struct task_struct *p,
 				   unsigned int rr_default);
-/* ------------------------------------------------------------------ */
-/* RT safety valve constants                                           */
-/* ------------------------------------------------------------------ */
-/** rt_ema threshold: force rogue FIFO to yield. */
-#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
 #endif /* __INFINITY_SCHED_H */
