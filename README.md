@@ -67,7 +67,7 @@ flowchart TB
 ## Quick start
 
 ```bash
-# 1. Clone the repo (v4.6 has latest features; v4.5 is stable baseline)
+# 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
 git clone -b v4.6-gpu https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
