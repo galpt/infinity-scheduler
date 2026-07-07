@@ -1,4 +1,4 @@
-From 21303e918237e5b8e121a07a3281d81a970e199f Mon Sep 17 00:00:00 2001
+From 0bc0943d08a49da10952159130fad30a0149a67f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
 Subject: [PATCH 01/16] v4.5: complete implementation
@@ -715,7 +715,7 @@ index 0cbee0318..29307b073 100644
 2.55.0
 
 
-From 8248032de40a30a5433cf3cc618c4bdb972c8c90 Mon Sep 17 00:00:00 2001
+From 500b4bbfa81f23cb49a5b2edacf50a870a8ab791 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
 Subject: [PATCH 02/16] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
@@ -1136,24 +1136,21 @@ index 6a02d46e8..8fa679a4a 100644
 2.55.0
 
 
-From 906d23883469469c1c12033dba21cb9f0b991cb7 Mon Sep 17 00:00:00 2001
+From cd549efcae65bfa4570ad5be4d73b87bc3fcfa13 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
 Subject: [PATCH 03/16] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 - infinity_consume now takes cpu_capacity and computes a dynamic alpha
   between 2048 (low cap) and 4096 (max perf) using the runqueue's
-  native SCHED_CAPACITY_SCALE telemetry — zero overhead, no cpufreq API
+  native SCHED_CAPACITY_SCALE telemetry -- zero overhead, no cpufreq API
 - Futex wakeup path: boost frequency via cpufreq_update_util when a
   futex-woken task is enqueued (fills the gap left by wake_up_q not
   passing WF_SYNC)
 - Interactive pick path: boost frequency when a zero-EMA task is
   selected, bypassing PELT ramp delay
-- Preemption cushion (PRD Req 2) skipped — EEVDF already handles it
+- Preemption cushion (PRD Req 2) skipped -- EEVDF already handles it
   natively through weight modulation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1295,7 +1292,7 @@ index 8fa679a4a..8f96c7554 100644
 2.55.0
 
 
-From ec51b2e93abd98a00004f1381c4b2e420691260e Mon Sep 17 00:00:00 2001
+From 06941712c5b45f511d2f3d75e95e15e762103540 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
 Subject: [PATCH 04/16] fix futex freq boost: check futex_waiting, not
@@ -1353,7 +1350,7 @@ index dfcb7ba0d..832396689 100644
 2.55.0
 
 
-From 34e12ad487e296af055dc214867032dabaad455c Mon Sep 17 00:00:00 2001
+From beaf9191847adaade365781da38c68cba3bc87da Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
 Subject: [PATCH 05/16] v4.5: Infinity EMA-driven migration hysteresis
@@ -1390,7 +1387,7 @@ index 832396689..1973f2793 100644
 2.55.0
 
 
-From e2e996a8dce80ec062fb29730017d92efe408c96 Mon Sep 17 00:00:00 2001
+From 0b99342d10dde64d8098c1d76ad6900ebdc6e53a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:13 +0700
 Subject: [PATCH 06/16] v4.5: Infinity cgroup defense + migration hysteresis
@@ -1521,7 +1518,7 @@ index 0d068b2f3..7d1933dd8 100644
 2.55.0
 
 
-From f2615487ce54372d648cb2bf39cea61854b4cb28 Mon Sep 17 00:00:00 2001
+From b2c07d7193b29fdcf20b09b4f3e403398b22661e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:34:10 +0700
 Subject: [PATCH 07/16] v4.5: Infinity cross-class RT safety valve
@@ -1703,7 +1700,7 @@ index 29307b073..51d64ea7c 100644
 2.55.0
 
 
-From afe3ffa33e08222a2896cfbfe9d9ee7734f4cded Mon Sep 17 00:00:00 2001
+From d5008e74552c9b277cf248fe67c7fac5f68c986a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:46 +0700
 Subject: [PATCH 08/16] v4.5: Infinity EMA-driven asymmetric core placement
@@ -1746,7 +1743,7 @@ index 2cdeb72f0..64db56230 100644
 2.55.0
 
 
-From 1d45f38ac32732453f1d54f16ae1ec89620af659 Mon Sep 17 00:00:00 2001
+From 2c8d2f615542813712eb5b2b7cf9bcf2eedec767 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:07:17 +0700
 Subject: [PATCH 09/16] v4.5: RT safety valve: fix rq->curr context bug via
@@ -1947,15 +1944,11 @@ index 51d64ea7c..58fbea589 100644
 2.55.0
 
 
-From 559ee7e89428dc2fd3f8fa8ecfe9161a18a4b867 Mon Sep 17 00:00:00 2001
+From a7eda0d31885aa9c4c7401ccef49acccdc44e69a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:23:34 +0700
-Subject: [PATCH 10/16] =?UTF-8?q?v4.6:=20adversarial=20review=20fixes=20?=
- =?UTF-8?q?=E2=80=94=20fork=20llist=20init,=20PF=5FKTHREAD=20guard,=20EEVD?=
- =?UTF-8?q?F=20cgroup=20modulation,=20atomic=20flags?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Subject: [PATCH 10/16] v4.6: adversarial review fixes -- fork llist init,
+ PF_KTHREAD guard, EEVDF cgroup modulation, atomic flags
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2136,15 +2129,11 @@ index 58fbea589..133d49a3a 100644
 2.55.0
 
 
-From 626e1cb53f2cd779f2a53ec467d6a4d821cc69dc Mon Sep 17 00:00:00 2001
+From e104c7c98c573b5fca5f9a839295847b4f1d90db Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:37:28 +0700
-Subject: [PATCH 11/16] =?UTF-8?q?v4.6:=20fix=20llist=20CPU=20mismatch=20?=
- =?UTF-8?q?=E2=80=94=20this=5Fcpu=5Fptr=20=E2=86=92=20&per=5Fcpu(...,=20cp?=
- =?UTF-8?q?u=5Fof(rq))?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Subject: [PATCH 11/16] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
+ &per_cpu(..., cpu_of(rq))
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2182,7 +2171,7 @@ index 133d49a3a..14290663f 100644
 2.55.0
 
 
-From 5db60264f9b8f825afcdb537e497fdd5aabad9af Mon Sep 17 00:00:00 2001
+From 9b6695c5a2ac61a328ef2239e777bca4fb03bac4 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:32:32 +0700
 Subject: [PATCH 12/16] v4.6: fix balance_callback deadlock + CPU 0 starvation
@@ -2263,7 +2252,7 @@ index 4b6dd7dd0..9ad7d68ea 100644
 2.55.0
 
 
-From 2589423566b630fa711cc495b494c3ee8d6e6bf2 Mon Sep 17 00:00:00 2001
+From e27526c99dd172e40c983777741da4cdcf0e138e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:36:41 +0700
 Subject: [PATCH 13/16] v4.6: replace balance_callback/llist with task_work for
@@ -2492,7 +2481,7 @@ index 14290663f..613f74413 100644
 2.55.0
 
 
-From 05a9baa8fd7889520c49f76df8df9557eeada1cb Mon Sep 17 00:00:00 2001
+From 29631fd36bae88608cd31102857dfcc3a302792c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:49:44 +0700
 Subject: [PATCH 14/16] v4.6: zero infinity_ctx flags/saved_rt in fork_init
@@ -2524,15 +2513,11 @@ index 207b0518d..17844b111 100644
 2.55.0
 
 
-From 40e428e7c2e9c52c078c4b30dcc91697f1f6dca8 Mon Sep 17 00:00:00 2001
+From e2062843ba3865aa9a59fec1d8651ba31dbc6bcd Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 7 Jul 2026 06:13:51 +0700
-Subject: [PATCH 15/16] =?UTF-8?q?v4.6:=20native=20implementation=20?=
- =?UTF-8?q?=E2=80=94=20requeue=5Ftask=5Frt=20FIFO=20throttle=20+=20update?=
- =?UTF-8?q?=5Fcfs=5Fgroup=20cgroup=20modulation?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Date: Tue, 7 Jul 2026 10:29:06 +0700
+Subject: [PATCH 15/16] v4.6: native implementation -- requeue_task_rt FIFO
+ throttle + update_cfs_group cgroup modulation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2797,15 +2782,11 @@ index 613f74413..f01d005a5 100644
 2.55.0
 
 
-From 029be0a54d7a7dc34840237fa3c407903b98b8df Mon Sep 17 00:00:00 2001
+From 24d4106eaa77ae2f4d366538c05ee8efbbaecca1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 7 Jul 2026 10:01:17 +0700
-Subject: [PATCH 16/16] =?UTF-8?q?v4.6:=20update=20comments=20=E2=80=94=20v?=
- =?UTF-8?q?4.5=E2=86=92v4.6,=20sched=5Ffork=20not=20task=5Ffork=5Ffair,=20?=
- =?UTF-8?q?deduplicate=20RT=20threshold?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Date: Tue, 7 Jul 2026 10:29:06 +0700
+Subject: [PATCH 16/16] v4.6: update comments -- v4.5->v4.6, sched_fork not
+ task_fork_fair, deduplicate RT threshold
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
