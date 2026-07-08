@@ -1,6 +1,68 @@
 # infinity-scheduler (v4.6-gpu)
 
-A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds. Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
+A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds.
+
+## Project structure
+
+```
+.
+├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
+├── patches/
+│   ├── arch/stable/           Vanilla kernel.org (6.18, 7.0.12, 7.1)
+│   └── fedora/stable/         Fedora kernel-ark (7.0.0 base)
+├── tools/                     Install script, build helpers, patch fixers
+├── CONTRIBUTING.md
+└── LICENSE
+```
+
+Each patch in `patches/arch/stable/` is a `git format-patch` cumulative series
+applicable via `git am` on the matching upstream kernel tag.  The Fedora patch
+at `patches/fedora/stable/` is generated from the `archived-7.0` branch of
+`gitlab.com/cki-project/kernel-ark`.  `patch -F 3` works for all, but `git am`
+preserves commit metadata (author, date, sign-off).
+
+## Quick start
+
+```bash
+# 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
+git clone -b v4.6-gpu https://github.com/galpt/infinity-scheduler.git
+cd infinity-scheduler
+
+# 2. Build and install (detects running kernel version automatically)
+sudo bash tools/install-infinity-scheduler.sh
+
+# 3. Reboot and select "Infinity scheduler kernel" at the boot menu
+reboot
+```
+
+> [!TIP]
+> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity
+> scheduler boot entries — the default kernel is never touched.
+
+```bash
+# Verify it's running
+uname -r                              # → 7.1-infinity
+sysctl kernel.infinity_running        # → kernel.infinity_running = 1
+sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
+```
+
+## Tunables
+
+| Parameter | Default | Range | Description |
+|---|---|---|---|
+| `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
+| `infinity_running` | 1 (ro) | — | Active flag |
+
+Infinity uses EEVDF's native per-task weight as its control variable — no
+separate fair-share window is needed.  The EMA climb time constant is
+approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
+(alpha 4096 at max cpu_capacity) to 0.67ms (alpha 2048 at low capacity).
+This gives sub-millisecond reaction to CPU-bound threads on any hardware.
+No user tunable is needed beyond the SMT divisor.
+
+## CPU scheduling
+
+Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
 
 ```mermaid
 flowchart TB
@@ -64,65 +126,18 @@ flowchart TB
     class AC,OF,TU infra
 ```
 
-## Quick start
-
-```bash
-# 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
-git clone -b v4.6-gpu https://github.com/galpt/infinity-scheduler.git
-cd infinity-scheduler
-
-# 2. Build and install (detects running kernel version automatically)
-sudo bash tools/install-infinity-scheduler.sh
-
-# 3. Reboot and select "Infinity scheduler kernel" at the boot menu
-reboot
-```
-
-> [!TIP]
-> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity
-> scheduler boot entries — the default kernel is never touched.
-
-```bash
-# Verify it's running
-uname -r                              # → 7.1-infinity
-sysctl kernel.infinity_running        # → kernel.infinity_running = 1
-sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
-```
-
-## Project structure
-
-```
-.
-├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
-├── patches/
-│   ├── arch/stable/           Vanilla kernel.org (6.18, 7.0.12, 7.1)
-│   └── fedora/stable/         Fedora kernel-ark (7.0.0 base)
-├── tools/                     Install script, build helpers, patch fixers
-├── CONTRIBUTING.md
-└── LICENSE
-```
-
-Each patch in `patches/arch/stable/` is a `git format-patch` cumulative series
-applicable via `git am` on the matching upstream kernel tag.  The Fedora patch
-at `patches/fedora/stable/` is generated from the `archived-7.0` branch of
-`gitlab.com/cki-project/kernel-ark`.  `patch -F 3` works for all, but `git am`
-preserves commit metadata (author, date, sign-off).
-
-## Tunables
-
-| Parameter | Default | Range | Description |
-|---|---|---|---|
-| `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
-| `infinity_running` | 1 (ro) | — | Active flag |
-
-Infinity uses EEVDF's native per-task weight as its control variable — no
-separate fair-share window is needed.  The EMA climb time constant is
-approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
-(alpha 4096 at max cpu_capacity) to 0.67ms (alpha 2048 at low capacity).
-This gives sub-millisecond reaction to CPU-bound threads on any hardware.
-No user tunable is needed beyond the SMT divisor.
-
 ## GPU scheduling
+
+The Infinity GPU extension hooks into the DRM scheduler via
+the Infinity virtual time algorithm (sole policy — FIFO/RR removed).  Each GPU context (entity) tracks its
+GPU time via EMA — climbing on job completion, decaying on idle.  Virtual
+GPU time replaces the stock submit-timestamp sort key, scaled by entity
+priority and burstiness.  The CPU-side interactivity signals (futex_waiting,
+CPU EMA) are resolved from the owning process via `pid_task()` under an RCU
+read lock and directly affect the entity's GPU vtime — no manual configuration
+needed.
+
+No fallback to FIFO exists — the legacy policy module parameter and selectors have been removed.
 
 ```mermaid
 flowchart TB
@@ -204,17 +219,6 @@ gpu_time_ema  += climb(delta)
 
     DONE -. "credit_count -= credits" .-> SELECT
 ```
-
-The Infinity GPU extension hooks into the DRM scheduler via
-the Infinity virtual time algorithm (sole policy — FIFO/RR removed).  Each GPU context (entity) tracks its
-GPU time via EMA — climbing on job completion, decaying on idle.  Virtual
-GPU time replaces the stock submit-timestamp sort key, scaled by entity
-priority and burstiness.  The CPU-side interactivity signals (futex_waiting,
-CPU EMA) are resolved from the owning process via `pid_task()` under an RCU
-read lock and directly affect the entity's GPU vtime — no manual configuration
-needed.
-
-No fallback to FIFO exists — the legacy policy module parameter and selectors have been removed.
 
 ## Feature comparison
 
