@@ -41,6 +41,7 @@ fi
 KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
 
 PATCH_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/$KERNEL_MAJOR"
+PATCH_VER="$KERNEL_MAJOR"
 
 if [ ! -d "$PATCH_DIR" ]; then
     # No patches for this exact major — find the closest available
@@ -122,15 +123,17 @@ prepare_source() {
     # Always start fresh — delete any previous clone and re-clone.
     # This avoids all edge cases with stale patches, committed changes,
     # half-built trees, or .rej/.orig files from failed runs.
-    info "Cloning kernel source v$KERNEL_VER to $KERNEL_SRC..."
+    # Use the patch version for cloning (e.g. patches/arch/7.1/ -> v7.1),
+    # not the running kernel version (e.g. 7.1.3), since point releases
+    # may have diverged from the patch base.
+    local clone_ver="${PATCH_VER:-$KERNEL_VER}"
+    info "Cloning kernel source v$clone_ver to $KERNEL_SRC..."
     rm -rf "$KERNEL_SRC"
     mkdir -p "$(dirname "$KERNEL_SRC")"
 
-    # Use the stable kernel tree — it has all tags including point releases
-    # (v7.0, v7.0.12, etc.), while Linus's tree only has major version tags.
-    git clone --depth 1 --branch "v$KERNEL_VER" \
+    git clone --depth 1 --branch "v$clone_ver" \
         "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" "$KERNEL_SRC" \
-        2>/dev/null || git clone --depth 1 --branch "v$KERNEL_VER" \
+        2>/dev/null || git clone --depth 1 --branch "v$clone_ver" \
         "https://github.com/torvalds/linux.git" "$KERNEL_SRC"
 
     cd "$KERNEL_SRC"
@@ -156,6 +159,9 @@ prepare_source() {
 apply_patches() {
     cd "$KERNEL_SRC"
     [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches for kernel $KERNEL_VER in $PATCH_DIR"
+
+    # Clean up any stale git am state from a previous interrupted run
+    git am --abort 2>/dev/null || true
 
     # Sanitize patch files: ensure empty context lines have leading space and
     # hunk header counts match body length.  Idempotent — safe to run each time.
