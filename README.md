@@ -17,12 +17,6 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 └── LICENSE
 ```
 
-Each kernel version directory contains a 5-patch modular series generated via
-`git format-patch`.  Apply in order with `git am *.patch` on the matching
-upstream kernel tag.  The Fedora patches target the `archived-7.0` branch of
-`gitlab.com/cki-project/kernel-ark`.  `patch -F 3` works but `git am` preserves
-commit metadata (author, date, sign-off).
-
 ## Quick start
 
 > [!NOTE]
