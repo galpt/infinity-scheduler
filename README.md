@@ -43,6 +43,7 @@ reboot
 # Verify it's running
 uname -r                              # → 7.1-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
+sysctl kernel.infinity_version        # → kernel.infinity_version = v4.6-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 ```
 
@@ -52,6 +53,7 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divis
 |---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
+| `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
 separate fair-share window is needed.  The EMA climb time constant is
