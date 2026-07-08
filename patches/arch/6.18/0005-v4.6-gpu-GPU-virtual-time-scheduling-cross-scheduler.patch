@@ -1,7 +1,7 @@
 From 71a005a0242a08755b8eaee277d99535a7293e00 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:15:27 +0700
-Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
+Subject: [PATCH 5/6] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
  coupling, KERNEL vtime boost
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
