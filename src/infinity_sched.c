@@ -28,6 +28,7 @@
 /* ------------------------------------------------------------------ */
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 static int infinity_running_flag = 1;
+static char infinity_version[] = "v4.6-gpu";
 static int clamp_smt_divisor(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
 {
@@ -60,6 +61,13 @@ static struct ctl_table infinity_sysctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "infinity_version",
+		.data		= infinity_version,
+		.maxlen		= sizeof(infinity_version),
+		.mode		= 0444,
+		.proc_handler	= proc_dostring,
 	},
 	{}
 };
