@@ -152,32 +152,25 @@ O(log n) insertion  |  O(1) selection
 min_gpu_vtime advances on each pick"]
         class QUEUE dec
 
-        SELFIFO["drm_sched_rq[KERNEL]
-───────────────────
-Always checked first
-Standalone FIFO
-Never enters fair queue
-Prevents TDR hardware reset"]
-        class SELFIFO dec
-
         KERNEL["KERNEL priority jobs
-(VM page tables, buffer evictions)"]
+(VM page tables, buffer evictions)
+4x vtime boost via >>= 2"]
         USER["HIGH / NORMAL / LOW priority jobs
 (rendering, compute, compositing)"]
         class KERNEL sig
         class USER ent
 
-        KERNEL --> SELFIFO
+        KERNEL --> QUEUE
         USER --> QUEUE
 
         SELECT["drm_sched_select_entity()
 ───────────────────────────
-KERNEL FIFO → entity found? return it
-INFINITY   → unified rq → first ready
-LEGACY     → per-priority FIFO/RR queues"]
+Single unified Infinity rbtree
+First ready entity wins
+KERNEL gets >>= 2 vtime boost
+(FIFO/RR removed — no fallback)"]
         class SELECT algo
 
-        SELFIFO --> SELECT
         QUEUE --> SELECT
     end
 
@@ -202,14 +195,14 @@ ema              (CPU burstiness)"]
 gpu_time_total += job_delta
 gpu_time_ema  += climb(delta)
 (EMA decay on next submission via
- drm_sched_rq_update_fifo_locked)"]
+ drm_sched_rq_update_vtime_locked)"]
     class DONE algo
 
     DONE -. "credit_count -= credits" .-> SELECT
 ```
 
 The Infinity GPU extension hooks into the DRM scheduler via
-`DRM_SCHED_POLICY_INFINITY` (default).  Each GPU context (entity) tracks its
+the Infinity virtual time algorithm (sole policy — FIFO/RR removed).  Each GPU context (entity) tracks its
 GPU time via EMA — climbing on job completion, decaying on idle.  Virtual
 GPU time replaces the stock submit-timestamp sort key, scaled by entity
 priority and burstiness.  The CPU-side interactivity signals (futex_waiting,
@@ -217,7 +210,7 @@ CPU EMA) are resolved from the owning process via `pid_task()` under an RCU
 read lock and directly affect the entity's GPU vtime — no manual configuration
 needed.
 
-To revert to stock FIFO: add `drm.sched_policy=0` to the kernel command line.
+No fallback to FIFO exists — the legacy policy module parameter and selectors have been removed.
 
 ## Feature comparison
 
@@ -237,7 +230,7 @@ To revert to stock FIFO: add `drm.sched_policy=0` to the kernel command line.
 | RT cross-class safety | No | **Yes (native requeue throttling)** |
 | Asymmetric core placement | No | **Yes (EMA-guided P/E core bias)** |
 | GPU time tracking | No | **Yes (EMA per DRM entity)** |
-| Virtual GPU time scheduling | No | **Yes (DRM_SCHED_POLICY_INFINITY)** |
+| Virtual GPU time scheduling | No | **Yes (sole Infinity policy, FIFO/RR removed)** |
 | Soft priority (anti-starvation) | No | **Yes (proportional vtime scaling)** |
 | Cross-scheduler interactivity | No | **Yes (CPU EMA feeds GPU vtime)** |
 
@@ -251,6 +244,7 @@ GPL-2.0
 - **[scx_flow 3.1.0](https://github.com/sched-ext/scx/tree/main/scheds/experimental/scx_flow)** — BPF sched-ext fair-share scheduler by the sched-ext community. The budget model and interactive floor logic are adapted from this implementation.
 - **[BORE](https://github.com/firelzrd/bore-scheduler)** — Burst-Oriented Response Enhancer scheduler by Masahito S ([firelzrd](https://github.com/firelzrd)). BORE's approach to CPU-bound task suppression through burst scoring provided a reference point for Infinity's accelerating consumption design.
 - **[BMQ / PDS / LF-BMQ](https://gitlab.com/alfredchen/projectc)** — BitMap Queue schedulers by Alfred Chen (Project C). Research into BMQ's complete scheduler replacement approach validated the decision to keep Infinity within EEVDF rather than replacing it entirely.
+- **[Tvrtko Ursulin — Fair(er) DRM GPU scheduler](https://blogs.igalia.com/tursulin/fair-er-drm-gpu-scheduler/)** — Igalia blog post demonstrating a CFS-inspired fair scheduler for the DRM GPU scheduler. The approach to unified virtual time scheduling and priority de-strictification directly informs Infinity's GPU extension.
 - **[LINUX DO](https://linux.do/)** — Chinese Linux community where the Infinity scheduler is discussed and promoted. Feedback from the community helps shape the project's development direction.
 - **[CachyOS community](https://cachyos.org/)** — Testers and early adopters who provided real-world feedback during development, helping validate the scheduler's behavior under diverse workloads.
 - **[u3z05en](https://github.com/u3z05en)** — Jonathan, for helping with the code review, addressing several subtle issues that made Infinity more correct and robust.
