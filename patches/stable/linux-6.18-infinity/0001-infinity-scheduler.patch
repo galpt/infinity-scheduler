@@ -1,7 +1,7 @@
 From 4458ead3ba4eeef9af1e585605abe886a0440f7e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:44:19 +0700
-Subject: [PATCH 01/24] v4.5: complete implementation
+Subject: [PATCH 01/25] v4.5: complete implementation
 
 - Weight from static_prio, slope 98/100 (2% floor)
 - Futex bypass: set in waitwake.c, halve vslice in place_entity
@@ -726,7 +726,7 @@ index 7936d4333..a3f69d4d7 100644
 From 721384490ff8783ad84efc8ada65cff6322d839e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:47:17 +0700
-Subject: [PATCH 02/24] add place_entity futex check to 6.18
+Subject: [PATCH 02/25] add place_entity futex check to 6.18
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -760,7 +760,7 @@ index feda5474d..93fbf23c1 100644
 From 8dd4159884b8f4f016126712dbb4e6faaddb6b08 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:18 +0700
-Subject: [PATCH 03/24] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 03/25] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1198,7 +1198,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 39c5be89fb13015ca369bac15adf089aa4adf118 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 04/24] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 04/25] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 
 - infinity_consume now takes cpu_capacity and computes a dynamic alpha
@@ -1354,7 +1354,7 @@ index 8fa679a4a..8f96c7554 100644
 From 19b3b5e2bca47a724a736eebc3036b7739e861ce Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:28:47 +0700
-Subject: [PATCH 05/24] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 05/25] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1412,7 +1412,7 @@ index 8f761839e..ffa8ae45f 100644
 From 629f9274455784e29bd3b57dcd7c514cbdd3a181 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:29 +0700
-Subject: [PATCH 06/24] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 06/25] v4.5: Infinity EMA-driven migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1449,7 +1449,7 @@ index ffa8ae45f..2680dd535 100644
 From eafea7c4606ab51dbcfe813d51ed27d15897e384 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:29:19 +0700
-Subject: [PATCH 07/24] v4.5: Infinity cgroup defense + migration hysteresis
+Subject: [PATCH 07/25] v4.5: Infinity cgroup defense + migration hysteresis
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1580,7 +1580,7 @@ index adfb6e340..131790813 100644
 From 10a7fc7cbda12cb8168e15ae278fcbb22fee20d2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:36:22 +0700
-Subject: [PATCH 08/24] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 08/25] v4.5: Infinity cross-class RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1748,7 +1748,7 @@ index a3f69d4d7..c22df24f1 100644
 From 0643d2e4288adc1157a3aa78292009a133a2d847 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:38:41 +0700
-Subject: [PATCH 09/24] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 09/25] v4.5: Infinity EMA-driven asymmetric core placement
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -1793,7 +1793,7 @@ index 6bca1665c..5dfcd5599 100644
 From 267362c1f0f8dd3b0a79f20ed3192c84f2b6554a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:07:17 +0700
-Subject: [PATCH 10/24] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 10/25] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1958,7 +1958,7 @@ index c22df24f1..01de70f1f 100644
 From f5acbf1e343f4f8fdd7ab0ea14ef32f9b84abd46 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:24:49 +0700
-Subject: [PATCH 11/24] v4.6: adversarial review fixes
+Subject: [PATCH 11/25] v4.6: adversarial review fixes
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2127,7 +2127,7 @@ index 01de70f1f..b9cabe5d1 100644
 From d29e14aa83dc67e14f311e324c0c5ac56481af5c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:37:32 +0700
-Subject: [PATCH 12/24] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
+Subject: [PATCH 12/25] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
  &per_cpu(..., cpu_of(rq))
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2169,7 +2169,7 @@ index b9cabe5d1..b46bca11a 100644
 From 62461513c0ae3a4a9113e990d68dac1880a16222 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:32:12 +0700
-Subject: [PATCH 13/24] v4.6: fix balance_callback deadlock + CPU 0 starvation
+Subject: [PATCH 13/25] v4.6: fix balance_callback deadlock + CPU 0 starvation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -2241,7 +2241,7 @@ index 20a141b16..385df8d30 100644
 From 30b5ffaf5c02ada9e5cf47f436ab094aa58ec46e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:37:58 +0700
-Subject: [PATCH 14/24] v4.6: replace balance_callback/llist with task_work for
+Subject: [PATCH 14/25] v4.6: replace balance_callback/llist with task_work for
  RT safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2436,7 +2436,7 @@ index b46bca11a..91d6c19bc 100644
 From b52ebefdf5ea421be5b614244dbbd5ab81e5ed53 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:49:44 +0700
-Subject: [PATCH 15/24] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+Subject: [PATCH 15/25] v4.6: zero infinity_ctx flags/saved_rt in fork_init
 
 A demoted RT task inherits stale flags and saved_rt fields via
 dup_task_struct's bit-for-bit copy.  Zero them so the child starts
@@ -2468,7 +2468,7 @@ index 582291f8b..8b41809fb 100644
 From 609e3f52b2f92021d16c00b0e51773ddc0443bb7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:07 +0700
-Subject: [PATCH 16/24] v4.6: native implementation -- requeue_task_rt FIFO
+Subject: [PATCH 16/25] v4.6: native implementation -- requeue_task_rt FIFO
  throttle + update_cfs_group cgroup modulation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2719,7 +2719,7 @@ index 91d6c19bc..c3ad990ff 100644
 From 9af4218201d450425994d7e57bc1f9829bfbc887 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:07 +0700
-Subject: [PATCH 17/24] v4.6: update comments -- v4.5->v4.6, sched_fork not
+Subject: [PATCH 17/25] v4.6: update comments -- v4.5->v4.6, sched_fork not
  task_fork_fair, deduplicate RT threshold
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -2770,7 +2770,7 @@ index 3eef63c4a..5441d8f46 100644
 From 081d6d2d493fc511eefad7ed87632f3d9657ec25 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:22:19 +0700
-Subject: [PATCH 18/24] v4.6-gpu: Infinity GPU scheduler extension
+Subject: [PATCH 18/25] v4.6-gpu: Infinity GPU scheduler extension
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -3171,7 +3171,7 @@ index 323a505e6..a576329d0 100644
 From 9b43ad3577cd01927078dfc5cfa86342d8c9530c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:29:13 +0700
-Subject: [PATCH 19/24] v4.6-gpu: update heading comments to v4.6-gpu
+Subject: [PATCH 19/25] v4.6-gpu: update heading comments to v4.6-gpu
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -3212,7 +3212,7 @@ index 5441d8f46..653d148fe 100644
 From e3cb359b2ec0e143f7655d01d68e1895c2b3b28f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:32:12 +0700
-Subject: [PATCH 20/24] v4.6-gpu: make INFINITY the default GPU scheduling
+Subject: [PATCH 20/25] v4.6-gpu: make INFINITY the default GPU scheduling
  policy
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -3240,7 +3240,7 @@ index f7fcf6189..288165c30 100644
 From 9e1e8b491d81d1952ab54483e18b5ab823655d8a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:40:45 +0700
-Subject: [PATCH 21/24] v4.6-gpu: add missing EMA idle decay to prevent sticky
+Subject: [PATCH 21/25] v4.6-gpu: add missing EMA idle decay to prevent sticky
  throttle
 
 The gpu_time_ema only climbed on job completion but never decayed
@@ -3292,7 +3292,7 @@ index 288165c30..880e429de 100644
 From 6e2383a06633cc8b494c9d9d089b88bfdf869437 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 00:39:25 +0700
-Subject: [PATCH 22/24] v4.6-gpu: fix ERR_PTR dereference and num_rqs
+Subject: [PATCH 22/25] v4.6-gpu: fix ERR_PTR dereference and num_rqs
  out-of-bounds boot panics
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -3377,7 +3377,7 @@ index 880e429de..e10f10d37 100644
 From bbf78ded5d7c7f004957137e496dd3652f3086f9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 00:47:12 +0700
-Subject: [PATCH 23/24] v4.6-gpu: restore can_queue gate with proper IS_ERR
+Subject: [PATCH 23/25] v4.6-gpu: restore can_queue gate with proper IS_ERR
  handling
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -3419,7 +3419,7 @@ index e10f10d37..a5dc10848 100644
 From 2971afe765722af3c07912be3a6ea971a5164eba Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 00:53:24 +0700
-Subject: [PATCH 24/24] v4.6-gpu: fix IS_ERR guard on KERNEL queue return path
+Subject: [PATCH 24/25] v4.6-gpu: fix IS_ERR guard on KERNEL queue return path
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -3446,6 +3446,428 @@ index a5dc10848..92eb5c955 100644
  			break;
  	}
  	return IS_ERR(entity) ? NULL : entity;
+-- 
+2.55.0
+
+
+From 48dbfa9a02f8166d03ff8fb46c5cf61b4a48dd72 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 8 Jul 2026 07:33:47 +0700
+Subject: [PATCH 25/25] =?UTF-8?q?v4.6-gpu:=20eliminate=20FIFO/RR=20?=
+ =?UTF-8?q?=E2=80=94=20unified=20Infinity-only=20GPU=20scheduling?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c    |  19 +-
+ drivers/gpu/drm/scheduler/sched_internal.h  |  10 +-
+ drivers/gpu/drm/scheduler/sched_main.c      | 213 ++++----------------
+ drivers/gpu/drm/xe/xe_gpu_scheduler_types.h |   1 -
+ include/drm/gpu_scheduler.h                 |   3 -
+ 5 files changed, 44 insertions(+), 202 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index 06b439d8e..a2132cb05 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -98,15 +98,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 			entity->priority = max_t(s32, (s32) sched_list[0]->num_rqs - 1,
+ 						 (s32) DRM_SCHED_PRIORITY_KERNEL);
+ 		}
+-		if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
+-		    entity->priority != DRM_SCHED_PRIORITY_KERNEL) {
++		{
+ 			u32 target_prio = sched_list[0]->num_rqs > 1 ?
+ 				sched_list[0]->num_rqs - 1 : 0;
+ 			if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
+ 				target_prio--;
+ 			entity->rq = sched_list[0]->sched_rq[target_prio];
+-		} else
+-			entity->rq = sched_list[0]->sched_rq[entity->priority];
++		}
+ 	}
+ 
+ 	init_completion(&entity->entity_idle);
+@@ -512,8 +510,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+ 	 * Update the entity's location in the min heap according to
+ 	 * the timestamp of the next job, if any.
+ 	 */
+-	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO ||
+-	    drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
++	{
+ 		struct drm_sched_job *next;
+ 
+ 		next = drm_sched_entity_queue_peek(entity);
+@@ -523,7 +520,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+ 			spin_lock(&entity->lock);
+ 			rq = entity->rq;
+ 			spin_lock(&rq->lock);
+-			drm_sched_rq_update_fifo_locked(entity, rq,
++			drm_sched_rq_update_vtime_locked(entity, rq,
+ 							next->submit_ts);
+ 			spin_unlock(&rq->lock);
+ 			spin_unlock(&entity->lock);
+@@ -569,15 +566,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+ 
+ 	spin_lock(&entity->lock);
+ 	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
+-	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
+-	    entity->priority != DRM_SCHED_PRIORITY_KERNEL) {
++	{
+ 		u32 target_prio = sched && sched->num_rqs > 1 ?
+ 			sched->num_rqs - 1 : 0;
+ 		if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
+ 			target_prio--;
+ 		rq = sched ? sched->sched_rq[target_prio] : NULL;
+-	} else
+-		rq = sched ? sched->sched_rq[entity->priority] : NULL;
++	}
+ 	if (rq != entity->rq) {
+ 		drm_sched_rq_remove_entity(entity->rq, entity);
+ 		entity->rq = rq;
+@@ -644,7 +639,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
+ 		spin_lock(&rq->lock);
+ 		drm_sched_rq_add_entity(rq, entity);
+ 
+-		drm_sched_rq_update_fifo_locked(entity, rq, submit_ts);
++		drm_sched_rq_update_vtime_locked(entity, rq, submit_ts);
+ 
+ 		spin_unlock(&rq->lock);
+ 		spin_unlock(&entity->lock);
+diff --git a/drivers/gpu/drm/scheduler/sched_internal.h b/drivers/gpu/drm/scheduler/sched_internal.h
+index fe1be08d5..2bb7de029 100644
+--- a/drivers/gpu/drm/scheduler/sched_internal.h
++++ b/drivers/gpu/drm/scheduler/sched_internal.h
+@@ -3,14 +3,6 @@
+ #ifndef _DRM_GPU_SCHEDULER_INTERNAL_H_
+ #define _DRM_GPU_SCHEDULER_INTERNAL_H_
+ 
+-
+-/* Used to choose between FIFO and RR job-scheduling */
+-extern int drm_sched_policy;
+-
+-#define DRM_SCHED_POLICY_RR    0
+-#define DRM_SCHED_POLICY_FIFO  1
+-#define DRM_SCHED_POLICY_INFINITY 2
+-
+ void drm_sched_wakeup(struct drm_gpu_scheduler *sched);
+ 
+ void drm_sched_rq_add_entity(struct drm_sched_rq *rq,
+@@ -18,7 +10,7 @@ void drm_sched_rq_add_entity(struct drm_sched_rq *rq,
+ void drm_sched_rq_remove_entity(struct drm_sched_rq *rq,
+ 				struct drm_sched_entity *entity);
+ 
+-void drm_sched_rq_update_fifo_locked(struct drm_sched_entity *entity,
++void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
+ 				     struct drm_sched_rq *rq, ktime_t ts);
+ 
+ void drm_sched_entity_select_rq(struct drm_sched_entity *entity);
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index 92eb5c955..ac4572a0a 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -85,15 +85,6 @@
+ #define CREATE_TRACE_POINTS
+ #include "gpu_scheduler_trace.h"
+ 
+-int drm_sched_policy = DRM_SCHED_POLICY_INFINITY;
+-
+-/**
+- * DOC: sched_policy (int)
+- * Used to override default entities scheduling policy in a run queue.
+- */
+-MODULE_PARM_DESC(sched_policy, "Specify the scheduling policy for entities on a run-queue, " __stringify(DRM_SCHED_POLICY_RR) " = Round Robin, " __stringify(DRM_SCHED_POLICY_FIFO) " = FIFO (default), " __stringify(DRM_SCHED_POLICY_INFINITY) " = Infinity vGPU.");
+-module_param_named(sched_policy, drm_sched_policy, int, 0444);
+-
+ static u32 drm_sched_available_credits(struct drm_gpu_scheduler *sched)
+ {
+ 	u32 credits;
+@@ -134,22 +125,18 @@ static bool drm_sched_can_queue(struct drm_gpu_scheduler *sched,
+ 	return drm_sched_available_credits(sched) >= s_job->credits;
+ }
+ 
+-static __always_inline bool drm_sched_entity_compare_before(struct rb_node *a,
+-							    const struct rb_node *b)
+-{
+-	struct drm_sched_entity *ent_a =  rb_entry((a), struct drm_sched_entity, rb_tree_node);
+-	struct drm_sched_entity *ent_b =  rb_entry((b), struct drm_sched_entity, rb_tree_node);
+-
+-	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
+-}
+-
+ static __always_inline bool
+ drm_sched_entity_compare_vtime(struct rb_node *a,
+ 			       const struct rb_node *b)
+ {
+ 	struct drm_sched_entity *ent_a = rb_entry(a, struct drm_sched_entity, rb_tree_node);
+ 	struct drm_sched_entity *ent_b = rb_entry(b, struct drm_sched_entity, rb_tree_node);
+-	return ent_a->cached_gpu_vtime < ent_b->cached_gpu_vtime;
++
++	if (ent_a->cached_gpu_vtime != ent_b->cached_gpu_vtime)
++		return ent_a->cached_gpu_vtime < ent_b->cached_gpu_vtime;
++
++	return ktime_before(ent_a->oldest_job_waiting,
++			    ent_b->oldest_job_waiting);
+ }
+ 
+ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+@@ -211,7 +198,7 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+ 	return vtime;
+ }
+ 
+-static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
++static void drm_sched_rq_remove_vtime_locked(struct drm_sched_entity *entity,
+ 					    struct drm_sched_rq *rq)
+ {
+ 	if (!RB_EMPTY_NODE(&entity->rb_tree_node)) {
+@@ -220,46 +207,36 @@ static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
+ 	}
+ }
+ 
+-void drm_sched_rq_update_fifo_locked(struct drm_sched_entity *entity,
++void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
+ 				     struct drm_sched_rq *rq,
+ 				     ktime_t ts)
+ {
+-	/*
+-	 * Both locks need to be grabbed, one to protect from entity->rq change
+-	 * for entity from within concurrent drm_sched_entity_select_rq and the
+-	 * other to update the rb tree structure.
+-	 */
+ 	lockdep_assert_held(&entity->lock);
+ 	lockdep_assert_held(&rq->lock);
+ 
+-	drm_sched_rq_remove_fifo_locked(entity, rq);
++	drm_sched_rq_remove_vtime_locked(entity, rq);
+ 
+ 	entity->oldest_job_waiting = ts;
+ 
+-	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
+-		/* Infinity EMA decay on idle: if the entity went idle
+-		 * between its last active timestamp and the current job
+-		 * submission, decay gpu_time_ema proportionally. */
+-		if (entity->gpu_time_last_active) {
+-			u64 idle_ns = ktime_to_ns(ktime_sub(ts,
+-				entity->gpu_time_last_active));
+-			u64 periods = div64_u64(idle_ns,
+-				INFINITY_GPU_EMA_HALFLIFE_NS);
+-			if (periods > 63)
+-				entity->gpu_time_ema = 0;
+-			else if (periods)
+-				entity->gpu_time_ema >>= periods;
+-		}
+-		entity->gpu_time_last_active = ts;
+-
+-		entity->cached_gpu_vtime = drm_sched_entity_calc_vtime(entity);
+-		entity->normalized_base = entity->gpu_time_total;
+-		rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
+-			      drm_sched_entity_compare_vtime);
+-	} else {
+-		rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
+-			      drm_sched_entity_compare_before);
++	/* Infinity EMA decay on idle: if the entity went idle
++	 * between its last active timestamp and the current job
++	 * submission, decay gpu_time_ema proportionally. */
++	if (entity->gpu_time_last_active) {
++		u64 idle_ns = ktime_to_ns(ktime_sub(ts,
++			entity->gpu_time_last_active));
++		u64 periods = div64_u64(idle_ns,
++			INFINITY_GPU_EMA_HALFLIFE_NS);
++		if (periods > 63)
++			entity->gpu_time_ema = 0;
++		else if (periods)
++			entity->gpu_time_ema >>= periods;
+ 	}
++	entity->gpu_time_last_active = ts;
++
++	entity->cached_gpu_vtime = drm_sched_entity_calc_vtime(entity);
++	entity->normalized_base = entity->gpu_time_total;
++	rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
++		      drm_sched_entity_compare_vtime);
+ }
+ 
+ /**
+@@ -325,111 +302,11 @@ void drm_sched_rq_remove_entity(struct drm_sched_rq *rq,
+ 	if (rq->current_entity == entity)
+ 		rq->current_entity = NULL;
+ 
+-	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO ||
+-	    drm_sched_policy == DRM_SCHED_POLICY_INFINITY)
+-		drm_sched_rq_remove_fifo_locked(entity, rq);
++	drm_sched_rq_remove_vtime_locked(entity, rq);
+ 
+ 	spin_unlock(&rq->lock);
+ }
+ 
+-/**
+- * drm_sched_rq_select_entity_rr - Select an entity which could provide a job to run
+- *
+- * @sched: the gpu scheduler
+- * @rq: scheduler run queue to check.
+- *
+- * Try to find the next ready entity.
+- *
+- * Return an entity if one is found; return an error-pointer (!NULL) if an
+- * entity was ready, but the scheduler had insufficient credits to accommodate
+- * its job; return NULL, if no ready entity was found.
+- */
+-static struct drm_sched_entity *
+-drm_sched_rq_select_entity_rr(struct drm_gpu_scheduler *sched,
+-			      struct drm_sched_rq *rq)
+-{
+-	struct drm_sched_entity *entity;
+-
+-	spin_lock(&rq->lock);
+-
+-	entity = rq->current_entity;
+-	if (entity) {
+-		list_for_each_entry_continue(entity, &rq->entities, list) {
+-			if (drm_sched_entity_is_ready(entity))
+-				goto found;
+-		}
+-	}
+-
+-	list_for_each_entry(entity, &rq->entities, list) {
+-		if (drm_sched_entity_is_ready(entity))
+-			goto found;
+-
+-		if (entity == rq->current_entity)
+-			break;
+-	}
+-
+-	spin_unlock(&rq->lock);
+-
+-	return NULL;
+-
+-found:
+-	if (!drm_sched_can_queue(sched, entity)) {
+-		/*
+-		 * If scheduler cannot take more jobs signal the caller to not
+-		 * consider lower priority queues.
+-		 */
+-		entity = ERR_PTR(-ENOSPC);
+-	} else {
+-		rq->current_entity = entity;
+-		reinit_completion(&entity->entity_idle);
+-	}
+-
+-	spin_unlock(&rq->lock);
+-
+-	return entity;
+-}
+-
+-/**
+- * drm_sched_rq_select_entity_fifo - Select an entity which provides a job to run
+- *
+- * @sched: the gpu scheduler
+- * @rq: scheduler run queue to check.
+- *
+- * Find oldest waiting ready entity.
+- *
+- * Return an entity if one is found; return an error-pointer (!NULL) if an
+- * entity was ready, but the scheduler had insufficient credits to accommodate
+- * its job; return NULL, if no ready entity was found.
+- */
+-static struct drm_sched_entity *
+-drm_sched_rq_select_entity_fifo(struct drm_gpu_scheduler *sched,
+-				struct drm_sched_rq *rq)
+-{
+-	struct rb_node *rb;
+-
+-	spin_lock(&rq->lock);
+-	for (rb = rb_first_cached(&rq->rb_tree_root); rb; rb = rb_next(rb)) {
+-		struct drm_sched_entity *entity;
+-
+-		entity = rb_entry(rb, struct drm_sched_entity, rb_tree_node);
+-		if (drm_sched_entity_is_ready(entity)) {
+-			/* If we can't queue yet, preserve the current entity in
+-			 * terms of fairness.
+-			 */
+-			if (!drm_sched_can_queue(sched, entity)) {
+-				spin_unlock(&rq->lock);
+-				return ERR_PTR(-ENOSPC);
+-			}
+-
+-			reinit_completion(&entity->entity_idle);
+-			break;
+-		}
+-	}
+-	spin_unlock(&rq->lock);
+-
+-	return rb ? rb_entry(rb, struct drm_sched_entity, rb_tree_node) : NULL;
+-}
+-
+ static struct drm_sched_entity *
+ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 				    struct drm_sched_rq *rq)
+@@ -1236,34 +1113,16 @@ static struct drm_sched_entity *
+ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ {
+ 	struct drm_sched_entity *entity;
+-	int i;
+ 
+-	/* Always exhaust KERNEL priority first -- GPU memory management */
+-	entity = drm_sched_rq_select_entity_fifo(sched,
+-				sched->sched_rq[DRM_SCHED_PRIORITY_KERNEL]);
+-	if (entity)
+-		return IS_ERR(entity) ? NULL : entity;
+-		return entity;
+-
+-	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
+-		/* Unified queue dynamically bounds to the highest available user queue */
+-		u32 target_prio = sched->num_rqs > 1 ? sched->num_rqs - 1 : 0;
+-		if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
+-			target_prio--;
+-		entity = drm_sched_rq_select_entity_infinity(sched,
+-				sched->sched_rq[target_prio]);
+-		return IS_ERR(entity) ? NULL : entity;
+-	}
++	/* Single unified Infinity queue -- all priorities including KERNEL
++	 * live in the same rbtree.  KERNEL priority gets a 4x vtime boost
++	 * via drm_sched_entity_calc_vtime(). */
++	u32 target_prio = sched->num_rqs > 1 ? sched->num_rqs - 1 : 0;
++	if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++		target_prio--;
+ 
+-	/* Legacy: per-priority queues */
+-	for (i = DRM_SCHED_PRIORITY_HIGH; i < sched->num_rqs; i++) {
+-		entity = drm_sched_policy == DRM_SCHED_POLICY_FIFO ?
+-			drm_sched_rq_select_entity_fifo(sched, sched->sched_rq[i]) :
+-			drm_sched_rq_select_entity_rr(sched, sched->sched_rq[i]);
+-		if (entity)
+-		return IS_ERR(entity) ? NULL : entity;
+-			break;
+-	}
++	entity = drm_sched_rq_select_entity_infinity(sched,
++			sched->sched_rq[target_prio]);
+ 	return IS_ERR(entity) ? NULL : entity;
+ }
+ 
+diff --git a/drivers/gpu/drm/xe/xe_gpu_scheduler_types.h b/drivers/gpu/drm/xe/xe_gpu_scheduler_types.h
+index 6731b13da..4abb6b374 100644
+--- a/drivers/gpu/drm/xe/xe_gpu_scheduler_types.h
++++ b/drivers/gpu/drm/xe/xe_gpu_scheduler_types.h
+@@ -52,6 +52,5 @@ struct xe_gpu_scheduler {
+ };
+ 
+ #define xe_sched_entity		drm_sched_entity
+-#define xe_sched_policy		drm_sched_policy
+ 
+ #endif
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index a576329d0..525768d16 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -747,7 +747,4 @@ void drm_sched_entity_modify_sched(struct drm_sched_entity *entity,
+ #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
+ #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
+ #define INFINITY_GPU_WEIGHT_REDUCE_PCT  50
+-/* Infinity scheduling policy value */
+-#define DRM_SCHED_POLICY_INFINITY       2
+-
+ #endif
 -- 
 2.55.0
 
