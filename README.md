@@ -1,6 +1,6 @@
 # infinity-scheduler (v4.6-gpu)
 
-A fair-share CPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds.
+A fair-share CPU + GPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds.
 
 ## Project structure
 
