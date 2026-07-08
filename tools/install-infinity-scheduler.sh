@@ -123,17 +123,13 @@ prepare_source() {
     # Always start fresh — delete any previous clone and re-clone.
     # This avoids all edge cases with stale patches, committed changes,
     # half-built trees, or .rej/.orig files from failed runs.
-    # Use the patch version for cloning (e.g. patches/arch/7.1/ -> v7.1),
-    # not the running kernel version (e.g. 7.1.3), since point releases
-    # may have diverged from the patch base.
-    local clone_ver="${PATCH_VER:-$KERNEL_VER}"
-    info "Cloning kernel source v$clone_ver to $KERNEL_SRC..."
+    info "Cloning kernel source v$KERNEL_VER to $KERNEL_SRC..."
     rm -rf "$KERNEL_SRC"
     mkdir -p "$(dirname "$KERNEL_SRC")"
 
-    git clone --depth 1 --branch "v$clone_ver" \
+    git clone --depth 1 --branch "v$KERNEL_VER" \
         "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" "$KERNEL_SRC" \
-        2>/dev/null || git clone --depth 1 --branch "v$clone_ver" \
+        2>/dev/null || git clone --depth 1 --branch "v$KERNEL_VER" \
         "https://github.com/torvalds/linux.git" "$KERNEL_SRC"
 
     cd "$KERNEL_SRC"
