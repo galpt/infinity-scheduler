@@ -8,20 +8,19 @@ A fair-share CPU scheduler based on the limit concept in mathematics — every s
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/             Vanilla kernel.org — 29 patches
-│   ├── arch/7.0/              Vanilla kernel.org — 28 patches
-│   ├── arch/7.1/              Vanilla kernel.org — 31 patches
-│   └── fedora/7.0/            Fedora kernel-ark — 2 patches
+│   ├── arch/6.18/             Vanilla kernel.org (4013 lines)
+│   ├── arch/7.0/              Vanilla kernel.org (4082 lines)
+│   ├── arch/7.1/              Vanilla kernel.org (4899 lines)
+│   └── fedora/7.0/            Fedora kernel-ark (1511 lines)
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
 ```
 
-Patches are generated via `git format-patch` from the matching upstream kernel tag
-and applicable via `git am`.  The Fedora patches target the `archived-7.0` branch of
-`gitlab.com/cki-project/kernel-ark`.  Each subdirectory contains a sequential patch
-series for easier review.  `patch -F 3` works for all, but `git am` preserves commit
-metadata (author, date, sign-off).
+Each `0001-v4.6-gpu-complete.patch` is a cumulative `git format-patch` series
+applicable via `git am` on the matching upstream kernel tag.  The Fedora patch
+targets the `archived-7.0` branch of `gitlab.com/cki-project/kernel-ark`.
+`patch -F 3` works, but `git am` preserves commit metadata (author, date, sign-off).
 
 ## Quick start
 

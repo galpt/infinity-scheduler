@@ -66,8 +66,8 @@ if [ -n "${1:-}" ] && [[ "$1" != "--"* ]]; then
     KERNEL_VER="$1"
 fi
 
-PATCH_DIR="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
-if [ ! -d "$PATCH_DIR" ]; then
+PATCH_FILE="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
+if [ ! -d "$PATCH_FILE" ]; then
     # No patches for this exact version — find the closest available
     # by comparing major.minor version numbers.
     local_base="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
@@ -86,7 +86,7 @@ if [ ! -d "$PATCH_DIR" ]; then
         echo "No patches found in $INFINITY_DIR/patches/stable/"
         exit 1
     fi
-    PATCH_DIR="$BEST_PATCH"
+    PATCH_FILE="$BEST_PATCH"
     PATCH_VER="$(basename "$BEST_PATCH" | sed 's/linux-//;s/-infinity//')"
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
@@ -103,7 +103,7 @@ cmd_status() {
     echo "  Repo branch: ${INFINITY_BRANCH:-(unknown)}"
     echo "  Build release suffix: $LOCALVERSION_SUFFIX"
     echo ""
-    if [ -d "$PATCH_DIR" ]; then
+    if [ -d "$PATCH_FILE" ]; then
         ok "Patches available for kernel $KERNEL_VER"
     else
         warn "No patches for kernel $KERNEL_VER"
@@ -291,11 +291,11 @@ prepare_source() {
 
 apply_patches() {
     cd "$KERNEL_SRC"
-    [ -d "$PATCH_DIR" ] || die "No patches for kernel $KERNEL_VER"
+    [ -d "$PATCH_FILE" ] || die "No patches for kernel $KERNEL_VER"
 
     # Patches are generated via git format-patch and have correct hunk counts;
     # no reformatting is required here.
-    for p in "$PATCH_DIR"/*.patch; do
+    for p in "$PATCH_FILE"/*.patch; do
         name=$(basename "$p")
         info "Applying: $name"
         if out=$(patch -p1 -N -F 10 < "$p" 2>&1); then
@@ -495,7 +495,7 @@ case "${1:-}" in
         # If it doesn't start with --, treat as kernel version override
         if [[ "$1" != --* ]]; then
             KERNEL_VER="$1"
-            PATCH_DIR="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
+            PATCH_FILE="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
             check_root
             check_secureboot
             check_deps
