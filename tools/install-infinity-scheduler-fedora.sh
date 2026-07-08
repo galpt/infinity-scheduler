@@ -308,11 +308,12 @@ apply_patches() {
     for p in "${PATCH_FILES[@]}"; do
         name=$(basename "$p")
         info "Applying: $name"
-        if out=$(git am "$p" 2>&1); then
+        if out=$(patch -p1 -N -F 10 -s < "$p" 2>&1); then
             ok "$name"
         elif echo "$out" | grep -q "Reversed\|already applied"; then
             ok "Already applied: $name"
-        else
+        elif echo "$out" | grep -q "FAILED\|fuzz"; then
+            echo "$out" | grep -E "FAILED|fuzz" | head -5
             echo "$out" | grep -i -E "FAILED|error|malformed|misordered" | head -5
             die "Failed to apply $name. The patch may need updating."
         fi
