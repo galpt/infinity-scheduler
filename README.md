@@ -94,15 +94,19 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divis
 ```
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
-├── patches/stable/         0001-infinity-scheduler.patch per kernel / distro version
+├── patches/
+│   ├── arch/stable/         Vanilla kernel.org (6.18, 7.0.12, 7.1)
+│   └── fedora/stable/       Fedora kernel-ark (7.0.0 base)
 ├── tools/                  Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
 ```
 
-Each `0001-infinity-scheduler.patch` is a `git format-patch` cumulative series
-applicable via `git am` on the matching upstream kernel tag.  `patch -F 3` works
-but `git am` preserves commit metadata (author, date, sign-off).
+Each patch in `patches/arch/stable/` is a `git format-patch` cumulative series
+applicable via `git am` on the matching upstream kernel tag.  The Fedora patch
+at `patches/fedora/stable/` is generated from the `archived-7.0` branch of
+`gitlab.com/cki-project/kernel-ark`.  `patch -F 3` works for all, but `git am`
+preserves commit metadata (author, date, sign-off).
 
 ## Tunables
 
