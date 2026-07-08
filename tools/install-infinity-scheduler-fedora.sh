@@ -66,29 +66,39 @@ if [ -n "${1:-}" ] && [[ "$1" != "--"* ]]; then
     KERNEL_VER="$1"
 fi
 
-PATCH_FILE="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
-if [ ! -d "$PATCH_FILE" ]; then
-    # No patches for this exact version — find the closest available
-    # by comparing major.minor version numbers.
-    local_base="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
+KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
+PATCH_DIR="$INFINITY_DIR/patches/fedora/$KERNEL_MAJOR"
+PATCH_FILES=()
+while IFS= read -r -d '' f; do
+    PATCH_FILES+=("$f")
+done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
+
+if [ ${#PATCH_FILES[@]} -eq 0 ]; then
+    # No patches for this exact major — find the closest available
     BEST_DIST=999
-    BEST_PATCH=""
-    for d in "$INFINITY_DIR/patches/stable/"*; do
+    BEST_DIR=""
+    for d in "$INFINITY_DIR/patches/fedora/"*/; do
         [ -d "$d" ] || continue
-        v="$(basename "$d" | sed 's/linux-//;s/-infinity//')"
+        v="$(basename "$d")"
         d_major="$(echo "$v" | grep -oP '^\d+\.\d+')"
-        # Squared Euclidean distance: (major_diff)^2 + (minor_diff)^2
-        dist=$(( (${local_base%%.*} - ${d_major%%.*}) * (${local_base%%.*} - ${d_major%%.*}) \
-              + (${local_base#*.} - ${d_major#*.}) * (${local_base#*.} - ${d_major#*.}) ))
-        [ "$dist" -lt "$BEST_DIST" ] && BEST_DIST=$dist && BEST_PATCH="$d"
+        [ -z "$d_major" ] && continue
+        dist=$(( (${KERNEL_MAJOR%%.*} - ${d_major%%.*}) * (${KERNEL_MAJOR%%.*} - ${d_major%%.*}) \
+              + (${KERNEL_MAJOR#*.} - ${d_major#*.}) * (${KERNEL_MAJOR#*.} - ${d_major#*.}) ))
+        if [ "$dist" -lt "$BEST_DIST" ]; then
+            BEST_DIST=$dist
+            BEST_DIR="$d"
+            BEST_VER="$v"
+        fi
     done
-    if [ -z "$BEST_PATCH" ]; then
-        echo "No patches found in $INFINITY_DIR/patches/stable/"
+    if [ -z "$BEST_DIR" ]; then
+        echo "No patches found under $INFINITY_DIR/patches/fedora/"
         exit 1
     fi
-    PATCH_FILE="$BEST_PATCH"
-    PATCH_VER="$(basename "$BEST_PATCH" | sed 's/linux-//;s/-infinity//')"
+    PATCH_DIR="$BEST_DIR"
+    PATCH_VER="$BEST_VER"
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
+    PATCH_FILES=()
+    while IFS= read -r -d '' f; do PATCH_FILES+=("$f"); done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
 fi
 KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
 DISTRO="Fedora"
@@ -103,8 +113,8 @@ cmd_status() {
     echo "  Repo branch: ${INFINITY_BRANCH:-(unknown)}"
     echo "  Build release suffix: $LOCALVERSION_SUFFIX"
     echo ""
-    if [ -d "$PATCH_FILE" ]; then
-        ok "Patches available for kernel $KERNEL_VER"
+    if [ ${#PATCH_FILES[@]} -gt 0 ]; then
+        ok "Patches available for kernel $KERNEL_VER (${#PATCH_FILES[@]} files)"
     else
         warn "No patches for kernel $KERNEL_VER"
     fi
@@ -291,14 +301,14 @@ prepare_source() {
 
 apply_patches() {
     cd "$KERNEL_SRC"
-    [ -d "$PATCH_FILE" ] || die "No patches for kernel $KERNEL_VER"
+    [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches for kernel $KERNEL_VER"
 
     # Patches are generated via git format-patch and have correct hunk counts;
     # no reformatting is required here.
-    for p in "$PATCH_FILE"/*.patch; do
+    for p in "${PATCH_FILES[@]}"; do
         name=$(basename "$p")
         info "Applying: $name"
-        if out=$(patch -p1 -N -F 10 < "$p" 2>&1); then
+        if out=$(git am "$p" 2>&1); then
             ok "$name"
         elif echo "$out" | grep -q "Reversed\|already applied"; then
             ok "Already applied: $name"
@@ -495,7 +505,11 @@ case "${1:-}" in
         # If it doesn't start with --, treat as kernel version override
         if [[ "$1" != --* ]]; then
             KERNEL_VER="$1"
-            PATCH_FILE="$INFINITY_DIR/patches/stable/linux-$KERNEL_VER-infinity"
+            KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
+            PATCH_DIR="$INFINITY_DIR/patches/fedora/$KERNEL_MAJOR"
+            PATCH_FILES=()
+            while IFS= read -r -d '' f; do PATCH_FILES+=("$f"); done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
+            [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches at $PATCH_DIR"
             check_root
             check_secureboot
             check_deps
