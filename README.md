@@ -94,7 +94,7 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divis
 ```
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
-├── patches/stable/         0001-infinity-scheduler.patch for each kernel version
+├── patches/stable/         0001-infinity-scheduler.patch per kernel / distro version
 ├── tools/                  Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
