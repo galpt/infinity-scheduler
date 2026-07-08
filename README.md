@@ -25,6 +25,12 @@ commit metadata (author, date, sign-off).
 
 ## Quick start
 
+> [!NOTE]
+> The install script below is tested and working with the **Limine** bootloader.
+> Support for **GRUB** and **systemd-boot** has been added but not yet tested on
+> real hardware. If you encounter issues or have a working version for your
+> bootloader, please send a pull request.
+
 ```bash
 # 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
 git clone -b v4.6-gpu https://github.com/galpt/infinity-scheduler.git
