@@ -95,9 +95,9 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divis
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/stable/         Vanilla kernel.org (6.18, 7.0.12, 7.1)
-│   └── fedora/stable/       Fedora kernel-ark (7.0.0 base)
-├── tools/                  Install script, build helpers, patch fixers
+│   ├── arch/stable/            Vanilla kernel.org (6.18, 7.0.12, 7.1)
+│   └── fedora/stable/          Fedora kernel-ark (7.0.0 base)
+├── tools/                      Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
 ```
