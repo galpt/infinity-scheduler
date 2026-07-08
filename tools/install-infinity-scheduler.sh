@@ -37,43 +37,43 @@ else
     DISTRO_FAMILY="arch"  # Arch, CachyOS, EndeavourOS, etc.
 fi
 
-PATCH_FILE=""
-PATCH_BASE_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/stable"
+# Map kernel version to patch directory (e.g. 7.0.12 -> 7.0, 7.1.5 -> 7.1)
+KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
 
-# Try exact version match first (e.g. linux-7.1-infinity.patch)
-for f in "$PATCH_BASE_DIR/linux-$KERNEL_VER-infinity.patch" \
-         "$PATCH_BASE_DIR/linux-$KERNEL_VER.patch"; do
-    if [ -f "$f" ]; then
-        PATCH_FILE="$f"
-        break
-    fi
-done
+PATCH_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/$KERNEL_MAJOR"
 
-if [ -z "$PATCH_FILE" ]; then
-    # No patches for this exact version — find the closest available.
-    local_base="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
+if [ ! -d "$PATCH_DIR" ]; then
+    # No patches for this exact major — find the closest available
+    local_base="$KERNEL_MAJOR"
     BEST_DIST=999
-    for f in "$PATCH_BASE_DIR"/*.patch; do
-        [ -f "$f" ] || continue
-        v="$(basename "$f" | sed 's/linux-//;s/-infinity//;s/-fedora//;s/\.patch//')"
+    BEST_DIR=""
+    for d in "$INFINITY_DIR/patches/$DISTRO_FAMILY"/*/; do
+        [ -d "$d" ] || continue
+        v="$(basename "$d")"
         d_major="$(echo "$v" | grep -oP '^\d+\.\d+')"
         [ -z "$d_major" ] && continue
         dist=$(( (${local_base%%.*} - ${d_major%%.*}) * (${local_base%%.*} - ${d_major%%.*}) \
               + (${local_base#*.} - ${d_major#*.}) * (${local_base#*.} - ${d_major#*.}) ))
         if [ "$dist" -lt "$BEST_DIST" ]; then
             BEST_DIST=$dist
-            BEST_PATCH="$f"
+            BEST_DIR="$d"
             BEST_VER="$v"
         fi
     done
-    if [ -z "$BEST_PATCH" ]; then
-        echo "No patches found in $PATCH_BASE_DIR"
+    if [ -z "$BEST_DIR" ]; then
+        echo "No patches found under $INFINITY_DIR/patches/$DISTRO_FAMILY/"
         exit 1
     fi
-    PATCH_FILE="$BEST_PATCH"
+    PATCH_DIR="$BEST_DIR"
     PATCH_VER="$BEST_VER"
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
+
+# Collect patch files sorted
+PATCH_FILES=()
+while IFS= read -r -d '' f; do
+    PATCH_FILES+=("$f")
+done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
 
 KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
 DISTRO="$(if [ "$DISTRO_FAMILY" = "fedora" ]; then echo "Fedora"; else echo "Arch/CachyOS"; fi)"
@@ -86,8 +86,8 @@ cmd_status() {
     echo "  Running kernel: $(uname -r)"
     echo "  Distro: $DISTRO"
     echo ""
-    if [ -n "$PATCH_FILE" ] && [ -f "$PATCH_FILE" ]; then
-        ok "Patches available for kernel $KERNEL_VER"
+    if [ -n "${PATCH_FILES[*]:-}" ] && [ -d "$PATCH_DIR" ]; then
+        ok "Patches available for kernel $KERNEL_VER ($(ls "$PATCH_DIR"/*.patch 2>/dev/null | wc -l) files)"
     else
         warn "No patches for kernel $KERNEL_VER"
     fi
@@ -151,7 +151,7 @@ prepare_source() {
 
 apply_patches() {
     cd "$KERNEL_SRC"
-    [ -f "$PATCH_FILE" ] || die "No patch file for kernel $KERNEL_VER: expected $PATCH_FILE"
+    [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches for kernel $KERNEL_VER in $PATCH_DIR"
 
     # Sanitize patch files: ensure empty context lines have leading space and
     # hunk header counts match body length.  Idempotent — safe to run each time.
@@ -166,10 +166,10 @@ apply_patches() {
     #     python3 "$INFINITY_DIR/tools/fix-patch-counts.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
     # fi
 
-    for p in "$PATCH_FILE"; do
+    for p in "${PATCH_FILES[@]}"; do
         name=$(basename "$p")
         info "Applying: $name"
-        if out=$(patch -p1 -N -F 10 < "$p" 2>&1); then
+        if out=$(git am "$p" 2>&1); then
             ok "$name"
         elif echo "$out" | grep -q "Reversed\|already applied"; then
             ok "Already applied: $name"
@@ -637,9 +637,11 @@ case "${1:-}" in
         # If it doesn't start with --, treat as kernel version override
         if [[ "$1" != --* ]]; then
             KERNEL_VER="$1"
-            PATCH_FILE="$INFINITY_DIR/patches/$DISTRO_FAMILY/stable/linux-$KERNEL_VER-infinity.patch"
-            [ -f "$PATCH_FILE" ] || PATCH_FILE="$INFINITY_DIR/patches/$DISTRO_FAMILY/stable/linux-$KERNEL_VER.patch"
-            [ -f "$PATCH_FILE" ] || die "No patch for kernel $KERNEL_VER in patches/$DISTRO_FAMILY/stable/"
+            KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
+            PATCH_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/$KERNEL_MAJOR"
+            [ -d "$PATCH_DIR" ] || die "No patch dir for kernel $KERNEL_VER at $PATCH_DIR"
+            PATCH_FILES=()
+            while IFS= read -r -d '' f; do PATCH_FILES+=("$f"); done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
             check_root
             check_deps
             check_nvidia

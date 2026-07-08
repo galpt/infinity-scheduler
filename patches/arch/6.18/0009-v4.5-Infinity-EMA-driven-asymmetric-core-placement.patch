@@ -1,0 +1,44 @@
+From 0643d2e4288adc1157a3aa78292009a133a2d847 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 19:38:41 +0700
+Subject: [PATCH] v4.5: Infinity EMA-driven asymmetric core placement
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6bca1665c..5dfcd5599 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8770,6 +8770,26 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		    cpumask_test_cpu(cpu, p->cpus_ptr))
+ 			return cpu;
+ 
++		/*
++		 * Infinity: on asymmetric topologies (Intel hybrid, ARM
++		 * big.LITTLE), bias interactive tasks (EMA == 0) toward the
++		 * highest-capacity P-cores.  READ_ONCE guards the lockless
++		 * ema read.
++		 */
++		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
++			struct asym_cap_data *entry;
++			rcu_read_lock();
++			list_for_each_entry_rcu(entry, &asym_cap_list, link) {
++				int cpu = cpumask_first_and(cpu_capacity_span(entry),
++							    p->cpus_ptr);
++				if (cpu < nr_cpu_ids) {
++					rcu_read_unlock();
++					return cpu;
++				}
++			}
++			rcu_read_unlock();
++		}
++
+ 		if (!is_rd_overutilized(this_rq()->rd)) {
+ 			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
+ 			if (new_cpu >= 0)
+-- 
+2.55.0
+

@@ -1,11 +1,8 @@
-From 6c771d83da3a6c6774c5b49b34ec283faf1d22e7 Mon Sep 17 00:00:00 2001
+From 0937963cf26ba0bdfdea14eb4c9a7d3991e3999f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 12:27:34 +0700
-Subject: [PATCH 1/2] =?UTF-8?q?v4.6-gpu:=20Infinity=20scheduler=20?=
- =?UTF-8?q?=E2=80=94=20CPU=20+=20GPU=20extension=20for=20Fedora=20kernel?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Subject: [PATCH] v4.6-gpu: Infinity scheduler -- CPU + GPU extension for
+ Fedora kernel
 
 Port of the Infinity scheduler v4.6-gpu to the Fedora kernel-ark archived-7.0 tree.
 
@@ -1468,47 +1465,6 @@ index 1ef9ba480..cd6621bf6 100644
  # ifdef CONFIG_CFS_BANDWIDTH
  	int			runtime_enabled;
  	s64			runtime_remaining;
--- 
-2.55.0
-
-
-From 4623bc2fc59aacc7d700243c308fe6ce0c78825f Mon Sep 17 00:00:00 2001
-From: Galih Tama <galpt@v.recipes>
-Date: Wed, 8 Jul 2026 15:26:58 +0700
-Subject: [PATCH 2/2] v4.6-gpu: add sysctl kernel.infinity_version (read-only,
- "v4.6-gpu")
-
-Signed-off-by: Galih Tama <galpt@v.recipes>
----
- kernel/sched/infinity_sched.c | 8 ++++++++
- 1 file changed, 8 insertions(+)
-
-diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 6c1d404ae..de2b83d28 100644
---- a/kernel/sched/infinity_sched.c
-+++ b/kernel/sched/infinity_sched.c
-@@ -27,6 +27,7 @@
- /* ------------------------------------------------------------------ */
- unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
- static int infinity_running_flag = 1;
-+static char infinity_version[] = "v4.6-gpu";
- static int clamp_smt_divisor(const struct ctl_table *table, int write,
- 			     void *buf, size_t *lenp, loff_t *ppos)
- {
-@@ -60,6 +61,13 @@ static struct ctl_table infinity_sysctl_table[] = {
- 		.mode		= 0444,
- 		.proc_handler	= proc_dointvec,
- 	},
-+	{
-+		.procname	= "infinity_version",
-+		.data		= infinity_version,
-+		.maxlen		= sizeof(infinity_version),
-+		.mode		= 0444,
-+		.proc_handler	= proc_dostring,
-+	},
- 	{}
- };
- /* ------------------------------------------------------------------ */
 -- 
 2.55.0
 

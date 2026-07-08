@@ -1,0 +1,37 @@
+From 2c992dfd1dc00b5a1a212d27b849cf8c2701ebc8 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 8 Jul 2026 10:32:50 +0700
+Subject: [PATCH] v4.6-gpu: remove dead normalized_base field and unused
+ INFINITY_GPU_WEIGHT_REDUCE_PCT
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 1 -
+ include/drm/gpu_scheduler.h            | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index c36a78b0f..140a79719 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -239,7 +239,6 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
+ 	entity->gpu_time_last_active = ts;
+ 
+ 	entity->cached_gpu_vtime = drm_sched_entity_calc_vtime(entity);
+-	entity->normalized_base = entity->gpu_time_total;
+ 	rb_add_cached(&entity->rb_tree_node, &rq->rb_tree_root,
+ 		      drm_sched_entity_compare_vtime);
+ }
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index ea4a50aa6..258fab253 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -798,5 +798,4 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+ #define INFINITY_GPU_EMA_ALPHA          4
+ #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
+ #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
+-#define INFINITY_GPU_WEIGHT_REDUCE_PCT  50
+ #endif
+-- 
+2.55.0
+

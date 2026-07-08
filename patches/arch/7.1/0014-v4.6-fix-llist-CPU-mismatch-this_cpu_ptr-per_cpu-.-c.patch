@@ -1,0 +1,61 @@
+From 061c3dd056f7b81ff40bdc8cb964d56b755395f1 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 22:36:39 +0700
+Subject: [PATCH] v4.6: fix llist CPU mismatch -- this_cpu_ptr -> &per_cpu(...,
+ cpu_of(rq))
+
+The restoration trigger in enqueue_task_fair used this_cpu_ptr() to
+select the llist head, but queue_balance_callback used cpu_of(rq).
+During a cross-CPU wakeup (e.g., try_to_wake_up on CPU A waking a task
+destined for CPU B), these point to different CPUs.  The llist node
+was added to CPU A's list but the worker only drained CPU B's list.
+
+Kill chain (confirmed by review-007):
+1. Plymouth (initramfs) runs SCHED_FIFO, exceeds 9.5ms rt_ema
+2. Safety valve demotes it to SCHED_NORMAL
+3. Plymouth sleeps/wakes across CPUs; restoration node stranded
+4. Plymouth exits -> task_struct freed while node still on wrong CPU's list
+5. Later RT task triggers balance_callback -> iterates freed node -> UAF panic
+
+Also fix rt.c (demotion) for consistency, though it was technically
+safe there since update_curr_rt always runs on the current CPU.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 5 ++++-
+ kernel/sched/rt.c   | 2 +-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ae82906ba..fa46dee33 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7445,8 +7445,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		    p->infinity.rt_ema < INFINITY_RT_RESTORE_WATERMARK &&
+ 		    !test_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags)) {
+ 			set_bit(INFINITY_RT_RESTORE_PENDING, &p->infinity.flags);
++			/* llist_add target must match cpu_of(rq) — during a
++			 * cross-CPU wakeup the current CPU (this_cpu_ptr)
++			 * may differ from the target runqueue's CPU. */
+ 			if (llist_add(&p->infinity.restore_node,
+-				      this_cpu_ptr(&infinity_rt_restore_list))) {
++				      &per_cpu(infinity_rt_restore_list, cpu_of(rq)))) {
+ 				queue_balance_callback(rq,
+ 					&per_cpu(infinity_rt_restore_cb, cpu_of(rq)),
+ 					infinity_rt_restore_worker);
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 33bb4eaab..cf29548b2 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -1003,7 +1003,7 @@ static void update_curr_rt(struct rq *rq)
+ 		 * Queue the balance_callback only on the first addition to
+ 		 * avoid redundant callbacks — the worker drains the entire list. */
+ 		if (llist_add(&donor->infinity.demote_node,
+-			      this_cpu_ptr(&infinity_rt_demote_list))) {
++			      &per_cpu(infinity_rt_demote_list, cpu_of(rq)))) {
+ 			queue_balance_callback(rq,
+ 				&per_cpu(infinity_rt_demote_cb, cpu_of(rq)),
+ 				infinity_rt_demote_worker);
+-- 
+2.55.0
+

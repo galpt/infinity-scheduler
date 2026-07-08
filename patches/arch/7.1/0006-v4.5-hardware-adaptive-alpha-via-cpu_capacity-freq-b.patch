@@ -1,0 +1,140 @@
+From 9956ddc64084ab1c1efb80bc231329ecd9a00599 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 07:55:57 +0700
+Subject: [PATCH] v4.5: hardware-adaptive alpha via cpu_capacity, freq boost on
+ futex/interactive
+
+- infinity_consume now takes cpu_capacity and computes a dynamic alpha
+  between 2048 (low cap) and 4096 (max perf) using the runqueue's
+  native SCHED_CAPACITY_SCALE telemetry -- zero overhead, no cpufreq API
+- Futex wakeup path: boost frequency via cpufreq_update_util when a
+  futex-woken task is enqueued (fills the gap left by wake_up_q not
+  passing WF_SYNC)
+- Interactive pick path: boost frequency when a zero-EMA task is
+  selected, bypassing PELT ramp delay
+- Preemption cushion (PRD Req 2) skipped -- EEVDF already handles it
+  natively through weight modulation
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           | 27 ++++++++++++++++++++++++---
+ kernel/sched/infinity_sched.c | 23 ++++++++++++++++++++---
+ kernel/sched/infinity_sched.h |  2 +-
+ 3 files changed, 45 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index aeb1b6509..fd808d454 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1477,10 +1477,11 @@ static void update_curr(struct cfs_rq *cfs_rq)
+ 	if (unlikely(delta_exec <= 0))
+ 		return;
+ 
+-	/* Infinity: EMA budget consumption */
++	/* Infinity: EMA budget consumption with adaptive alpha */
+ 	if (entity_is_task(curr)) {
+ 		struct task_struct *p__ = task_of(curr);
+-		infinity_consume(&p__->infinity, delta_exec);
++		infinity_consume(&p__->infinity, delta_exec,
++				 rq_of(cfs_rq)->cpu_capacity);
+ 	}
+ 
+ 	curr->vruntime += calc_delta_fair(delta_exec, curr);
+@@ -5864,6 +5865,17 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 		 */
+ 		return NULL;
+ 	}
++	/*
++	 * Hint the cpufreq governor when an interactive task (zero EMA)
++	 * is picked, so it ramps frequency immediately rather than waiting
++	 * for PELT to accumulate.
++	 */
++	if (entity_is_task(se)) {
++		struct task_struct *p = task_of(se);
++		if (p->infinity.ema == 0)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++	}
++
+ 	return se;
+ }
+ 
+@@ -7363,9 +7375,18 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 			h_nr_idle = 1;
+ 	}
+ 
+-	if (flags & ENQUEUE_WAKEUP)
++	if (flags & ENQUEUE_WAKEUP) {
+ 		p->infinity.futex_waiting = false;
+ 
++		/*
++		 * Immediately request maximum frequency when a futex-woken
++		 * task is enqueued, bypassing PELT ramp delay for IPC
++		 * wakeups.
++		 */
++		if (p->in_iowait)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++	}
++
+ 	if (!rq_h_nr_queued && rq->cfs.h_nr_queued)
+ 		dl_server_start(&rq->fair_server);
+ 
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index d5c3f655e..0321bf44e 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -76,19 +76,36 @@ late_initcall(infinity_sched_init);
+ /* ------------------------------------------------------------------ */
+ /* infinity_consume — EMA budget consumption                           */
+ /* ------------------------------------------------------------------ */
+-void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns)
++void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
++		      unsigned long cpu_capacity)
+ {
+ 	u64 step;
++	u32 alpha;
++
++	/*
++	 * Hardware-adaptive alpha: scale reactivity by the core's physical
++	 * capacity.  At max capacity (1024) the alpha reaches 4096 for
++	 * sub-millisecond thread storm detection; at reduced capacity
++	 * (power saving, thermal throttle) it backs down to 2048.
++	 *
++	 *   cap=1024 (max perf) → α = 4096  (τ_climb ≈ 0.38ms)
++	 *   cap= 512 (mid)      → α = 3072  (τ_climb ≈ 0.5ms,  current default)
++	 *   cap= 256 (low)      → α = 2560  (τ_climb ≈ 0.6ms)
++	 */
++	if (cpu_capacity >= SCHED_CAPACITY_SCALE)
++		alpha = 4096;
++	else
++		alpha = 2048 + (u32)div64_u64(2048ULL * cpu_capacity,
++					      SCHED_CAPACITY_SCALE);
+ 
+ 	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
+ 		return;
+ 
+-	/* Prevent u64 overflow in the multiply for large nohz_full deltas */
+ 	if (delta_ns > INFINITY_BUDGET_MAX_NS)
+ 		delta_ns = INFINITY_BUDGET_MAX_NS;
+ 
+ 	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
+-			 INFINITY_EMA_ALPHA,
++			 alpha,
+ 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+ 	ctx->ema += step;
+ }
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 8fa679a4a..8f96c7554 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -129,7 +129,7 @@ extern unsigned long infinity_tune_smt_divisor;
+ /* ------------------------------------------------------------------ */
+ /* API — called from fair.c and rt.c                                   */
+ /* ------------------------------------------------------------------ */
+-void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns);
++void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
+ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
+ void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
+ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
+-- 
+2.55.0
+

@@ -1,0 +1,71 @@
+From 62461513c0ae3a4a9113e990d68dac1880a16222 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Mon, 6 Jul 2026 23:32:12 +0700
+Subject: [PATCH] v4.6: fix balance_callback deadlock + CPU 0 starvation
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           |  3 ++-
+ kernel/sched/infinity_sched.c | 12 ++++++++++--
+ 2 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 4d65cb9c1..d3338fed0 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -9673,7 +9673,8 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+ 	 */
+ 	if (!(env->flags & LBF_ACTIVE_LB) &&
+ 	    env->sd->nr_balance_failed <= env->sd->cache_nice_tries &&
+-	    p->infinity.ema == 0) {
++	    READ_ONCE(p->infinity.ema) == 0 &&
++	    p->se.sum_exec_runtime > 2000000ULL) {
+ 		return 0;
+ 	}
+ 
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 20a141b16..385df8d30 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -31,8 +31,11 @@ DEFINE_PER_CPU(struct llist_head, infinity_rt_restore_list);
+ 
+ void infinity_rt_demote_worker(struct rq *rq)
+ {
+-	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_demote_list));
++	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_demote_list, cpu_of(rq)));
+ 	struct infinity_ctx *ctx, *next;
++	if (!node)
++		return;
++	raw_spin_rq_unlock(rq);
+ 	llist_for_each_entry_safe(ctx, next, node, demote_node) {
+ 		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
+ 		clear_bit(INFINITY_RT_DEMOTE_PENDING, &ctx->flags);
+@@ -43,12 +46,16 @@ void infinity_rt_demote_worker(struct rq *rq)
+ 		if (sched_setattr_nocheck(p, &attr) == 0)
+ 			set_bit(INFINITY_RT_DEMOTED, &ctx->flags);
+ 	}
++	raw_spin_rq_lock(rq);
+ }
+ 
+ void infinity_rt_restore_worker(struct rq *rq)
+ {
+-	struct llist_node *node = llist_del_all(this_cpu_ptr(&infinity_rt_restore_list));
++	struct llist_node *node = llist_del_all(&per_cpu(infinity_rt_restore_list, cpu_of(rq)));
+ 	struct infinity_ctx *ctx, *next;
++	if (!node)
++		return;
++	raw_spin_rq_unlock(rq);
+ 	llist_for_each_entry_safe(ctx, next, node, restore_node) {
+ 		struct task_struct *p = container_of(ctx, struct task_struct, infinity);
+ 		clear_bit(INFINITY_RT_RESTORE_PENDING, &ctx->flags);
+@@ -59,6 +66,7 @@ void infinity_rt_restore_worker(struct rq *rq)
+ 		if (sched_setattr_nocheck(p, &attr) == 0)
+ 			clear_bit(INFINITY_RT_DEMOTED, &ctx->flags);
+ 	}
++	raw_spin_rq_lock(rq);
+ }
+ /* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
+-- 
+2.55.0
+

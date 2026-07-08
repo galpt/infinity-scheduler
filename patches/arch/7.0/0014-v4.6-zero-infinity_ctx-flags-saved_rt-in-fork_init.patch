@@ -1,0 +1,31 @@
+From 29631fd36bae88608cd31102857dfcc3a302792c Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 7 Jul 2026 00:49:44 +0700
+Subject: [PATCH] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+
+A demoted RT task inherits stale flags and saved_rt fields via
+dup_task_struct's bit-for-bit copy.  Zero them so the child starts
+clean.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 207b0518d..17844b111 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -185,6 +185,9 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->rt_ema = 0;
+ 	ctx->last_sleep_ns = now;
+ 	ctx->rt_last_sleep_ns = 0;
++	ctx->flags = 0;
++	ctx->saved_rt_priority = 0;
++	ctx->saved_rt_policy = 0;
+ 	init_task_work(&ctx->demote_work, infinity_rt_demote_cb);
+ 	init_task_work(&ctx->restore_work, infinity_rt_restore_cb);
+ }
+-- 
+2.55.0
+

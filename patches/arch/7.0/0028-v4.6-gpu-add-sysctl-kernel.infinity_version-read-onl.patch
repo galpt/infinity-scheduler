@@ -1,0 +1,43 @@
+From 2ce72df4ec9d0e8ff1dd4bf5b7b093d53bc4579b Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 8 Jul 2026 15:26:02 +0700
+Subject: [PATCH] v4.6-gpu: add sysctl kernel.infinity_version (read-only,
+ returns "v4.6-gpu")
+
+Use: sysctl kernel.infinity_version  ->  kernel.infinity_version = v4.6-gpu
+Allows users to verify which Infinity branch they are running.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 6c1d404ae..de2b83d28 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -27,6 +27,7 @@
+ /* ------------------------------------------------------------------ */
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+ static int infinity_running_flag = 1;
++static char infinity_version[] = "v4.6-gpu";
+ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ 			     void *buf, size_t *lenp, loff_t *ppos)
+ {
+@@ -60,6 +61,13 @@ static struct ctl_table infinity_sysctl_table[] = {
+ 		.mode		= 0444,
+ 		.proc_handler	= proc_dointvec,
+ 	},
++	{
++		.procname	= "infinity_version",
++		.data		= infinity_version,
++		.maxlen		= sizeof(infinity_version),
++		.mode		= 0444,
++		.proc_handler	= proc_dostring,
++	},
+ 	{}
+ };
+ /* ------------------------------------------------------------------ */
+-- 
+2.55.0
+

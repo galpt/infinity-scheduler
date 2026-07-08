@@ -1,0 +1,84 @@
+From ab69c64acf2fe1756181c47ddb97117ee325577b Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 8 Jul 2026 00:39:25 +0700
+Subject: [PATCH] v4.6-gpu: fix ERR_PTR dereference and num_rqs out-of-bounds
+ boot panics
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c | 20 ++++++++++++++------
+ drivers/gpu/drm/scheduler/sched_main.c   | 12 ++++++------
+ 2 files changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index e542beb20..a6211fc7b 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -98,9 +98,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 						 (s32) DRM_SCHED_PRIORITY_KERNEL);
+ 		}
+ 		if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
+-		    entity->priority != DRM_SCHED_PRIORITY_KERNEL)
+-			entity->rq = sched_list[0]->sched_rq[DRM_SCHED_PRIORITY_HIGH];
+-		else
++		    entity->priority != DRM_SCHED_PRIORITY_KERNEL) {
++			u32 target_prio = sched_list[0]->num_rqs > 1 ?
++				sched_list[0]->num_rqs - 1 : 0;
++			if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++				target_prio--;
++			entity->rq = sched_list[0]->sched_rq[target_prio];
++		} else
+ 			entity->rq = sched_list[0]->sched_rq[entity->priority];
+ 	}
+ 
+@@ -565,9 +569,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+ 	spin_lock(&entity->lock);
+ 	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
+ 	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY &&
+-	    entity->priority != DRM_SCHED_PRIORITY_KERNEL)
+-		rq = sched ? sched->sched_rq[DRM_SCHED_PRIORITY_HIGH] : NULL;
+-	else
++	    entity->priority != DRM_SCHED_PRIORITY_KERNEL) {
++		u32 target_prio = sched && sched->num_rqs > 1 ?
++			sched->num_rqs - 1 : 0;
++		if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++			target_prio--;
++		rq = sched ? sched->sched_rq[target_prio] : NULL;
++	} else
+ 		rq = sched ? sched->sched_rq[entity->priority] : NULL;
+ 	if (rq != entity->rq) {
+ 		drm_sched_rq_remove_entity(entity->rq, entity);
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index b12d70cbf..27ec7aad7 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -443,10 +443,7 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 		entity = rb_entry(rb, struct drm_sched_entity, rb_tree_node);
+ 		if (!drm_sched_entity_is_ready(entity))
+ 			continue;
+-		if (!drm_sched_can_queue(sched, entity)) {
+-			spin_unlock(&rq->lock);
+-			return ERR_PTR(-ENOSPC);
+-		}
++		/* Credit flow handled by caller -- do not return ERR_PTR here */
+ 		reinit_completion(&entity->entity_idle);
+ 		rq->current_entity = entity;
+ 
+@@ -1247,9 +1244,12 @@ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ 		return entity;
+ 
+ 	if (drm_sched_policy == DRM_SCHED_POLICY_INFINITY) {
+-		/* Unified queue: HIGH, NORMAL, LOW all in rq[DRM_SCHED_PRIORITY_HIGH] */
++		/* Unified queue dynamically bounds to the highest available user queue */
++		u32 target_prio = sched->num_rqs > 1 ? sched->num_rqs - 1 : 0;
++		if (target_prio == DRM_SCHED_PRIORITY_KERNEL && target_prio > 0)
++			target_prio--;
+ 		return drm_sched_rq_select_entity_infinity(sched,
+-				sched->sched_rq[DRM_SCHED_PRIORITY_HIGH]);
++				sched->sched_rq[target_prio]);
+ 	}
+ 
+ 	/* Legacy: per-priority queues */
+-- 
+2.55.0
+
