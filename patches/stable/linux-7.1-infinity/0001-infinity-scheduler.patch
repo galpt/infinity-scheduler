@@ -1,7 +1,7 @@
 From faab8b27541be10d80e919593e168b894bc0c2ef Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:12:35 +0700
-Subject: [PATCH 01/28] infinity-scheduler v4.5
+Subject: [PATCH 01/29] infinity-scheduler v4.5
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -814,7 +814,7 @@ index 4ee8faf01..a173005c8 100644
 From 468cd5aa6816cc77ba2f3e8a505017a0846c1cee Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:16:19 +0700
-Subject: [PATCH 02/28] v4.5: complete implementation
+Subject: [PATCH 02/29] v4.5: complete implementation
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -888,7 +888,7 @@ index 59732b03b..7ff59274f 100644
 From ef6b48636849d285f09670412c395bc69c445457 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:17:50 +0700
-Subject: [PATCH 03/28] v4.5: complete Infinity scheduler
+Subject: [PATCH 03/29] v4.5: complete Infinity scheduler
 
 - Fix weight ratchet: base from static_prio (not live weight)
 - Slope 98/100: at EMA=100% weight = base x 2%
@@ -1276,7 +1276,7 @@ index 29f2b38c0..6a02d46e8 100644
 From 06095c7d4a2145a3a5838ad9a13ebe339150cc0f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 4 Jul 2026 19:43:03 +0700
-Subject: [PATCH 04/28] v4.5: add place_entity futex check, remove dead
+Subject: [PATCH 04/29] v4.5: add place_entity futex check, remove dead
  pick_eevdf bypass
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1335,7 +1335,7 @@ index 7ff59274f..5aa627c5c 100644
 From d7b3cd03fef3e7c01f57dd12601a7e9c7060050e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 01:10:17 +0700
-Subject: [PATCH 05/28] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
+Subject: [PATCH 05/29] v4.5: fix SCHED_IDLE, futex ordering, u64 overflow,
  fork init, stale comments, AUDIT guard
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1748,7 +1748,7 @@ index 6a02d46e8..8fa679a4a 100644
 From 9956ddc64084ab1c1efb80bc231329ecd9a00599 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 07:55:57 +0700
-Subject: [PATCH 06/28] v4.5: hardware-adaptive alpha via cpu_capacity, freq
+Subject: [PATCH 06/29] v4.5: hardware-adaptive alpha via cpu_capacity, freq
  boost on futex/interactive
 
 - infinity_consume now takes cpu_capacity and computes a dynamic alpha
@@ -1889,7 +1889,7 @@ index 8fa679a4a..8f96c7554 100644
 From 8c70ba279e8360388f963d2f711696553b79d356 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 09:26:32 +0700
-Subject: [PATCH 07/28] fix futex freq boost: check futex_waiting, not
+Subject: [PATCH 07/29] fix futex freq boost: check futex_waiting, not
  in_iowait
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -1926,7 +1926,7 @@ index fd808d454..2076fb537 100644
 From 069d2e1fd96c8c0620bab4434b3b8a6dfa8c6283 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:23:28 +0700
-Subject: [PATCH 08/28] v4.5: Infinity EMA-driven migration hysteresis
+Subject: [PATCH 08/29] v4.5: Infinity EMA-driven migration hysteresis
 
 Protect interactive (EMA=0) tasks from being migrated by the load
 balancer's idle balance and newly_idle balance.  The check in
@@ -1976,7 +1976,7 @@ index 2076fb537..4d178960b 100644
 From a9732f29923095f168bc1516a317256127d7f812 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:27:00 +0700
-Subject: [PATCH 09/28] v4.5: Infinity dynamic cgroup defense shields
+Subject: [PATCH 09/29] v4.5: Infinity dynamic cgroup defense shields
 
 Introduce aggregate group EMA at the cfs_rq level for graduated,
 automatic cgroup weight modulation:
@@ -2133,7 +2133,7 @@ index 9f63b15d3..22f34f7fd 100644
 From fe13b6a45419b2b672cf5d6dde85a1f1b205e85c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:31:01 +0700
-Subject: [PATCH 10/28] v4.5: Infinity cross-class RT safety valve
+Subject: [PATCH 10/29] v4.5: Infinity cross-class RT safety valve
 
 Implement deferred RT demotion for rogue SCHED_FIFO/SCHED_RR tasks.
 When rt_ema exceeds 95% (>9.5ms continuous runtime), the task is
@@ -2331,7 +2331,7 @@ index a173005c8..3cb6aa116 100644
 From d87b35625d209ce4a2a780af3d61b907f5007f7a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 19:35:42 +0700
-Subject: [PATCH 11/28] v4.5: Infinity EMA-driven asymmetric core placement
+Subject: [PATCH 11/29] v4.5: Infinity EMA-driven asymmetric core placement
 
 On hybrid topologies (sd_asym_cpucapacity), bias interactive tasks
 (EMA == 0) toward the highest-capacity core during wakeup in
@@ -2392,7 +2392,7 @@ index 68cc59afd..3139f4776 100644
 From 1b0aa6dfbb869abde5cd0a7d01e808b3c8daff28 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 20:05:47 +0700
-Subject: [PATCH 12/28] v4.5: RT safety valve: fix rq->curr context bug via
+Subject: [PATCH 12/29] v4.5: RT safety valve: fix rq->curr context bug via
  llist
 
 Replace the broken rq->curr approach in balance_callback workers with
@@ -2606,7 +2606,7 @@ index 3cb6aa116..6d952a5fa 100644
 From 4f207cb06144c152cc51ca8bd00211aefa7e0d22 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 21:22:08 +0700
-Subject: [PATCH 13/28] v4.6: adversarial review fixes -- fork llist init,
+Subject: [PATCH 13/29] v4.6: adversarial review fixes -- fork llist init,
  PF_KTHREAD guard, EEVDF cgroup modulation, atomic flags
 
 Four fixes addressing findings from adversarial code review:
@@ -2819,7 +2819,7 @@ index 6d952a5fa..33bb4eaab 100644
 From 061c3dd056f7b81ff40bdc8cb964d56b755395f1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 22:36:39 +0700
-Subject: [PATCH 14/28] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
+Subject: [PATCH 14/29] v4.6: fix llist CPU mismatch -- this_cpu_ptr ->
  &per_cpu(..., cpu_of(rq))
 
 The restoration trigger in enqueue_task_fair used this_cpu_ptr() to
@@ -2881,7 +2881,7 @@ index 33bb4eaab..cf29548b2 100644
 From 76bedc0acf51becfa6ec8cc09b58acefd040cb83 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 6 Jul 2026 23:31:19 +0700
-Subject: [PATCH 15/28] v4.6: fix balance_callback deadlock + CPU 0 starvation
+Subject: [PATCH 15/29] v4.6: fix balance_callback deadlock + CPU 0 starvation
 
 Two boot fixes:
 
@@ -2987,7 +2987,7 @@ index 4fe70e858..33da34363 100644
 From 94421c46617fde6ee2629d598448be06f78e6902 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:35:12 +0700
-Subject: [PATCH 16/28] v4.6: replace balance_callback/llist with task_work for
+Subject: [PATCH 16/29] v4.6: replace balance_callback/llist with task_work for
  RT safety valve
 
 The balance_callback infrastructure used for RT demotion and restoration
@@ -3248,7 +3248,7 @@ index cf29548b2..abb0c6679 100644
 From 91609383998e9ee932e7d724702667953650e38c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 00:49:44 +0700
-Subject: [PATCH 17/28] v4.6: zero infinity_ctx flags/saved_rt in fork_init
+Subject: [PATCH 17/29] v4.6: zero infinity_ctx flags/saved_rt in fork_init
 
 A demoted RT task inherits stale flags and saved_rt fields via
 dup_task_struct's bit-for-bit copy.  Zero them so the child starts
@@ -3280,7 +3280,7 @@ index b2edf5705..1faa08d57 100644
 From 4932801332698ad816feef2a2c12f3ebfb9edd4b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:06 +0700
-Subject: [PATCH 18/28] v4.6: native implementation -- requeue_task_rt FIFO
+Subject: [PATCH 18/29] v4.6: native implementation -- requeue_task_rt FIFO
  throttle + update_cfs_group cgroup modulation
 
 Replace the over-engineered task_work/callback_head/sched_setattr cross-class
@@ -3567,7 +3567,7 @@ index abb0c6679..14135c532 100644
 From 9d7d3410ea75352fbcd81957eee3993f995b67eb Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 10:29:06 +0700
-Subject: [PATCH 19/28] v4.6: update comments -- v4.5->v4.6, sched_fork not
+Subject: [PATCH 19/29] v4.6: update comments -- v4.5->v4.6, sched_fork not
  task_fork_fair, deduplicate RT threshold
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -3640,7 +3640,7 @@ index ab77fc26e..bb1c3df2d 100644
 From 76dd27a5c6cd292c2c243e85bac805afc68bd0bc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:15:09 +0700
-Subject: [PATCH 20/28] v4.6-gpu: Infinity GPU scheduler extension
+Subject: [PATCH 20/29] v4.6-gpu: Infinity GPU scheduler extension
 
 Implement all 4 features from PRD-001:
 
@@ -4047,7 +4047,7 @@ index 78e07c250..fcd2d9f06 100644
 From 30af37740f78d793d3abb1c7131b1dc5bc29c670 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:29:13 +0700
-Subject: [PATCH 21/28] v4.6-gpu: update heading comments to v4.6-gpu
+Subject: [PATCH 21/29] v4.6-gpu: update heading comments to v4.6-gpu
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -4088,7 +4088,7 @@ index bb1c3df2d..35e8306fb 100644
 From bf882134c39479339aeab948a670e6716bb1e396 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:32:11 +0700
-Subject: [PATCH 22/28] v4.6-gpu: make INFINITY the default GPU scheduling
+Subject: [PATCH 22/29] v4.6-gpu: make INFINITY the default GPU scheduling
  policy
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -4116,7 +4116,7 @@ index cbe2fb29b..53b24a43b 100644
 From 0d35d1c9dfd8dc85dd14d7da638ded965473f96d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 7 Jul 2026 23:40:45 +0700
-Subject: [PATCH 23/28] v4.6-gpu: add missing EMA idle decay to prevent sticky
+Subject: [PATCH 23/29] v4.6-gpu: add missing EMA idle decay to prevent sticky
  throttle
 
 The gpu_time_ema only climbed on job completion but never decayed
@@ -4170,7 +4170,7 @@ index 53b24a43b..e057e0361 100644
 From 05c4760e60651178b6d6942f53a6fdaa4658902f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 00:39:24 +0700
-Subject: [PATCH 24/28] v4.6-gpu: fix ERR_PTR dereference and num_rqs
+Subject: [PATCH 24/29] v4.6-gpu: fix ERR_PTR dereference and num_rqs
  out-of-bounds boot panics
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -4255,7 +4255,7 @@ index e057e0361..69596ed49 100644
 From 058609b84b19d358099a97a420829b5aabd9261b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 00:47:12 +0700
-Subject: [PATCH 25/28] v4.6-gpu: restore can_queue gate with proper IS_ERR
+Subject: [PATCH 25/29] v4.6-gpu: restore can_queue gate with proper IS_ERR
  handling
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -4297,7 +4297,7 @@ index 69596ed49..b11aafe80 100644
 From 51bbb875176423734231ff64202a7f7243b7d185 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 00:53:23 +0700
-Subject: [PATCH 26/28] v4.6-gpu: fix IS_ERR guard on KERNEL queue return path
+Subject: [PATCH 26/29] v4.6-gpu: fix IS_ERR guard on KERNEL queue return path
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -4324,7 +4324,7 @@ index b11aafe80..deb33990f 100644
 From 5d95d62b7bf8830d234e4bf17a0a227b0f49b12d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 07:30:37 +0700
-Subject: [PATCH 27/28] =?UTF-8?q?v4.6-gpu:=20eliminate=20FIFO/RR=20?=
+Subject: [PATCH 27/29] =?UTF-8?q?v4.6-gpu:=20eliminate=20FIFO/RR=20?=
  =?UTF-8?q?=E2=80=94=20unified=20Infinity-only=20GPU=20scheduling?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -4754,7 +4754,7 @@ index fcd2d9f06..bb5d9d3ca 100644
 From 9a14ee10dc2dce5061da668e3f185db8cead6ae0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 8 Jul 2026 07:51:30 +0700
-Subject: [PATCH 28/28] v4.6-gpu: add missing KERNEL vtime boost (vtime >>= 2)
+Subject: [PATCH 28/29] v4.6-gpu: add missing KERNEL vtime boost (vtime >>= 2)
  in calc_vtime
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
@@ -4776,6 +4776,38 @@ index 31d9df8d8..70e8359e8 100644
  	case DRM_SCHED_PRIORITY_HIGH:
  		break;
  	case DRM_SCHED_PRIORITY_NORMAL:
+-- 
+2.55.0
+
+
+From d17fe76b88a8cc1e58158baac235df214417b07b Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 8 Jul 2026 10:27:35 +0700
+Subject: [PATCH 29/29] v4.6-gpu: clamp delta_ns in infinity_rt_consume to
+ prevent u64 overflow under NO_HZ_FULL
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 82a562f3b..e84d67d74 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -171,6 +171,12 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
+ 		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
+ 		return;
+ 	}
++	/* Clamp delta_ns to prevent u64 overflow in the numerator for
++	 * tickless (NO_HZ_FULL) configurations where delta_ns can span
++	 * hundreds of seconds between calls.  Matches the same clamp
++	 * used in infinity_consume for the Fair class. */
++	if (delta_ns > INFINITY_RT_BUDGET_NS)
++		delta_ns = INFINITY_RT_BUDGET_NS;
+ 	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
+ 			   INFINITY_RT_ALPHA,
+ 			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
 -- 
 2.55.0
 

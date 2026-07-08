@@ -171,6 +171,12 @@ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
 		return;
 	}
+	/* Clamp delta_ns to prevent u64 overflow in the numerator for
+	 * tickless (NO_HZ_FULL) configurations where delta_ns can span
+	 * hundreds of seconds between calls.  Matches the same clamp
+	 * used in infinity_consume for the Fair class. */
+	if (delta_ns > INFINITY_RT_BUDGET_NS)
+		delta_ns = INFINITY_RT_BUDGET_NS;
 	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
 			   INFINITY_RT_ALPHA,
 			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
