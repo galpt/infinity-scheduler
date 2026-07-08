@@ -7,7 +7,7 @@
 # Usage:
 #   sudo bash install-infinity-scheduler.sh                         # build + install (auto-detect kernel)
 #   sudo bash install-infinity-scheduler.sh 7.1                     # build for kernel 7.1
-#   sudo bash install-infinity-scheduler.sh --remove                 # remove Infinity GRUB entry
+#   sudo bash install-infinity-scheduler.sh --remove                 # remove Infinity boot entries
 #   sudo bash install-infinity-scheduler.sh --status                 # show current state
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -109,6 +109,9 @@ cmd_status() {
     done
     if grep -q "[Ii]nfinity-scheduler" /boot/grub/custom/infinity-scheduler.cfg 2>/dev/null; then
         ok "GRUB entry: infinity-scheduler"
+    fi
+    if ls /boot/loader/entries/infinity-scheduler-* 2>/dev/null | head -1 | grep -q .; then
+        ok "systemd-boot entry: infinity-scheduler"
     fi
     echo ""
     echo "  To install: sudo bash $0"
@@ -464,8 +467,12 @@ install_infinity_kernel() {
         ok "Infinity kernel installed — GRUB entry added."
         echo ""
         echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the GRUB menu."
+    elif setup_sd_boot_entry "$ver" "$cmdline"; then
+        ok "Infinity kernel installed — systemd-boot entry added."
+        echo ""
+        echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the systemd-boot menu."
     else
-        warn "Could not find Limine or GRUB. Boot entry not created."
+        warn "Could not find Limine, GRUB, or systemd-boot. Boot entry not created."
         warn "  Kernel installed: /boot/vmlinuz-infinity-$ver"
         warn "  Initramfs:        /boot/initramfs-infinity-$ver.img"
         warn "  Add a boot entry manually."
@@ -558,6 +565,29 @@ GRUB
     return 0
 }
 
+setup_sd_boot_entry() {
+    local ver="$1" cmdline="$2"
+    local loader_dir="/boot/loader"
+    local entries_dir="$loader_dir/entries"
+    [ -d "$loader_dir" ] || return 1
+    [ -f "$loader_dir/loader.conf" ] || return 1
+    mkdir -p "$entries_dir"
+
+    # Remove old Infinity entries first
+    for old in "$entries_dir"/infinity-scheduler-*.conf; do
+        [ -f "$old" ] && rm -f "$old"
+    done
+
+    local entry_file="$entries_dir/infinity-scheduler-${ver}.conf"
+    cat > "$entry_file" <<SDCONF
+title  Infinity scheduler kernel ($ver)
+linux  /vmlinuz-infinity-$ver
+initrd /initramfs-infinity-$ver.img
+options $cmdline
+SDCONF
+    return 0
+}
+
 cmd_remove() {
     check_root
     local running
@@ -602,6 +632,11 @@ cmd_remove() {
     # Remove GRUB entry
     rm -f /boot/grub/custom/infinity-scheduler.cfg
 
+    # Remove systemd-boot entries
+    for old in /boot/loader/entries/infinity-scheduler-*.conf; do
+        [ -f "$old" ] && rm -f "$old" && ok "Removed: $(basename "$old")"
+    done
+
     # Remove kernel and initramfs images
     for f in /boot/vmlinuz-infinity-* /boot/initramfs-infinity-* /boot/System.map-infinity-*; do
         [ -f "$f" ] && rm -f "$f" && ok "Removed: $(basename "$f")"
@@ -613,6 +648,8 @@ cmd_remove() {
     elif command -v update-grub &>/dev/null; then
         update-grub 2>&1 | tail -5
     fi
+
+    # systemd-boot entries are files — already removed above, no regeneration needed
 
     ok "Infinity kernel removed. Default $DISTRO kernel is still in place."
 }
