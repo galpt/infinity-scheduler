@@ -69,9 +69,12 @@ if [ ! -d "$PATCH_DIR" ]; then
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
 
-# Use the single cumulative patch file
-PATCH_FILE="$PATCH_DIR/0001-v4.6-gpu-complete.patch"
-[ -f "$PATCH_FILE" ] || { echo "No patch file found at $PATCH_FILE"; exit 1; }
+# Collect patch files sorted by name
+PATCH_FILES=()
+while IFS= read -r -d '' f; do
+    PATCH_FILES+=("$f")
+done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
+[ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches found in $PATCH_DIR"
 
 KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
 DISTRO="$(if [ "$DISTRO_FAMILY" = "fedora" ]; then echo "Fedora"; else echo "Arch/CachyOS"; fi)"
@@ -84,8 +87,8 @@ cmd_status() {
     echo "  Running kernel: $(uname -r)"
     echo "  Distro: $DISTRO"
     echo ""
-    if [ -n "$PATCH_FILE" ] && [ -f "$PATCH_FILE" ]; then
-        ok "Patches available for kernel $KERNEL_VER"
+    if [ -d "$PATCH_DIR" ] && [ ${#PATCH_FILES[@]} -gt 0 ]; then
+        ok "Patches available for kernel $KERNEL_VER (${#PATCH_FILES[@]} files)"
     else
         warn "No patches for kernel $KERNEL_VER"
     fi
@@ -149,7 +152,7 @@ prepare_source() {
 
 apply_patches() {
     cd "$KERNEL_SRC"
-    [ -f "$PATCH_FILE" ] || die "No patch file for kernel $KERNEL_VER: $PATCH_FILE"
+    [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches for kernel $KERNEL_VER in $PATCH_DIR"
 
     # Sanitize patch files: ensure empty context lines have leading space and
     # hunk header counts match body length.  Idempotent — safe to run each time.
@@ -164,13 +167,14 @@ apply_patches() {
     #     python3 "$INFINITY_DIR/tools/fix-patch-counts.py" --rewrite "$PATCH_DIR"/*.patch 2>/dev/null || true
     # fi
 
-    name=$(basename "$PATCH_FILE")
-    info "Applying: $name"
-    if out=$(git am "$PATCH_FILE" 2>&1); then
-        ok "$name"
-    elif echo "$out" | grep -q "Reversed\|already applied"; then
-        ok "Already applied: $name"
-    else
+    for p in "${PATCH_FILES[@]}"; do
+        name=$(basename "$p")
+        info "Applying: $name"
+        if out=$(git am "$p" 2>&1); then
+            ok "$name"
+        elif echo "$out" | grep -q "Reversed\|already applied"; then
+            ok "Already applied: $name"
+        else
             # Show the actual patch error so the user knows which hunk failed
             echo "$out" | grep -i -E "FAILED|error|malformed|misordered" | head -5
             die "Failed to apply $name. The patch may need updating."
@@ -636,8 +640,9 @@ case "${1:-}" in
             KERNEL_VER="$1"
             KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
             PATCH_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/$KERNEL_MAJOR"
-            PATCH_FILE="$PATCH_DIR/0001-v4.6-gpu-complete.patch"
-            [ -f "$PATCH_FILE" ] || die "No patch file at $PATCH_FILE"
+            PATCH_FILES=()
+            while IFS= read -r -d '' f; do PATCH_FILES+=("$f"); done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
+            [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches at $PATCH_DIR"
             check_root
             check_deps
             check_nvidia

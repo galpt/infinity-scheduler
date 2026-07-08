@@ -1,0 +1,317 @@
+From 842d3bcd1450db09ebe69cd7bad5988707be969d Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Thu, 9 Jul 2026 02:13:30 +0700
+Subject: [PATCH 2/5] v4.5: Infinity CPU scheduling on CFS/EEVDF
+
+Infinity_update_weight in update_deadline() modulates EEVDF weight.
+place_entity() halves vslice for futex-waking tasks.
+can_migrate_task() protects interactive tasks from migration.
+update_cfs_group() reduces group shares for noisy cgroups.
+enqueue/dequeue track idle times for group EMA decay.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 207 +++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 204 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 3ebec186f..5df93b66d 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -55,8 +55,28 @@
+ #include <uapi/linux/sched/types.h>
+ 
+ #include "sched.h"
+-#include "stats.h"
+-#include "autogroup.h"
++#include "pelt.h"
++#include "infinity_sched.h"
++
++static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
++			    unsigned long weight);
++
++/* Infinity: update EEVDF weight from EMA */
++static void infinity_update_weight(struct cfs_rq *cfs_rq,
++				   struct sched_entity *se,
++				   struct task_struct *p)
++{
++	u64 ema;
++	u32 new_weight;
++
++	ema = p->infinity.ema;
++	if (ema > INFINITY_BUDGET_MAX_NS)
++		ema = INFINITY_BUDGET_MAX_NS;
++	new_weight = infinity_calc_weight(p, ema);
++
++	if (new_weight != se->load.weight)
++		reweight_entity(cfs_rq, se, new_weight);
++}
+ 
+ /*
+  * The initial- and re-scaling of tunables is configurable
+@@ -1244,10 +1264,43 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ 	 * For EEVDF the virtual time slope is determined by w_i (iow.
+ 	 * nice) while the request time r_i is determined by
+ 	 * sysctl_sched_base_slice.
++	 *
++	 * Infinity: the task's EEVDF weight is modulated by EMA
++	 * (via infinity_update_weight).  A lower weight gives EEVDF
++	 * a shorter slice and later deadline naturally -- no slice
++	 * manipulation needed beyond optional SMT halving.
+ 	 */
+-	if (!se->custom_slice)
++	if (!se->custom_slice) {
+ 		se->slice = sysctl_sched_base_slice;
+ 
++		if (entity_is_task(se)) {
++			struct task_struct *p__ = task_of(se);
++
++			/*
++			 * SMT halving: on the secondary SMT thread,
++			 * reduce the slice further.
++			 */
++#ifdef CONFIG_SCHED_SMT
++			{
++				int cpu = cpu_of(rq_of(cfs_rq));
++				const struct cpumask *sibling_mask =
++					topology_sibling_cpumask(cpu);
++				if (sibling_mask && !cpumask_empty(sibling_mask) &&
++				    cpu != cpumask_first(sibling_mask)) {
++					unsigned long div = READ_ONCE(
++						infinity_tune_smt_divisor);
++					if (div > 1)
++						se->slice = div64_u64(
++							se->slice, div);
++				}
++			}
++#endif
++
++			/* Update EEVDF weight from EMA */
++			infinity_update_weight(cfs_rq, se, p__);
++		}
++	}
++
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i / w_i
+ 	 */
+@@ -1424,6 +1477,25 @@ static void update_curr(struct cfs_rq *cfs_rq)
+ 	if (unlikely(delta_exec <= 0))
+ 		return;
+ 
++	/* Infinity: EMA budget consumption with adaptive alpha */
++	if (entity_is_task(curr)) {
++		struct task_struct *p__ = task_of(curr);
++		infinity_consume(&p__->infinity, delta_exec,
++				 rq_of(cfs_rq)->cpu_capacity);
++	} else {
++		/* Group entity: climb group_ema for cgroup defense */
++		struct cfs_rq *gcfs_rq = group_cfs_rq(curr);
++		if (gcfs_rq) {
++			u64 delta = delta_exec;
++			if (delta > INFINITY_CGROUP_EMA_CLIMB_NS)
++				delta = INFINITY_CGROUP_EMA_CLIMB_NS;
++			gcfs_rq->group_ema += div64_u64(
++				(INFINITY_CGROUP_EMA_CLIMB_NS - gcfs_rq->group_ema) *
++				delta * INFINITY_CGROUP_EMA_ALPHA,
++				INFINITY_CGROUP_EMA_CLIMB_NS * INFINITY_FP_ONE);
++		}
++	}
++
+ 	curr->vruntime += calc_delta_fair(delta_exec, curr);
+ 	resched = update_deadline(cfs_rq, curr);
+ 
+@@ -4253,6 +4325,21 @@ static void update_cfs_group(struct sched_entity *se)
+ 		return;
+ 
+ 	shares = calc_group_shares(gcfs_rq);
++
++	/* Infinity: reduce group shares when aggregate EMA is elevated.
++	 * This feeds directly into the PELT-aware reweight_entity(), so the
++	 * load balancer sees the reduced weight consistently -- unlike the old
++	 * update_deadline() approach which created a tug-of-war with
++	 * update_cfs_group() on every tick. */
++	if (gcfs_rq->group_ema > 0) {
++		u64 ema_pct = div64_u64(gcfs_rq->group_ema * 100ULL,
++					INFINITY_CGROUP_EMA_CLIMB_NS);
++		if (ema_pct > 50) {
++			long reduced = shares * (100 - INFINITY_CGROUP_WEIGHT_REDUCE_PCT) / 100;
++			shares = max(reduced, (long)MIN_SHARES);
++		}
++	}
++
+ 	if (unlikely(se->load.weight != shares))
+ 		reweight_entity(cfs_rq_of(se), se, shares);
+ }
+@@ -5507,6 +5594,15 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
+ 		vslice /= 2;
+ 
++	/*
++	 * Infinity: when a task wakes from a futex (futex_waiting is true),
++	 * halve its vslice so it gets an earlier deadline and runs sooner,
++	 * reducing IPC wakeup latency.
++	 */
++	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
++	    task_of(se)->infinity.futex_waiting)
++		vslice >>= 1;
++
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i/w_i
+ 	 */
+@@ -5783,6 +5879,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 	struct sched_entity *se;
+ 
+ 	se = pick_eevdf(cfs_rq, protect);
++	if (unlikely(!se)) {
++		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
++		se = __pick_first_entity(cfs_rq);
++		if (!se)
++			return NULL;
++	}
+ 	if (se->sched_delayed) {
+ 		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
+ 		/*
+@@ -5790,6 +5892,17 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 		 */
+ 		return NULL;
+ 	}
++	/*
++	 * Hint the cpufreq governor when an interactive task (zero EMA)
++	 * is picked, so it ramps frequency immediately rather than waiting
++	 * for PELT to accumulate.
++	 */
++	if (entity_is_task(se)) {
++		struct task_struct *p = task_of(se);
++		if (p->infinity.ema == 0)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++	}
++
+ 	return se;
+ }
+ 
+@@ -7198,6 +7311,33 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ {
+ 	struct cfs_rq *cfs_rq;
+ 	struct sched_entity *se = &p->se;
++
++	/* Infinity: EMA decay on wakeup */
++	if (flags & ENQUEUE_WAKEUP) {
++		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
++		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
++			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);
++#ifdef CONFIG_FAIR_GROUP_SCHED
++		/*
++		 * Group EMA decay: if this cfs_rq was idle (sleep_start set)
++		 * and we're the first task re-entering, apply exponential decay
++		 * using the elapsed idle time.
++		 */
++		{
++			struct cfs_rq *pcfs_rq = cfs_rq_of(&p->se);
++			if (pcfs_rq->group_ema_sleep_start) {
++				u64 sleep_ns = now - pcfs_rq->group_ema_sleep_start;
++				u64 periods = div64_u64(sleep_ns,
++					INFINITY_CGROUP_EMA_HALFLIFE_NS);
++				if (periods > 63)
++					pcfs_rq->group_ema = 0;
++				else
++					pcfs_rq->group_ema >>= periods;
++				pcfs_rq->group_ema_sleep_start = 0;
++			}
++		}
++#endif
++	}
+ 	int h_nr_idle = task_has_idle_policy(p);
+ 	int h_nr_runnable = 1;
+ 	int task_new = !(flags & ENQUEUE_WAKEUP);
+@@ -7282,6 +7422,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 			h_nr_idle = 1;
+ 	}
+ 
++	if (flags & ENQUEUE_WAKEUP) {
++		/* Check futex_waiting before clearing -- triggers freq ramp for IPC wakeups */
++		if (p->infinity.futex_waiting)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
++		p->infinity.futex_waiting = false;
++
++		if (p->in_iowait)
++			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++	}
++
+ 	if (!rq_h_nr_queued && rq->cfs.h_nr_queued)
+ 		dl_server_start(&rq->fair_server);
+ 
+@@ -7430,6 +7581,15 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+  */
+ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ {
++	/* Infinity: record sleep start */
++	if (flags & DEQUEUE_SLEEP) {
++		p->infinity.last_sleep_ns = rq_clock(rq_of(task_cfs_rq(p)));
++#ifdef CONFIG_FAIR_GROUP_SCHED
++		/* If this cfs_rq becomes empty, record idle start for group EMA decay */
++		if (cfs_rq_of(&p->se)->nr_queued == 0)
++			cfs_rq_of(&p->se)->group_ema_sleep_start = rq_clock(rq);
++#endif
++	}
+ 	if (task_is_throttled(p)) {
+ 		dequeue_throttled_task(p, flags);
+ 		return true;
+@@ -8847,6 +9007,31 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		    cpumask_test_cpu(cpu, p->cpus_ptr))
+ 			return cpu;
+ 
++		/*
++		 * Infinity: on asymmetric topologies (Intel hybrid, ARM
++		 * big.LITTLE), bias interactive tasks (EMA == 0) toward the
++		 * highest-capacity P-cores.  This avoids placing latency-
++		 * sensitive tasks on E-cores during wakeup.
++		 *
++		 * Lockless read of p->infinity.ema: only p->pi_lock is held
++		 * here, not rq->lock.  READ_ONCE prevents compiler tearing
++		 * on 32-bit architectures.
++		 */
++		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
++			struct asym_cap_data *entry;
++			int best_cpu;
++
++			rcu_read_lock();
++			list_for_each_entry_rcu(entry, &asym_cap_list, link) {
++				best_cpu = cpumask_first_and(cpu_capacity_span(entry), p->cpus_ptr);
++				if (best_cpu < nr_cpu_ids) {
++					rcu_read_unlock();
++					return best_cpu;
++				}
++			}
++			rcu_read_unlock();
++		}
++
+ 		if (!is_rd_overutilized(this_rq()->rd)) {
+ 			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
+ 			if (new_cpu >= 0)
+@@ -9818,6 +10003,22 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+ 		return 0;
+ 	}
+ 
++	/*
++	 * Infinity: protect interactive (EMA=0) tasks from migration.
++	 * Keeping low-latency tasks cache-warm on their home CPU avoids the
++	 * L1/L2/L3 refill penalty that destroys frame-time consistency.
++	 * Active balance and desperate imbalance bypass this gate.
++	 */
++	if (!(env->flags & LBF_ACTIVE_LB) &&
++	    env->sd->nr_balance_failed <= env->sd->cache_nice_tries &&
++	    READ_ONCE(p->infinity.ema) == 0 &&
++	    /* Only protect tasks with a real runtime history.  Newly forked
++	     * tasks start with EMA=0 and must be free to spread across CPUs
++	     * during boot, otherwise CPU 0 becomes a bottleneck. */
++	    p->se.sum_exec_runtime > 2000000ULL) {
++		return 0;
++	}
++
+ 	/*
+ 	 * Aggressive migration if:
+ 	 * 1) active balance
+-- 
+2.55.0
+
