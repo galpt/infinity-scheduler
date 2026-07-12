@@ -261,3 +261,4 @@ GPL-2.0
 - **[CachyOS community](https://cachyos.org/)** — Testers and early adopters who provided real-world feedback during development, helping validate the scheduler's behavior under diverse workloads.
 - **[u3z05en](https://github.com/u3z05en)** — Jonathan, for helping with the code review, addressing several subtle issues that made Infinity more correct and robust.
 - **[lostf1sh](https://github.com/lostf1sh)** — Bug reports and code review, helping identify issues and improve the scheduler's correctness.
+- **[RiverOnVenus](https://github.com/RiverOnVenus)** — Bug report and root cause analysis of the cgroup EMA idle-decay path where group_ema_sleep_start was checked before nr_queued was decremented, leaving the cgroup weight reduction stuck permanently.
