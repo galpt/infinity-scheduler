@@ -1,4 +1,4 @@
-From 915141e4b7ac4adc67d2dad5c19023941f7d0f61 Mon Sep 17 00:00:00 2001
+From e24ca7450a3bd92c121fe78e06a46bf0b03a0633 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:29:39 +0700
 Subject: [PATCH 6/6] v4.6-gpu: remove dead normalized_base field and unused
@@ -6,102 +6,9 @@ Subject: [PATCH 6/6] v4.6-gpu: remove dead normalized_base field and unused
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- build-final.log             | 11 +++++++++
- build.log                   | 47 +++++++++++++++++++++++++++++++++++++
- build2.log                  | 11 +++++++++
- include/drm/gpu_scheduler.h |  6 -----
- 4 files changed, 69 insertions(+), 6 deletions(-)
- create mode 100644 build-final.log
- create mode 100644 build.log
- create mode 100644 build2.log
+ include/drm/gpu_scheduler.h | 6 ------
+ 1 file changed, 6 deletions(-)
 
-diff --git a/build-final.log b/build-final.log
-new file mode 100644
-index 000000000..343ec9f3c
---- /dev/null
-+++ b/build-final.log
-@@ -0,0 +1,11 @@
-+  CALL    scripts/checksyscalls.sh
-+  DESCEND objtool
-+  INSTALL libsubcmd_headers
-+  CC      drivers/gpu/drm/scheduler/sched_main.o
-+  CC      drivers/gpu/drm/scheduler/sched_entity.o
-+  CC      kernel/sched/core.o
-+  CC      kernel/sched/fair.o
-+  CC      kernel/sched/build_policy.o
-+  CC      kernel/sched/build_utility.o
-+  CC      kernel/sched/infinity_sched.o
-+  AR      kernel/sched/built-in.a
-diff --git a/build.log b/build.log
-new file mode 100644
-index 000000000..56580d488
---- /dev/null
-+++ b/build.log
-@@ -0,0 +1,47 @@
-+  UPD     include/config/kernel.release
-+  UPD     include/generated/utsrelease.h
-+  CC      arch/x86/kernel/asm-offsets.s
-+  CC      kernel/sched/rq-offsets.s
-+  CALL    scripts/checksyscalls.sh
-+  DESCEND objtool
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/exec-cmd.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/help.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/pager.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/parse-options.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/run-command.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/sigchain.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libsubcmd/subcmd-config.o
-+  LD      /tmp/build-7.0.12/tools/objtool/libsubcmd/libsubcmd-in.o
-+  AR      /tmp/build-7.0.12/tools/objtool/libsubcmd/libsubcmd.a
-+  INSTALL libsubcmd_headers
-+  CC      /tmp/build-7.0.12/tools/objtool/arch/x86/decode.o
-+  CC      /tmp/build-7.0.12/tools/objtool/arch/x86/special.o
-+  CC      /tmp/build-7.0.12/tools/objtool/arch/x86/orc.o
-+  LD      /tmp/build-7.0.12/tools/objtool/arch/x86/objtool-in.o
-+  CC      /tmp/build-7.0.12/tools/objtool/weak.o
-+  CC      /tmp/build-7.0.12/tools/objtool/check.o
-+  CC      /tmp/build-7.0.12/tools/objtool/special.o
-+  CC      /tmp/build-7.0.12/tools/objtool/builtin-check.o
-+  CC      /tmp/build-7.0.12/tools/objtool/elf.o
-+  CC      /tmp/build-7.0.12/tools/objtool/objtool.o
-+  CC      /tmp/build-7.0.12/tools/objtool/disas.o
-+  CC      /tmp/build-7.0.12/tools/objtool/trace.o
-+  CC      /tmp/build-7.0.12/tools/objtool/orc_gen.o
-+  CC      /tmp/build-7.0.12/tools/objtool/orc_dump.o
-+  CC      /tmp/build-7.0.12/tools/objtool/builtin-klp.o
-+  CC      /tmp/build-7.0.12/tools/objtool/klp-diff.o
-+  CC      /tmp/build-7.0.12/tools/objtool/klp-post-link.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libstring.o
-+  CC      /tmp/build-7.0.12/tools/objtool/libctype.o
-+  CC      /tmp/build-7.0.12/tools/objtool/str_error_r.o
-+  CC      /tmp/build-7.0.12/tools/objtool/librbtree.o
-+  CC      /tmp/build-7.0.12/tools/objtool/signal.o
-+  LD      /tmp/build-7.0.12/tools/objtool/objtool-in.o
-+  LINK    /tmp/build-7.0.12/tools/objtool/objtool
-+make[5]: Nothing to be done for 'drivers/gpu/drm/scheduler/'.
-+  CC      kernel/sched/core.o
-+  CC      kernel/sched/fair.o
-+  CC      kernel/sched/build_policy.o
-+  CC      kernel/sched/build_utility.o
-+  CC      kernel/sched/infinity_sched.o
-+  AR      kernel/sched/built-in.a
-diff --git a/build2.log b/build2.log
-new file mode 100644
-index 000000000..eb27e3d16
---- /dev/null
-+++ b/build2.log
-@@ -0,0 +1,11 @@
-+  SYNC    include/config/auto.conf
-+  CALL    scripts/checksyscalls.sh
-+  DESCEND objtool
-+  INSTALL libsubcmd_headers
-+make[5]: Nothing to be done for 'drivers/gpu/drm/scheduler/'.
-+  CC      kernel/sched/core.o
-+  CC      kernel/sched/fair.o
-+  CC      kernel/sched/build_policy.o
-+  CC      kernel/sched/build_utility.o
-+  CC      kernel/sched/infinity_sched.o
-+  AR      kernel/sched/built-in.a
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
 index 258fab253..6ef992687 100644
 --- a/include/drm/gpu_scheduler.h

@@ -1,6 +1,6 @@
-From b451bee977161879f2717d2f5891959b97eff318 Mon Sep 17 00:00:00 2001
+From 3d7fbdcf2986295186d0c565083482f8448868c1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 9 Jul 2026 02:29:39 +0700
+Date: Sun, 12 Jul 2026 19:56:06 +0700
 Subject: [PATCH 6/6] v4.6-gpu: remove dead normalized_base field and unused
  INFINITY_GPU_WEIGHT_REDUCE_PCT
 
