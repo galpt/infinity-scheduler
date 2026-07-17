@@ -1,4 +1,4 @@
-From 36f4b93e255f5d208290ff74cd68de1bcfab3652 Mon Sep 17 00:00:00 2001
+From 5307fb45a5289e78e5a1bf9be451c09f8c328bd9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:16:53 +0700
 Subject: [PATCH 5/6] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
@@ -94,7 +94,7 @@ index fe174a485..5edd39c50 100644
  		spin_unlock(&rq->lock);
  		spin_unlock(&entity->lock);
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 2d5cb21a0..63d15a306 100644
+index 2d5cb21a0..c32cfad2e 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -84,15 +84,6 @@
@@ -429,16 +429,16 @@ index 2d5cb21a0..63d15a306 100644
  	return IS_ERR(entity) ? NULL : entity;
  }
  
-@@ -1249,6 +1265,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
+@@ -1255,6 +1271,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
+ 		return;
  	}
  
- 	sched_job = drm_sched_entity_pop_job(entity);
-+
 +	/* Infinity: save entity for GPU time tracking in drm_sched_job_done */
 +	WRITE_ONCE(sched_job->infinity_entity, entity);
- 	if (!sched_job) {
- 		complete_all(&entity->entity_idle);
- 		drm_sched_run_job_queue(sched);
++
+ 	s_fence = sched_job->s_fence;
+ 
+ 	atomic_add(sched_job->credits, &sched->credit_count);
 -- 
 2.55.0
 
