@@ -1,4 +1,4 @@
-From ff2019f553aea19e85303b29b72a28197f68d765 Mon Sep 17 00:00:00 2001
+From 143e397d3d5eec5808fb351ac118923bea06f657 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:15:13 +0700
 Subject: [PATCH 1/6] v4.5: core Infinity scheduler infrastructure
@@ -73,10 +73,11 @@ index a55e21892..8f6e46713 100644
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
-@@ -150,6 +157,6 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -150,6 +157,7 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.loginuid	= INVALID_UID,
  	.sessionid	= AUDIT_SID_UNSET,
  #endif
++#endif
  #ifdef CONFIG_PERF_EVENTS
  	.perf_event_mutex = __MUTEX_INITIALIZER(init_task.perf_event_mutex),
  	.perf_event_list = LIST_HEAD_INIT(init_task.perf_event_list),

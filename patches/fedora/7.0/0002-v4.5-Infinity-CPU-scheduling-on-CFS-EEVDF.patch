@@ -1,15 +1,15 @@
-From e78176a4e3f99def53af9d8e87df983aeda25588 Mon Sep 17 00:00:00 2001
+From d7c4a2f3a3753c00c86bb7c413fe11c5a710a0c5 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:20:04 +0700
 Subject: [PATCH 2/6] v4.5: Infinity CPU scheduling on CFS/EEVDF
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c | 222 +++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 219 insertions(+), 3 deletions(-)
+ kernel/sched/fair.c | 216 +++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 213 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index ab4114712..03a12d7bd 100644
+index ab4114712..af46ca66a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -55,8 +55,28 @@
@@ -269,35 +269,22 @@ index ab4114712..03a12d7bd 100644
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  
-@@ -7177,6 +7348,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7177,6 +7348,14 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
 +	/* Infinity: record sleep start */
-+	if (flags & DEQUEUE_SLEEP)
++	if (flags & DEQUEUE_SLEEP) {
 +		p->infinity.last_sleep_ns = rq_clock(rq_of(task_cfs_rq(p)));
-+
++#ifdef CONFIG_FAIR_GROUP_SCHED
++		if (cfs_rq_of(&p->se)->nr_queued == 0)
++			cfs_rq_of(&p->se)->group_ema_sleep_start = rq_clock(rq);
++#endif
++	}
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7189,6 +7364,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
- 	if (dequeue_entities(rq, &p->se, flags) < 0)
- 		return false;
- 
-+#ifdef CONFIG_FAIR_GROUP_SCHED
-+	/*
-+	 * nr_queued is now final (decremented inside dequeue_entity →
-+	 * account_entity_dequeue). If this cfs_rq is empty, record idle
-+	 * start so enqueue_task_fair can decay group_ema on next wakeup.
-+	 */
-+	if ((flags & DEQUEUE_SLEEP) && cfs_rq_of(&p->se)->nr_queued == 0)
-+		cfs_rq_of(&p->se)->group_ema_sleep_start = rq_clock(rq);
-+#endif
-+
- 	/*
- 	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
- 	 */
-@@ -8598,6 +8783,24 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8598,6 +8777,24 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		    cpumask_test_cpu(cpu, p->cpus_ptr))
  			return cpu;
  
@@ -322,7 +309,7 @@ index ab4114712..03a12d7bd 100644
  		if (!is_rd_overutilized(this_rq()->rd)) {
  			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
  			if (new_cpu >= 0)
-@@ -9562,6 +9765,19 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+@@ -9562,6 +9759,19 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
  		return 0;
  	}
  
