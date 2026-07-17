@@ -1,4 +1,4 @@
-From dcad9b8915e309af8afcb20289a73dc607a2bbf8 Mon Sep 17 00:00:00 2001
+From 32c0a8e340e1a15e3498ad01a7209ba3442367db Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:15:27 +0700
 Subject: [PATCH 5/6] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
@@ -7,8 +7,8 @@ Subject: [PATCH 5/6] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_entity.c |  31 ++-
- drivers/gpu/drm/scheduler/sched_main.c   | 259 ++++++++++++-----------
- 2 files changed, 165 insertions(+), 125 deletions(-)
+ drivers/gpu/drm/scheduler/sched_main.c   | 260 ++++++++++++-----------
+ 2 files changed, 166 insertions(+), 125 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
 index fe174a485..a2132cb05 100644
@@ -102,7 +102,7 @@ index fe174a485..a2132cb05 100644
  		spin_unlock(&rq->lock);
  		spin_unlock(&entity->lock);
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index c39f0245e..07465ba36 100644
+index c39f0245e..b41c9dc45 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -71,6 +71,7 @@
@@ -269,11 +269,10 @@ index c39f0245e..07465ba36 100644
  
 -	if (drm_sched_policy == DRM_SCHED_POLICY_FIFO)
 -		drm_sched_rq_remove_fifo_locked(entity, rq);
-+	drm_sched_rq_remove_vtime_locked(entity, rq);
- 
- 	spin_unlock(&rq->lock);
- }
- 
+-
+-	spin_unlock(&rq->lock);
+-}
+-
 -/**
 - * drm_sched_rq_select_entity_rr - Select an entity which could provide a job to run
 - *
@@ -286,7 +285,7 @@ index c39f0245e..07465ba36 100644
 - * entity was ready, but the scheduler had insufficient credits to accommodate
 - * its job; return NULL, if no ready entity was found.
 - */
- static struct drm_sched_entity *
+-static struct drm_sched_entity *
 -drm_sched_rq_select_entity_rr(struct drm_gpu_scheduler *sched,
 -			      struct drm_sched_rq *rq)
 -{
@@ -309,8 +308,9 @@ index c39f0245e..07465ba36 100644
 -		if (entity == rq->current_entity)
 -			break;
 -	}
--
--	spin_unlock(&rq->lock);
++	drm_sched_rq_remove_vtime_locked(entity, rq);
+ 
+ 	spin_unlock(&rq->lock);
 -
 -	return NULL;
 -
@@ -329,8 +329,8 @@ index c39f0245e..07465ba36 100644
 -	spin_unlock(&rq->lock);
 -
 -	return entity;
--}
--
+ }
+ 
 -/**
 - * drm_sched_rq_select_entity_fifo - Select an entity which provides a job to run
 - *
@@ -343,7 +343,7 @@ index c39f0245e..07465ba36 100644
 - * entity was ready, but the scheduler had insufficient credits to accommodate
 - * its job; return NULL, if no ready entity was found.
 - */
--static struct drm_sched_entity *
+ static struct drm_sched_entity *
 -drm_sched_rq_select_entity_fifo(struct drm_gpu_scheduler *sched,
 -				struct drm_sched_rq *rq)
 +drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
@@ -442,16 +442,23 @@ index c39f0245e..07465ba36 100644
  	return IS_ERR(entity) ? NULL : entity;
  }
  
-@@ -1241,6 +1259,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
+@@ -1241,12 +1259,16 @@ static void drm_sched_run_job_work(struct work_struct *w)
  		return;	/* No more work */
  
  	sched_job = drm_sched_entity_pop_job(entity);
 +
-+	/* Infinity: save entity for GPU time tracking in drm_sched_job_done */
-+	WRITE_ONCE(sched_job->infinity_entity, entity);
  	if (!sched_job) {
  		complete_all(&entity->entity_idle);
  		drm_sched_run_job_queue(sched);
+ 		return;
+ 	}
+ 
++	/* Infinity: save entity for GPU time tracking in drm_sched_job_done */
++	WRITE_ONCE(sched_job->infinity_entity, entity);
++
+ 	s_fence = sched_job->s_fence;
+ 
+ 	atomic_add(sched_job->credits, &sched->credit_count);
 -- 
 2.55.0
 
