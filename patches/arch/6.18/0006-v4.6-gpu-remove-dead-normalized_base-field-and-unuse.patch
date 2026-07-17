@@ -1,4 +1,4 @@
-From 8efc17c6cfba082636e9f22f7bc3a5bc7629ff3f Mon Sep 17 00:00:00 2001
+From 9fc3e8164d695eb9e17e437a3051a46e4006f710 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:29:39 +0700
 Subject: [PATCH 6/6] v4.6-gpu: remove dead normalized_base field and unused
@@ -10,7 +10,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 6 deletions(-)
 
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 5d77791a4..3f6977d85 100644
+index 548fa1d88..3f4250337 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -256,12 +256,6 @@ struct drm_sched_entity {
