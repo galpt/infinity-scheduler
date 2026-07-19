@@ -1,4 +1,4 @@
-From 9fc3e8164d695eb9e17e437a3051a46e4006f710 Mon Sep 17 00:00:00 2001
+From dab01ce08db7f99b76c2bde8fabe5c4c9578ebbc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:29:39 +0700
 Subject: [PATCH 6/6] v4.6-gpu: remove dead normalized_base field and unused
