@@ -27,7 +27,7 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 
 ```bash
 # 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
-git clone -b v4.6-gpu https://github.com/galpt/infinity-scheduler.git
+git clone -b v4.6-gpu --depth 1 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
