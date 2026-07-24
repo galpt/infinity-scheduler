@@ -1,15 +1,15 @@
-From eeac8928a166845e955b9e225312a0d4f1a64c1d Mon Sep 17 00:00:00 2001
+From c393a769f5061db2b0aad2b65abf8743df6910b9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 9 Jul 2026 02:16:43 +0700
-Subject: [PATCH 2/6] v4.5: Infinity CPU scheduling on CFS/EEVDF
+Date: Sat, 25 Jul 2026 02:54:21 +0700
+Subject: [PATCH 2/5] v4.5: Infinity CPU scheduling on CFS/EEVDF
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c | 215 +++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 212 insertions(+), 3 deletions(-)
+ kernel/sched/fair.c | 219 +++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 216 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..61a129b24 100644
+index 3bce48ad0..8fa44a8ab 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -55,8 +55,28 @@
@@ -230,14 +230,16 @@ index 3bce48ad0..61a129b24 100644
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  
-@@ -7079,6 +7225,15 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7079,6 +7225,17 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
  			h_nr_runnable = 1;
  	}
  
 +	if (flags & ENQUEUE_WAKEUP) {
-+		/* Check futex_waiting to trigger freq ramp for IPC wakeups */
++		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
 +		if (p->infinity.futex_waiting)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
++		p->infinity.futex_waiting = false;
 +
 +		if (p->in_iowait)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
@@ -246,14 +248,16 @@ index 3bce48ad0..61a129b24 100644
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  
-@@ -7118,6 +7273,15 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7118,6 +7275,17 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
  		flags &= ~(DEQUEUE_DELAYED | DEQUEUE_SPECIAL);
  	}
  
 +	if (flags & ENQUEUE_WAKEUP) {
-+		/* Check futex_waiting to trigger freq ramp for IPC wakeups */
++		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
 +		if (p->infinity.futex_waiting)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++
++		p->infinity.futex_waiting = false;
 +
 +		if (p->in_iowait)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
@@ -262,7 +266,7 @@ index 3bce48ad0..61a129b24 100644
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  
-@@ -7172,6 +7336,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7172,6 +7340,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -273,7 +277,7 @@ index 3bce48ad0..61a129b24 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7184,6 +7352,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7184,6 +7356,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -290,7 +294,7 @@ index 3bce48ad0..61a129b24 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -8593,6 +8771,24 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8593,6 +8775,24 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		    cpumask_test_cpu(cpu, p->cpus_ptr))
  			return cpu;
  
@@ -315,7 +319,7 @@ index 3bce48ad0..61a129b24 100644
  		if (!is_rd_overutilized(this_rq()->rd)) {
  			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
  			if (new_cpu >= 0)
-@@ -9564,6 +9760,19 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+@@ -9564,6 +9764,19 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
  		return 0;
  	}
  

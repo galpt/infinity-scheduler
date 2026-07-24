@@ -1,4 +1,4 @@
-From 26ddccad4cfa0905eeec00b1116c7b7a8828a8c4 Mon Sep 17 00:00:00 2001
+From a16130b64e8a5d3edd5f1eb588d8b789da3f61dc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:13:30 +0700
 Subject: [PATCH 4/6] v4.6-gpu: GPU DRM scheduler header extensions
@@ -11,8 +11,8 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_internal.h  |  8 +--
  drivers/gpu/drm/xe/xe_gpu_scheduler_types.h |  1 -
- include/drm/gpu_scheduler.h                 | 56 +++++++++++++++++++++
- 3 files changed, 57 insertions(+), 8 deletions(-)
+ include/drm/gpu_scheduler.h                 | 65 +++++++++++++++++++++
+ 3 files changed, 66 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_internal.h b/drivers/gpu/drm/scheduler/sched_internal.h
 index 7ea5a6736..abd5988e2 100644
@@ -52,7 +52,7 @@ index 63d9bf925..37828e85a 100644
  
  #endif
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 78e07c250..8c22c848e 100644
+index 78e07c250..8758dfe07 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -233,6 +233,40 @@ struct drm_sched_entity {
@@ -110,21 +110,37 @@ index 78e07c250..8c22c848e 100644
  };
  
  /**
-@@ -357,6 +398,13 @@ struct drm_sched_job {
+@@ -357,6 +398,11 @@ struct drm_sched_job {
  	struct drm_sched_fence		*s_fence;
  	struct drm_sched_entity         *entity;
  
 +	/**
-+	 * @infinity_entity: Entity that submitted this job, saved before
 +	 * drm_sched_entity_pop_job() clears @entity for UAF safety.  Used
 +	 * by drm_sched_job_done() to track GPU time on the submitting entity.
 +	 */
-+	struct drm_sched_entity         *infinity_entity;
 +
  	enum drm_sched_priority		s_priority;
  	u32				credits;
  	/** @last_dependency: tracks @dependencies as they signal */
-@@ -750,4 +798,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -587,6 +633,17 @@ struct drm_gpu_scheduler {
+ 	struct delayed_work		work_tdr;
+ 	struct list_head		pending_list;
+ 	spinlock_t			job_list_lock;
++
++	/**
++	 * @infinity_pending_lock: Protects infinity_pending_* fields used to
++	 * pass GPU time from drm_sched_job_done() to the next invocation of
++	 * drm_sched_run_job_work(), where the entity is guaranteed alive.
++	 */
++	spinlock_t			infinity_pending_lock;
++	u64				infinity_pending_fence_ctx;
++	u64				infinity_pending_gpu_ns;
++	bool				infinity_pending_valid;
++
+ 	int				hang_limit;
+ 	atomic_t                        *score;
+ 	atomic_t                        _score;
+@@ -750,4 +807,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
  		list_for_each_entry((__job), &(__sched)->pending_list, list)	\
  			for_each_if(!(__entity) || (__job)->entity == (__entity))
  

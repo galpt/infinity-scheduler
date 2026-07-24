@@ -1,24 +1,23 @@
-From 9845a0541aed5920d5e03d34487720dd38051d30 Mon Sep 17 00:00:00 2001
+From 5538b13c0c0e8212c93063fa55750aea7b99d621 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 9 Jul 2026 02:15:24 +0700
-Subject: [PATCH 4/6] v4.6-gpu: GPU DRM scheduler header extensions
+Date: Sat, 25 Jul 2026 02:54:23 +0700
+Subject: [PATCH 4/5] v4.6-gpu: GPU DRM scheduler header extensions
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_internal.h  |  9 +---
+ drivers/gpu/drm/scheduler/sched_internal.h  |  8 +--
  drivers/gpu/drm/xe/xe_gpu_scheduler_types.h |  1 -
- include/drm/gpu_scheduler.h                 | 56 +++++++++++++++++++++
- 3 files changed, 57 insertions(+), 9 deletions(-)
+ include/drm/gpu_scheduler.h                 | 75 +++++++++++++++++++++
+ 3 files changed, 76 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_internal.h b/drivers/gpu/drm/scheduler/sched_internal.h
-index 7ea5a6736..2bb7de029 100644
+index 7ea5a6736..abd5988e2 100644
 --- a/drivers/gpu/drm/scheduler/sched_internal.h
 +++ b/drivers/gpu/drm/scheduler/sched_internal.h
-@@ -3,13 +3,6 @@
- #ifndef _DRM_GPU_SCHEDULER_INTERNAL_H_
+@@ -4,12 +4,6 @@
  #define _DRM_GPU_SCHEDULER_INTERNAL_H_
  
--
+ 
 -/* Used to choose between FIFO and RR job-scheduling */
 -extern int drm_sched_policy;
 -
@@ -28,7 +27,7 @@ index 7ea5a6736..2bb7de029 100644
  void drm_sched_wakeup(struct drm_gpu_scheduler *sched);
  
  void drm_sched_rq_add_entity(struct drm_sched_rq *rq,
-@@ -17,7 +10,7 @@ void drm_sched_rq_add_entity(struct drm_sched_rq *rq,
+@@ -17,7 +11,7 @@ void drm_sched_rq_add_entity(struct drm_sched_rq *rq,
  void drm_sched_rq_remove_entity(struct drm_sched_rq *rq,
  				struct drm_sched_entity *entity);
  
@@ -49,7 +48,7 @@ index 6731b13da..4abb6b374 100644
  
  #endif
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 323a505e6..548fa1d88 100644
+index 323a505e6..fd8462186 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -233,6 +233,40 @@ struct drm_sched_entity {
@@ -107,22 +106,47 @@ index 323a505e6..548fa1d88 100644
  };
  
  /**
-@@ -357,6 +398,14 @@ struct drm_sched_job {
+@@ -357,6 +398,11 @@ struct drm_sched_job {
  	struct drm_sched_fence		*s_fence;
  	struct drm_sched_entity         *entity;
  
-+
 +	/**
-+	 * @infinity_entity: Entity that submitted this job, saved before
 +	 * drm_sched_entity_pop_job() clears @entity for UAF safety.  Used
 +	 * by drm_sched_job_done() to track GPU time on the submitting entity.
 +	 */
-+	struct drm_sched_entity         *infinity_entity;
 +
  	enum drm_sched_priority		s_priority;
  	u32				credits;
  	/** @last_dependency: tracks @dependencies as they signal */
-@@ -698,4 +747,11 @@ void drm_sched_entity_modify_sched(struct drm_sched_entity *entity,
+@@ -587,6 +633,27 @@ struct drm_gpu_scheduler {
+ 	struct delayed_work		work_tdr;
+ 	struct list_head		pending_list;
+ 	spinlock_t			job_list_lock;
++
++	/**
++	 * @infinity_pending_lock: Protects infinity_pending_* fields used to
++	 * pass GPU time from drm_sched_job_done() to the next invocation of
++	 * drm_sched_run_job_work(), where the entity is guaranteed alive.
++	 */
++	spinlock_t			infinity_pending_lock;
++	u64				infinity_pending_fence_ctx;
++	u64				infinity_pending_gpu_ns;
++	bool				infinity_pending_valid;
++
++	/**
++	 * @infinity_pending_lock: Protects infinity_pending_* fields used to
++	 * pass GPU time from drm_sched_job_done() to the next invocation of
++	 * drm_sched_run_job_work(), where the entity is guaranteed alive.
++	 */
++	spinlock_t			infinity_pending_lock;
++	u64				infinity_pending_fence_ctx;
++	u64				infinity_pending_gpu_ns;
++	bool				infinity_pending_valid;
++
+ 	int				hang_limit;
+ 	atomic_t                        *score;
+ 	atomic_t                        _score;
+@@ -698,4 +765,12 @@ void drm_sched_entity_modify_sched(struct drm_sched_entity *entity,
  				   struct drm_gpu_scheduler **sched_list,
  				   unsigned int num_sched_list);
  
@@ -133,6 +157,7 @@ index 323a505e6..548fa1d88 100644
 +#define INFINITY_GPU_EMA_ALPHA          4
 +#define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
 +#define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
++
  #endif
 -- 
 2.55.0

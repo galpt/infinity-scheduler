@@ -1,4 +1,4 @@
-From 429312c2da8d3f4d8af580a2f3ccdea1ba540fd3 Mon Sep 17 00:00:00 2001
+From 64b325addc54bfccaa64dc8d5fecce70b1a04506 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:13:30 +0700
 Subject: [PATCH 3/6] v4.5: Infinity RT scheduling -- adaptive RR timeslice and

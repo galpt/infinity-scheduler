@@ -1,7 +1,7 @@
-From 45a53e41365d7f8e07f8166d3926057203a74a59 Mon Sep 17 00:00:00 2001
+From a712688aa2d785dabf9f8b0bb2319ebab8121f6a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 9 Jul 2026 02:16:40 +0700
-Subject: [PATCH 1/6] v4.5: core Infinity scheduler infrastructure
+Date: Sat, 25 Jul 2026 02:54:21 +0700
+Subject: [PATCH 1/5] v4.5: core Infinity scheduler infrastructure
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
