@@ -8,10 +8,10 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/             6 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/              6 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/              6 patches — Vanilla kernel.org 7.1
-│   └── fedora/7.0/            6 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/             5 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/              5 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/              5 patches — Vanilla kernel.org 7.1
+│   └── fedora/7.0/            5 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -48,13 +48,15 @@ sysctl kernel.infinity_running        # → kernel.infinity_running = 1
 sysctl kernel.infinity_version        # → kernel.infinity_version = v4.6-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 
-# Check health statistics
-cat /proc/sys/kernel/infinity_stats   # → Formatted CPU + GPU health table
+# Check GPU accounting integrity
+cat /proc/sys/kernel/infinity_stats   # → Raw comma-formatted CPU + GPU table
 ```
 
 > [!NOTE]
 > Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line
-> table that `sysctl` cannot display properly.
+> table that `sysctl` cannot display properly. The stats show completion
+> callbacks, accounting applied (with %), accounting skipped, and the
+> Accounting confidence line so you can verify `callbacks == applied + skipped`.
 
 ## Tunables
 
@@ -144,10 +146,10 @@ The Infinity GPU extension hooks into the DRM scheduler via
 the Infinity virtual time algorithm (sole policy — FIFO/RR removed).  Each GPU context (entity) tracks its
 GPU time via EMA — climbing on job completion, decaying on idle.  Virtual
 GPU time replaces the stock submit-timestamp sort key, scaled by entity
-priority and burstiness.  The CPU-side interactivity signals (futex_waiting,
-CPU EMA) are resolved from the owning process via `pid_task()` under an RCU
-read lock and directly affect the entity's GPU vtime — no manual configuration
-needed.
+priority and burstiness.  An EMA-gated idle-start mechanism gives
+sustained scheduling priority to entities that have been idle
+(gpu_time_ema == 0) by skipping the catch-up boost — no cross-process
+PID tracking needed.
 
 No fallback to FIFO exists — the legacy policy module parameter and selectors have been removed.
 
@@ -162,15 +164,16 @@ flowchart TB
         ENTITY["drm_sched_entity
 ─────────────────
 gpu_time_total  (cumulative ns)
-gpu_time_ema    (burstiness EMA)
-cached_gpu_vtime(snapshotted sort key)
-last_user_pid   (owning process)"]
+gpu_time_ema    (burstiness EMA, idle signal)
+gpu_time_last_active(decay timestamp)
+cached_gpu_vtime(snapshotted sort key)"]
         class ENTITY ent
 
         ENTITY --> VTIME["drm_sched_entity_calc_vtime()
 ─────────────────────────────
-1. normalize:    max(gpu_time_total,
-                 min_gpu_vtime - catchup_bonus)
+1. normalize:    gpu_time_ema == 0
+                 → actual total (idle-start priority)
+                 else → min_gpu_vtime - catchup_bonus
 2. priority:     HIGH=1x, NORMAL=1.5x, LOW=3x
 3. EMA boost:    vtime += ema_pct/2
 ──► cached_gpu_vtime (immutable in rbtree)"]
@@ -205,59 +208,44 @@ KERNEL gets >>= 2 vtime boost
         QUEUE --> SELECT
     end
 
-    subgraph CPU["CPU Infinity scheduler (signals)"]
-        TASK["task_struct.infinity_ctx
-───────────────────
-futex_waiting    (IPC round-trip)
-ema              (CPU burstiness)"]
-        class TASK sig
-    end
-
-    TASK -. "pid_task(last_user_pid)
-    under rcu_read_lock()
-    futex_waiting?  → vtime >>= 1
-    ema == 0?       → vtime >>= 1" .-> VTIME
-
     SELECT --> HW["GPU hardware ring → job submitted"]
     class HW ent
 
     HW --> DONE["drm_sched_job_done()
 ─────────────────
-gpu_time_total += job_delta
-gpu_time_ema  += climb(delta)
-(protected by job_list_lock via
- spin_trylock; entity pointer
- cleared in entity_kill)
-(EMA decay on next submission via
- drm_sched_rq_update_vtime_locked)"]
+Save gpu_ns on job via WRITE_ONCE
+(IRQ-safe, no spin_locks)
+→ deferred accounting in
+  drm_sched_get_finished_job()"]
     class DONE algo
 
     DONE -. "infinity_entity saved in
-    run_job_work before pop_job
-    clears the original" .-> ENTITY
+    run_job_work before drm_sched_job_begin;
+    infinity_entity cleaned up in
+    entity_kill after entity_idle wait" .-> ENTITY
 ```
 
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
-|---|---|---|
+|---|---|---|---|
 | Fair-share slice | Yes | Yes |
-| Budget model | Linear consumption | **EMA (Limitless)** |
+| Budget model | Linear consumption | EMA (Limitless) |
 | SMT halving | No | Yes |
-| EEVDF Invariant Assert | N/A (BPF) | **Yes (WARN_ON_ONCE)** |
-| Wakeup deadline boost | N/A | **Asymptotic vslice** |
+| EEVDF Invariant Assert | N/A (BPF) | Yes (WARN_ON_ONCE) |
+| Wakeup deadline boost | N/A | Asymptotic vslice |
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
-| Adaptive RR timeslice | No | **Yes (rt_ema-based, 10–100ms)** |
-| Hardware-adaptive alpha | No | **Yes (2048–4096 via cpu_capacity)** |
-| Futex IPC wakeup boost | No | **Yes (vslice halved on futex wakeup)** |
-| Migration hysteresis | No | **Yes (EMA-driven cache pinning)** |
-| Cgroup defense shield | No | **Yes (aggregate group EMA)** |
-| RT cross-class safety | No | **Yes (native requeue throttling)** |
-| Asymmetric core placement | No | **Yes (EMA-guided P/E core bias)** |
-| GPU time tracking | No | **Yes (EMA per DRM entity)** |
-| Virtual GPU time scheduling | No | **Yes (sole Infinity policy, FIFO/RR removed)** |
-| Soft priority (anti-starvation) | No | **Yes (proportional vtime scaling)** |
-| Cross-scheduler interactivity | No | **Yes (CPU EMA feeds GPU vtime)** |
+| Adaptive RR timeslice | No | Yes (rt_ema-based, 10–100ms) |
+| Hardware-adaptive alpha | No | Yes (2048–4096 via cpu_capacity) |
+| Futex IPC wakeup boost | No | Yes (vslice halved on futex wakeup) |
+| Migration hysteresis | No | Yes (EMA-driven cache pinning) |
+| Cgroup defense shield | No | Yes (aggregate group EMA) |
+| RT cross-class safety | No | Yes (native requeue throttling) |
+| Asymmetric core placement | No | Yes (EMA-guided P/E core bias) |
+| GPU time tracking | No | Yes (EMA per DRM entity) |
+| Virtual GPU time scheduling | No | Yes (sole Infinity policy, FIFO/RR removed) |
+| Soft priority (anti-starvation) | No | Yes (proportional vtime scaling) |
+| Idle-start GPU priority | No | Yes (EMA-gated, no PID tracking) |
 
 ## License
 
