@@ -1,4 +1,4 @@
-From c8cfe75f9397756f6e52db6c4020b1b3c4c7fe75 Mon Sep 17 00:00:00 2001
+From 765b60ea8634377ad78f1a01edbdd598f47a601e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
@@ -44,15 +44,33 @@ v4.6-gpu: revert to zero-allocation stack buffer, shorten separators
 - Verified: no frame size warning, no memory leak, no UAF
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: rewrite stats handler with printf-style column format and | separators
+
+Replace hand-padded string alignment with printf-style %-22s / %14s
+column formatting.  Each row uses:
+
+  | %-22s | %14s | %s
+
+This guarantees perfect vertical alignment on every line regardless
+of label length, eliminates the tree-branch offset bug, and makes
+the output look like a proper table with | column separators.
+
+Also add val_from_u64() helper with truncation safeguard: if the
+comma-formatted value exceeds 14 characters (e.g. atomic counter
+wrap), leftmost digits are cut and the rightmost 14 are kept so the
+table column never shifts.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_entity.c |  57 ++++-
- drivers/gpu/drm/scheduler/sched_main.c   | 279 +++++++++++++----------
+ drivers/gpu/drm/scheduler/sched_main.c   | 279 ++++++++++++----------
  include/drm/gpu_scheduler.h              |  48 ++--
  kernel/sched/fair.c                      |   4 +-
- kernel/sched/infinity_sched.c            | 241 ++++++++++++++++++++
+ kernel/sched/infinity_sched.c            | 280 +++++++++++++++++++++++
  kernel/sched/infinity_sched.h            |   7 +
  kernel/sched/rt.c                        |   1 +
- 7 files changed, 498 insertions(+), 139 deletions(-)
+ 7 files changed, 537 insertions(+), 139 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
 index fe174a485..09909eb7c 100644
@@ -644,7 +662,7 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..4962ddca3 100644
+index 682ddfb67..e343112a8 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -18,11 +18,33 @@
@@ -681,7 +699,7 @@ index 682ddfb67..4962ddca3 100644
  /* ------------------------------------------------------------------ */
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
-@@ -47,6 +69,216 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,6 +69,255 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
@@ -723,7 +741,7 @@ index 682ddfb67..4962ddca3 100644
 +/* fmt_val -- Write val to buf with comma separators, right-aligned    *
 + * to @width.  If @width is 0, no padding is applied.                 */
 +/* ------------------------------------------------------------------ */
-+static void fmt_val(char *buf, size_t sz, u64 val, unsigned int width)
++static __maybe_unused void fmt_val(char *buf, size_t sz, u64 val, unsigned int width)
 +{
 +	char tmp[32];
 +	unsigned int len;
@@ -755,6 +773,42 @@ index 682ddfb67..4962ddca3 100644
 +	}
 +}
 +/* ------------------------------------------------------------------ */
++/* val_from_u64 -- Format u64 into string with comma separators.       *
++ * Result is right-aligned in a 14-char field (null-terminated).       *
++ * If the formatted value exceeds 14 characters, the leftmost digits   *
++ * are truncated (keeps rightmost digits) to prevent table columns     *
++ * from shifting.                                                      */
++/* ------------------------------------------------------------------ */
++static void val_from_u64(char *dest, size_t sz, u64 val)
++{
++	char raw[24];
++	char tmp[32];
++	int raw_len, i, pos = 0, keep;
++
++	if (val == 0) {
++		scnprintf(tmp, sizeof(tmp), "0");
++	} else {
++		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
++		raw_len = strlen(raw);
++		for (i = 0; i < raw_len; i++) {
++			if (i > 0 && (raw_len - i) % 3 == 0)
++				tmp[pos++] = ',';
++			tmp[pos++] = raw[i];
++		}
++		tmp[pos] = '\0';
++	}
++
++	/* Truncate leftmost digits if too long for the 14-char column */
++	pos = strlen(tmp);
++	if (pos > 14) {
++		keep = pos - 14;
++		/* Advance past the truncation point */
++		scnprintf(dest, sz, "%14s", tmp + keep);
++	} else {
++		scnprintf(dest, sz, "%14s", tmp);
++	}
++}
++/* ------------------------------------------------------------------ */
 +/* Stats display handler                                               */
 +/* ------------------------------------------------------------------ */
 +static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
@@ -762,23 +816,22 @@ index 682ddfb67..4962ddca3 100644
 +				       loff_t *ppos)
 +{
 +	/*
-+	 * ┌─────────────────────────────────────────────────────────────┐
-+	 * │ Output format key (fixed-width columns):                    │
-+	 * │   col 0-22: label (left-aligned, 22 chars)                 │
-+	 * │   col 23-36: value (right-aligned, 14 chars, comma-sep)    │
-+	 * │   col 37+: description                                     │
-+	 * └─────────────────────────────────────────────────────────────┘
++	 * Table layout: printf-style column format guarantees alignment.
++	 *
++	 *   | %-22s | %14s | %s
++	 *   col 0: `| ` + label (22 left-aligned)
++	 *   col 1: ` | ` + value (14 right-aligned)
++	 *   col 2: ` | ` + description (free-form)
++	 *
++	 * 58-char separator fits a 60-column terminal comfortably.
 +	 */
 +	char buf[1024];
 +	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
++	char val[16];  /* 14-char right-aligned value + null */
 +
 +	if (write)
 +		return -EROFS;
 +
-+	/*
-+	 * Read counters through unsigned int to prevent sign-extension
-+	 * of a wrapped 32-bit atomic_t from producing absurd u64 values.
-+	 */
 +	fbc  = (u64)(unsigned int)atomic_read(&infinity_futex_boost_count);
 +	emc  = (u64)(unsigned int)atomic_read(&infinity_ema_climb_count);
 +	wkc  = (u64)(unsigned int)atomic_read(&infinity_wakeup_count);
@@ -789,100 +842,104 @@ index 682ddfb67..4962ddca3 100644
 +
 +	buf[0] = '\0';
 +
-+	/* Header */
 +	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
 +		  "Infinity Scheduler v4.6-gpu\n");
-+	strlcat(buf,
-+		"────────────────────────────────────────────────────────────\n",
-+		sizeof(buf));
 +
 +	/* CPU section */
-+	strlcat(buf, "CPU\n", sizeof(buf));
++	strlcat(buf, "  cpu\n", sizeof(buf));
++	strlcat(buf, "  | -------------------- | --- |\n", sizeof(buf));
 +
-+	strlcat(buf, "  Futex boosts        ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), fbc, 14);
++	val_from_u64(val, sizeof(val), fbc);
 +	if (emc) {
 +		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+			  "  %llu%% of tasks\n",
++			  "| %-22s | %14s | %llu%% of tasks\n",
++			  "futex boosts", val,
 +			  div64_u64(fbc * 100ULL, emc));
 +	} else {
-+		strlcat(buf, "  N/A\n", sizeof(buf));
++		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++			  "| %-22s | %14s | N/A\n",
++			  "futex boosts", val);
 +	}
 +
-+	strlcat(buf, "  EMA climbs          ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), emc, 14);
-+	strlcat(buf, "\n", sizeof(buf));
++	val_from_u64(val, sizeof(val), emc);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s |\n", "ema climbs", val);
 +
-+	strlcat(buf, "  Wakeup decays       ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), wkc, 14);
-+	strlcat(buf, "\n", sizeof(buf));
++	val_from_u64(val, sizeof(val), wkc);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s |\n", "wakeup decays", val);
 +
-+	strlcat(buf, "  Per-task EMA range ", sizeof(buf));
-+	strlcat(buf, "0 - 10,000\n", sizeof(buf));
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s |\n", "per-task ema range", "0 - 10,000");
 +
 +	/* RT section */
-+	strlcat(buf, "\nRT\n", sizeof(buf));
-+	strlcat(buf, "  RT throttles        ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), rtc, 14);
-+	strlcat(buf, "  0 rogue SCHED_FIFO (>95%% rt_ema)\n",
-+		sizeof(buf));
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "\n  rt\n  | %s |\n", "-----------------------------");
++
++	val_from_u64(val, sizeof(val), rtc);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s | 0 rogue (threshold >95%%)\n",
++		  "rt throttles", val);
 +
 +	/* GPU section */
-+	strlcat(buf, "\nGPU\n", sizeof(buf));
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "\n  gpu\n  | %s |\n",
++		  "-------------------------------------------------");
 +
-+	strlcat(buf, "  Completion entered  ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), gcb, 14);
-+	strlcat(buf, "  fence callbacks fired\n", sizeof(buf));
++	val_from_u64(val, sizeof(val), gcb);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s | fence callbacks\n",
++		  "completion entered", val);
 +
-+	strlcat(buf, "  Accounting applied  ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), gapp, 14);
++	val_from_u64(val, sizeof(val), gapp);
 +	if (gcb) {
 +		u64 whole = div64_u64(gapp * 100ULL, gcb);
 +		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
 +		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+			  "  %llu.%02llu%%\n", whole, frac);
++			  "| %-22s | %14s | %llu.%02llu%%\n",
++			  "accounting applied", val, whole, frac);
 +	} else {
-+		strlcat(buf, "  N/A\n", sizeof(buf));
++		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++			  "| %-22s | %14s | N/A\n",
++			  "accounting applied", val);
 +	}
 +
-+	strlcat(buf, "  \xe2\x94\x9c\xe2\x94\x80 lock contention    ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), 0, 14);
-+	strlcat(buf, "  (lock contention)\n", sizeof(buf));
++	val_from_u64(val, sizeof(val), 0);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s | (lock contention)\n",
++		  "  \xe2\x94\x9c\xe2\x94\x80 lock", val);
 +
-+	strlcat(buf, "  \xe2\x94\x94\xe2\x94\x80 entity freed       ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), gskp, 14);
-+	strlcat(buf, "  (entity_kill race)\n", sizeof(buf));
++	val_from_u64(val, sizeof(val), gskp);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "| %-22s | %14s | (entity_kill race)\n",
++		  "  \xe2\x94\x94\xe2\x94\x80 entity freed", val);
 +
 +	/* Footer */
-+	strlcat(buf,
-+		"────────────────────────────────────────────────────────────\n",
-+		sizeof(buf));
-+
 +	if (gcb) {
 +		u64 whole = div64_u64(gapp * 100ULL, gcb);
 +		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
 +		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+			  "Accounting confidence: %llu.%02llu%%  (", whole, frac);
-+		fmt_val(buf, sizeof(buf), gapp, 0);
-+		strlcat(buf, " / ", sizeof(buf));
-+		fmt_val(buf, sizeof(buf), gcb, 0);
-+		strlcat(buf, " completions)\n", sizeof(buf));
++			  "accounting confidence: %llu.%02llu%%"
++			  "  (%llu / %llu completions)\n",
++			  whole, frac,
++			  (unsigned long long)gapp,
++			  (unsigned long long)gcb);
 +	} else {
 +		strlcat(buf,
-+			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
++			"accounting confidence: N/A  (no GPU jobs tracked)\n",
 +			sizeof(buf));
 +	}
 +
 +	if (gcb && gapp == gcb)
 +		strlcat(buf,
-+			"Verdict: All counters healthy -- system operating normally\n",
++			"verdict: all counters healthy -- system operating normally\n",
 +			sizeof(buf));
 +	else if (gcb && gapp < gcb)
 +		strlcat(buf,
-+			"Verdict: Accounting mismatch detected -- see above for details\n",
++			"verdict: accounting mismatch -- see above\n",
 +			sizeof(buf));
 +	else
-+		strlcat(buf, "Verdict: No GPU jobs recorded yet\n",
++		strlcat(buf, "verdict: no GPU jobs recorded yet\n",
 +			sizeof(buf));
 +
 +	{
@@ -898,7 +955,7 @@ index 682ddfb67..4962ddca3 100644
  static struct ctl_table infinity_sysctl_table[] = {
  	{
  		.procname	= "infinity_smt_divisor",
-@@ -69,6 +301,13 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +340,13 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
@@ -912,7 +969,7 @@ index 682ddfb67..4962ddca3 100644
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +358,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +397,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
@@ -920,7 +977,7 @@ index 682ddfb67..4962ddca3 100644
  }
  /* ------------------------------------------------------------------ */
  /* infinity_wakeup -- EMA decay on wakeup                               */
-@@ -152,6 +392,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -152,6 +431,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			}
  		}
  	}
