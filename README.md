@@ -52,6 +52,10 @@ sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divis
 cat /proc/sys/kernel/infinity_stats   # → Formatted CPU + GPU health table
 ```
 
+> [!NOTE]
+> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line
+> table that `sysctl` cannot display properly.
+
 ## Tunables
 
 | Parameter | Default | Range | Description |
