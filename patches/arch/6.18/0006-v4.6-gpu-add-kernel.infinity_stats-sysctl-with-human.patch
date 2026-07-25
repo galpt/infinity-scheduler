@@ -1,4 +1,4 @@
-From dda757227f148af8dacc4b9b325200876efcfa53 Mon Sep 17 00:00:00 2001
+From ab3321249cf317c6f97aaa72809e058a5d9aa5bb Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 12:20:32 +0700
 Subject: [PATCH 6/6] v4.6-gpu: add kernel.infinity_stats sysctl with
@@ -9,10 +9,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  drivers/gpu/drm/scheduler/sched_main.c |   5 +
  include/drm/gpu_scheduler.h            |   8 ++
  kernel/sched/fair.c                    |   4 +-
- kernel/sched/infinity_sched.c          | 122 ++++++++++++++++++++++++-
+ kernel/sched/infinity_sched.c          | 128 ++++++++++++++++++++++++-
  kernel/sched/infinity_sched.h          |   6 ++
  kernel/sched/rt.c                      |   1 +
- 6 files changed, 144 insertions(+), 2 deletions(-)
+ 6 files changed, 150 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
 index bfe549a23..2de80e10e 100644
@@ -71,10 +71,10 @@ index 5f3d0c1f0..768907cae 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..d058aa0a1 100644
+index 682ddfb67..b4365e811 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -18,11 +18,25 @@
+@@ -18,11 +18,31 @@
   */
  #include <linux/math64.h>
  #include <linux/sysctl.h>
@@ -91,7 +91,13 @@ index 682ddfb67..d058aa0a1 100644
 +atomic_t infinity_futex_boost_count	= ATOMIC_INIT(0);
 +atomic_t infinity_ema_climb_count	= ATOMIC_INIT(0);
 +atomic_t infinity_rt_throttle_count	= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_futex_boost_count);
++EXPORT_SYMBOL(infinity_ema_climb_count);
++EXPORT_SYMBOL(infinity_rt_throttle_count);
 +atomic_t infinity_gpu_jobs_completed	= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_gpu_jobs_completed);
++EXPORT_SYMBOL(infinity_gpu_ema_updates);
++EXPORT_SYMBOL(infinity_gpu_cross_couplings);
 +atomic_t infinity_gpu_ema_updates	= ATOMIC_INIT(0);
 +atomic_t infinity_gpu_cross_couplings	= ATOMIC_INIT(0);
 +/* ------------------------------------------------------------------ */
@@ -100,7 +106,7 @@ index 682ddfb67..d058aa0a1 100644
  /* ------------------------------------------------------------------ */
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
-@@ -47,7 +61,107 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,7 +67,107 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
@@ -209,7 +215,7 @@ index 682ddfb67..d058aa0a1 100644
  	{
  		.procname	= "infinity_smt_divisor",
  		.data		= &infinity_tune_smt_divisor,
-@@ -69,6 +183,11 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +189,11 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
@@ -221,7 +227,7 @@ index 682ddfb67..d058aa0a1 100644
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +238,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +244,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
