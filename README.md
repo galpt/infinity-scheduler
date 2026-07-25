@@ -228,7 +228,7 @@ Save gpu_ns on job via WRITE_ONCE
 ## Feature comparison
 
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
-|---|---|---|---|
+|---|---|---|
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | EMA (Limitless) |
 | SMT halving | No | Yes |
