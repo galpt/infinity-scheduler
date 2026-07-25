@@ -55,7 +55,7 @@ cat /proc/sys/kernel/infinity_stats   # → Formatted CPU + GPU health table
 ## Tunables
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|---|
+|---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
