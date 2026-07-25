@@ -47,15 +47,19 @@ uname -r                              # → 7.1-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
 sysctl kernel.infinity_version        # → kernel.infinity_version = v4.6-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
+
+# Check health statistics
+cat /proc/sys/kernel/infinity_stats   # → Formatted CPU + GPU health table
 ```
 
 ## Tunables
 
 | Parameter | Default | Range | Description |
-|---|---|---|---|
+|---|---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
+| `infinity_stats` | — (ro) | — | Human-readable health statistics (CPU + GPU) |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
 separate fair-share window is needed.  The EMA climb time constant is
@@ -125,7 +129,7 @@ flowchart TB
     subgraph INFRA["Scheduler infrastructure"]
         AC["α = 2048 + 2048 × cap/1024\n───\nmax (1024) → α = 4096\nmid  (512)  → α = 3072\nlow  (256)  → α = 2560"]
         OF["sleep decay\n───\n2nd-order Taylor expansion\n24ms shift half-life"]
-        TU["tunables\n───\nsmt_divisor\nrunning (ro)"]
+        TU["tunables & stats\n───\nsmt_divisor\nrunning (ro)\nversion (ro)\nstats (ro)"]
     end
     class AC,OF,TU infra
 ```
@@ -217,11 +221,16 @@ ema              (CPU burstiness)"]
 ─────────────────
 gpu_time_total += job_delta
 gpu_time_ema  += climb(delta)
+(protected by job_list_lock via
+ spin_trylock; entity pointer
+ cleared in entity_kill)
 (EMA decay on next submission via
  drm_sched_rq_update_vtime_locked)"]
     class DONE algo
 
-    DONE -. "credit_count -= credits" .-> SELECT
+    DONE -. "infinity_entity saved in
+    run_job_work before pop_job
+    clears the original" .-> ENTITY
 ```
 
 ## Feature comparison

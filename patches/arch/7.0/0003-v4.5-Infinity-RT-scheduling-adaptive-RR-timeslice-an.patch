@@ -1,7 +1,7 @@
 From 9c811271c2b042ba8a3d83d1b3fad1de2168c44f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:40 +0700
-Subject: [PATCH 3/5] v4.5: Infinity RT scheduling -- adaptive RR timeslice and
+Subject: [PATCH 3/6] v4.5: Infinity RT scheduling -- adaptive RR timeslice and
  requeue safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>

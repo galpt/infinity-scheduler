@@ -1,7 +1,7 @@
 From fbf63a5ea614fd9bd18c418b649ca21bccaf2e02 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:40 +0700
-Subject: [PATCH 2/5] v4.5: Infinity CPU scheduling on CFS/EEVDF
+Subject: [PATCH 2/6] v4.5: Infinity CPU scheduling on CFS/EEVDF
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
