@@ -1,4 +1,4 @@
-From a88c533c65a9b33010ad54c61a5e3bd3abe72bb4 Mon Sep 17 00:00:00 2001
+From 118ee263a8b3e44fc94cfef8ba08e2470e312c46 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 12:20:33 +0700
 Subject: [PATCH 6/6] v4.6-gpu: add kernel.infinity_stats sysctl with
