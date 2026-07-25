@@ -1,7 +1,7 @@
 From a316e52d14a3568eb8d34d2db259fb6c1dc77665 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:43 +0700
-Subject: [PATCH 4/6] v4.6-gpu: GPU DRM scheduler header extensions
+Subject: [PATCH 4/5] v4.6-gpu: GPU DRM scheduler header extensions
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
