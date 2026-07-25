@@ -1,8 +1,23 @@
-From e307fb26cab66c2d800fc9d561cfe829b59a1df0 Mon Sep 17 00:00:00 2001
+From eba21b200b159fa943c1612283f6fe96cf86f11d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
  boost, idle-start, deferred accounting, em dash fix
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: fix stats tree branch label alignment
+
+The tree branch labels for lock contention and entity freed had too much
+trailing padding, misaligning the value column.  Fixed to all be exactly
+22 display characters wide (matching the regular label column).
+
+Verifed with Python simulation that all value columns align at the same
+position.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: fix Per-task EMA range spacing to align with value column
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -605,7 +620,7 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..a4faed1d6 100644
+index 682ddfb67..bdec45550 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -18,11 +18,33 @@
@@ -778,8 +793,8 @@ index 682ddfb67..a4faed1d6 100644
 +	fmt_val(buf, sizeof(buf), wkc, 14);
 +	strlcat(buf, "\n", sizeof(buf));
 +
-+	strlcat(buf, "  Per-task EMA range  0 - 10,000\n",
-+		sizeof(buf));
++	strlcat(buf, "  Per-task EMA range ", sizeof(buf));
++	strlcat(buf, "0 - 10,000\n", sizeof(buf));
 +
 +	/* RT section */
 +	strlcat(buf, "\nRT\n", sizeof(buf));
@@ -806,11 +821,11 @@ index 682ddfb67..a4faed1d6 100644
 +		strlcat(buf, "  N/A\n", sizeof(buf));
 +	}
 +
-+	strlcat(buf, "  \xe2\x94\x9c\xe2\x94\x80 trylock failures  ", sizeof(buf));
++	strlcat(buf, "  \xe2\x94\x9c\xe2\x94\x80 lock contention    ", sizeof(buf));
 +	fmt_val(buf, sizeof(buf), 0, 14);
 +	strlcat(buf, "  (lock contention)\n", sizeof(buf));
 +
-+	strlcat(buf, "  \xe2\x94\x94\xe2\x94\x80 entity not found  ", sizeof(buf));
++	strlcat(buf, "  \xe2\x94\x94\xe2\x94\x80 entity freed       ", sizeof(buf));
 +	fmt_val(buf, sizeof(buf), gskp, 14);
 +	strlcat(buf, "  (entity_kill race)\n", sizeof(buf));
 +
