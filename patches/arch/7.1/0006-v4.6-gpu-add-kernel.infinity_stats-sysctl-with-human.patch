@@ -1,4 +1,4 @@
-From c09f2cc8f961b8727eb21c2e43f014aa22e7566e Mon Sep 17 00:00:00 2001
+From 276a27bb4ab2331618b9c36ddecc8419130e99cf Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 12:16:58 +0700
 Subject: [PATCH 6/6] v4.6-gpu: add kernel.infinity_stats sysctl with
@@ -15,12 +15,12 @@ completed, GPU EMA updates, and cross-scheduler coupling events.
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_main.c |   5 +
- include/drm/gpu_scheduler.h            |   8 ++
+ include/drm/gpu_scheduler.h            |  12 +-
  kernel/sched/fair.c                    |   4 +-
- kernel/sched/infinity_sched.c          | 128 ++++++++++++++++++++++++-
- kernel/sched/infinity_sched.h          |   6 ++
+ kernel/sched/infinity_sched.c          | 156 +++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h          |   6 +
  kernel/sched/rt.c                      |   1 +
- 6 files changed, 150 insertions(+), 2 deletions(-)
+ 6 files changed, 179 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
 index 4082edd3d..7c0c5e52d 100644
@@ -46,10 +46,21 @@ index 4082edd3d..7c0c5e52d 100644
  		spin_unlock_irqrestore(&sched->job_list_lock, __flags);
  	}
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 8fab4dde6..17f424527 100644
+index 8fab4dde6..a7e7878b1 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
-@@ -805,4 +805,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -632,10 +632,6 @@ struct drm_gpu_scheduler {
+ 	struct list_head		pending_list;
+ 	spinlock_t			job_list_lock;
+ 
+-	/**
+-
+-	int				hang_limit;
+-	atomic_t                        *score;
+ 	atomic_t                        _score;
+ 	bool				ready;
+ 	bool				free_guilty;
+@@ -805,4 +801,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
  #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
  #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
  
@@ -79,14 +90,14 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..8f317cf67 100644
+index 682ddfb67..41032fa23 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -18,11 +18,31 @@
   */
  #include <linux/math64.h>
  #include <linux/sysctl.h>
-+#include <linux/seq_file.h>
++#include <linux/string.h>
  #include <uapi/linux/sched/types.h>
 +#include <drm/gpu_scheduler.h>
  #include "sched.h"
@@ -114,15 +125,14 @@ index 682ddfb67..8f317cf67 100644
  /* ------------------------------------------------------------------ */
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
-@@ -47,7 +67,107 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,6 +67,134 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
--static struct ctl_table infinity_sysctl_table[] = {
 +/* ------------------------------------------------------------------ */
 +/* Human-readable number formatting                                    */
 +/* ------------------------------------------------------------------ */
-+static void fmt_human(struct seq_file *m, u64 val)
++static void fmt_human(char *buf, size_t sz, u64 val)
 +{
 +	static const struct {
 +		u64 divisor;
@@ -136,106 +146,135 @@ index 682ddfb67..8f317cf67 100644
 +		{ 1000ULL,                "K" },
 +	};
 +	int i;
++	char tmp[32];
 +
 +	for (i = 0; i < ARRAY_SIZE(table); i++) {
 +		if (val >= table[i].divisor) {
 +			u64 whole = val / table[i].divisor;
 +			u64 frac = (val % table[i].divisor) /
 +				   (table[i].divisor / 100);
-+			seq_printf(m, "%llu.%02llu %s",
-+				   whole, frac, table[i].unit);
++			scnprintf(tmp, sizeof(tmp), "%llu.%02llu %s",
++				  whole, frac, table[i].unit);
++			strlcat(buf, tmp, sz);
 +			return;
 +		}
 +	}
 +
-+	seq_printf(m, "%llu", (unsigned long long)val);
++	scnprintf(tmp, sizeof(tmp), "%llu", (unsigned long long)val);
++	strlcat(buf, tmp, sz);
 +}
 +/* ------------------------------------------------------------------ */
 +/* Stats display handler                                               */
 +/* ------------------------------------------------------------------ */
-+static int infinity_stats_show(struct seq_file *m, void *v)
++static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
++				       void *buffer, size_t *lenp,
++				       loff_t *ppos)
 +{
-+	u64 futex   = (u64)atomic_read(&infinity_futex_boost_count);
-+	u64 ema     = (u64)atomic_read(&infinity_ema_climb_count);
-+	u64 rtthr   = (u64)atomic_read(&infinity_rt_throttle_count);
-+	u64 gpu_j   = (u64)atomic_read(&infinity_gpu_jobs_completed);
-+	u64 gpu_e   = (u64)atomic_read(&infinity_gpu_ema_updates);
-+	u64 gpu_c   = (u64)atomic_read(&infinity_gpu_cross_couplings);
++	char buf[1024];
 +
-+	seq_puts(m, "Infinity Scheduler v4.6-gpu\n");
-+	seq_puts(m, "────────────────────────────\n\n");
-+	seq_puts(m, "CPU:\n");
-+	seq_puts(m, "  Futex boosts      : "); fmt_human(m, futex);
-+	seq_puts(m, "  Tasks boosted on IPC wakeup\n");
-+	seq_puts(m, "  EMA climbs        : "); fmt_human(m, ema);
-+	seq_puts(m, "  Burstiness events detected\n");
-+	seq_puts(m, "  Sleep decays      : "); fmt_human(m, ema);
-+	seq_puts(m, "  Wakeup performance improvements\n");
-+	seq_puts(m, "  RT throttles      : "); fmt_human(m, rtthr);
-+	seq_puts(m, "  Rogue SCHED_FIFO safety valve\n\n");
-+	seq_puts(m, "GPU:\n");
-+	seq_puts(m, "  Jobs processed     : "); fmt_human(m, gpu_j);
-+	seq_puts(m, "  Total GPU jobs completed\n");
-+	seq_puts(m, "  EMA updates        : "); fmt_human(m, gpu_e);
-+	seq_puts(m, "  Burstiness tracking updates\n");
-+	seq_puts(m, "  Cross-couplings    : "); fmt_human(m, gpu_c);
-+	seq_puts(m, "  CPU\u2192GPU interactivity signals\n\n");
++	if (write)
++		return -EROFS;
 +
-+	seq_puts(m, "Health:\n");
-+	if (futex > 0)
-+		seq_puts(m, "  1. CPU interactivity : GOOD\n");
-+	else
-+		seq_puts(m, "  1. CPU interactivity : IDLE (no futex events yet)\n");
-+	if (rtthr > 0)
-+		seq_puts(m, "  2. RT throttling    : THROTTLED\n");
-+	else
-+		seq_puts(m, "  2. RT throttling    : GOOD\n");
-+	if (gpu_j > 0 && gpu_c > 0)
-+		seq_puts(m, "  3. GPU scheduling   : GOOD\n");
-+	else if (gpu_j > 0)
-+		seq_puts(m, "  3. GPU scheduling   : ACTIVE (no cross-coupling yet)\n");
-+	else
-+		seq_puts(m, "  3. GPU scheduling   : IDLE (no GPU jobs tracked)\n");
++	buf[0] = '\0';
 +
-+	seq_puts(m, "\nSystem:\n");
-+	seq_printf(m, "  Version     : %s\n", infinity_version);
-+	seq_printf(m, "  Running     : %s\n",
-+		   infinity_running_flag ? "yes" : "no");
-+	seq_printf(m, "  SMT divisor : %lu\n",
-+		   infinity_tune_smt_divisor);
-+	return 0;
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "Infinity Scheduler v4.6-gpu\n");
++	strlcat(buf, "----------------------------\n\n", sizeof(buf));
++	strlcat(buf, "CPU:\n", sizeof(buf));
++
++	strlcat(buf, "  Futex boosts      : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_futex_boost_count));
++	strlcat(buf, "  Tasks boosted on IPC wakeup\n", sizeof(buf));
++
++	strlcat(buf, "  EMA climbs        : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_ema_climb_count));
++	strlcat(buf, "  Burstiness events detected\n", sizeof(buf));
++
++	/* Sleep decays uses same counter as EMA climbs */
++	strlcat(buf, "  Sleep decays      : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_ema_climb_count));
++	strlcat(buf, "  Wakeup performance improvements\n", sizeof(buf));
++
++	strlcat(buf, "  RT throttles      : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_rt_throttle_count));
++	strlcat(buf, "  Rogue SCHED_FIFO safety valve\n\n", sizeof(buf));
++
++	strlcat(buf, "GPU:\n", sizeof(buf));
++
++	strlcat(buf, "  Jobs processed     : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_gpu_jobs_completed));
++	strlcat(buf, "  Total GPU jobs completed\n", sizeof(buf));
++
++	strlcat(buf, "  EMA updates        : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_gpu_ema_updates));
++	strlcat(buf, "  Burstiness tracking updates\n", sizeof(buf));
++
++	strlcat(buf, "  Cross-couplings    : ", sizeof(buf));
++	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_gpu_cross_couplings));
++	strlcat(buf, "  CPU->GPU interactivity signals\n\n", sizeof(buf));
++
++	strlcat(buf, "Health:\n", sizeof(buf));
++
++	if (atomic_read(&infinity_futex_boost_count) > 0)
++		strlcat(buf, "  1. CPU interactivity : GOOD\n", sizeof(buf));
++	else
++		strlcat(buf, "  1. CPU interactivity : IDLE (no futex events yet)\n",
++			sizeof(buf));
++
++	if (atomic_read(&infinity_rt_throttle_count) > 0)
++		strlcat(buf, "  2. RT throttling    : THROTTLED\n", sizeof(buf));
++	else
++		strlcat(buf, "  2. RT throttling    : GOOD\n", sizeof(buf));
++
++	if (atomic_read(&infinity_gpu_jobs_completed) > 0 &&
++	    atomic_read(&infinity_gpu_cross_couplings) > 0)
++		strlcat(buf, "  3. GPU scheduling   : GOOD\n", sizeof(buf));
++	else if (atomic_read(&infinity_gpu_jobs_completed) > 0)
++		strlcat(buf, "  3. GPU scheduling   : ACTIVE (no cross-coupling yet)\n",
++			sizeof(buf));
++	else
++		strlcat(buf, "  3. GPU scheduling   : IDLE (no GPU jobs tracked)\n",
++			sizeof(buf));
++
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "\nSystem:\n");
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "  Version     : %s\n", infinity_version);
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "  Running     : %s\n",
++		  infinity_running_flag ? "yes" : "no");
++	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++		  "  SMT divisor : %lu\n",
++		  infinity_tune_smt_divisor);
++
++	{
++		struct ctl_table tmp = *ctl;
++		tmp.data = buf;
++		tmp.maxlen = sizeof(buf);
++		return proc_dostring(&tmp, write, buffer, lenp, ppos);
++	}
 +}
-+
-+static int infinity_stats_open(struct inode *inode, struct file *file)
-+{
-+	return single_open(file, infinity_stats_show, NULL);
-+}
-+
-+static const struct proc_ops infinity_stats_proc_ops = {
-+	.proc_open	= infinity_stats_open,
-+	.proc_read	= seq_read,
-+	.proc_lseek	= seq_lseek,
-+	.proc_release	= single_release,
-+};
 +/* ------------------------------------------------------------------ */
 +/* Sysctl table                                                        */
 +/* ------------------------------------------------------------------ */
+ static struct ctl_table infinity_sysctl_table[] = {
  	{
  		.procname	= "infinity_smt_divisor",
- 		.data		= &infinity_tune_smt_divisor,
-@@ -69,6 +189,11 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +217,13 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
 +	{
 +		.procname	= "infinity_stats",
++		.data		= NULL,
++		.maxlen		= 0,
 +		.mode		= 0444,
-+		.proc_ops	= &infinity_stats_proc_ops,
++		.proc_handler	= infinity_stats_proc_handler,
 +	},
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +244,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +274,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
