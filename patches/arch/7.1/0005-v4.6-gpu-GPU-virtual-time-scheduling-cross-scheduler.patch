@@ -1,4 +1,4 @@
-From 7b7d8c897a4f48b33ffe21189354cc429ada5585 Mon Sep 17 00:00:00 2001
+From 5d268b8a74909cb3225e68b4dad2577887d1c1f5 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
@@ -46,18 +46,52 @@ Stats redesign:
    prevent sign-extension of wrapped 32-bit atomic_t values.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: replace cross-scheduler coupling with EMA-gated idle-start priority
+
+The previous cross-scheduler coupling used last_user_pid to detect
+interactivity by checking the entity-creating process's futex_waiting
+flag and CPU EMA.  This fails for multi-process browser architectures
+(Firefox, Chrome) where GPU entities are created by a separate GPU
+process, not the user-facing UI thread -- the cross-coupling never
+fires, and idle entities (e.g., browser after Alt+Tab from a game)
+compete on vtime alone.
+
+Replace with EMA-gated idle-start priority: when gpu_time_ema == 0
+(the entity has been idle with no recent GPU submissions), skip the
+catch-up boost entirely and use the entity's actual gpu_time_total as
+effective vtime.  This gives the browser sustained scheduling priority
+after Alt+Tab because its gpu_time_total is small (frozen during idle)
+while the game's gpu_time_total is large.
+
+Benefits:
+- No last_user_pid needed -- GPU EMA is an entity-level signal that
+  decays to 0 regardless of which OS process owns the entity
+- No cross-scheduler PID tracking -- removes get_task_pid/put_pid
+  and rcu_read_lock/unlock from the scheduling hot path
+- Sustained idle-start priority -- browser gets hundreds of jobs
+  ahead of the game, not just one (old catch-up: ~5ms gap)
+- All existing benefits preserved: fair gpu_time_total ordering,
+  EMA burst detection, priority scaling, unified queue
+
+Removed:
+- last_user_pid field and its get/put in entity_init/fini
+- Cross-coupling futex/CPU-ema check in calc_vtime
+- infinity_gpu_cross_couplings counter and stats line
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_entity.c |  64 ++++-
- drivers/gpu/drm/scheduler/sched_main.c   | 287 ++++++++++++++---------
- include/drm/gpu_scheduler.h              |  43 +++-
+ drivers/gpu/drm/scheduler/sched_entity.c |  57 ++++-
+ drivers/gpu/drm/scheduler/sched_main.c   | 279 +++++++++++++----------
+ include/drm/gpu_scheduler.h              |  48 ++--
  kernel/sched/fair.c                      |   4 +-
- kernel/sched/infinity_sched.c            | 255 ++++++++++++++++++++
+ kernel/sched/infinity_sched.c            | 241 ++++++++++++++++++++
  kernel/sched/infinity_sched.h            |   7 +
  kernel/sched/rt.c                        |   1 +
- 7 files changed, 528 insertions(+), 133 deletions(-)
+ 7 files changed, 498 insertions(+), 139 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
-index fe174a485..f3770bb55 100644
+index fe174a485..09909eb7c 100644
 --- a/drivers/gpu/drm/scheduler/sched_entity.c
 +++ b/drivers/gpu/drm/scheduler/sched_entity.c
 @@ -97,7 +97,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
@@ -75,16 +109,7 @@ index fe174a485..f3770bb55 100644
  	}
  
  	init_completion(&entity->entity_idle);
-@@ -111,6 +117,8 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
- 	atomic_set(&entity->fence_seq, 0);
- 	entity->fence_context = dma_fence_context_alloc(2);
- 
-+	entity->last_user_pid = get_task_pid(current->group_leader, PIDTYPE_PID);
-+
- 	return 0;
- }
- EXPORT_SYMBOL(drm_sched_entity_init);
-@@ -245,6 +253,40 @@ static void drm_sched_entity_kill(struct drm_sched_entity *entity)
+@@ -245,6 +251,40 @@ static void drm_sched_entity_kill(struct drm_sched_entity *entity)
  	/* Make sure this entity is not used by the scheduler at the moment */
  	wait_for_completion(&entity->entity_idle);
  
@@ -125,19 +150,7 @@ index fe174a485..f3770bb55 100644
  	/* The entity is guaranteed to not be used by the scheduler */
  	prev = rcu_dereference_check(entity->last_scheduled, true);
  	dma_fence_get(prev);
-@@ -328,6 +370,11 @@ EXPORT_SYMBOL(drm_sched_entity_flush);
-  */
- void drm_sched_entity_fini(struct drm_sched_entity *entity)
- {
-+	if (entity->last_user_pid) {
-+		put_pid(entity->last_user_pid);
-+		entity->last_user_pid = NULL;
-+	}
-+
- 	/*
- 	 * If consumption of existing jobs wasn't completed forcefully remove
- 	 * them. Also makes sure that the scheduler won't touch this entity any
-@@ -496,7 +543,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+@@ -496,7 +536,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
  	 * Update the entity's location in the min heap according to
  	 * the timestamp of the next job, if any.
  	 */
@@ -146,7 +159,7 @@ index fe174a485..f3770bb55 100644
  		struct drm_sched_job *next;
  
  		next = drm_sched_entity_queue_peek(entity);
-@@ -506,7 +553,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+@@ -506,7 +546,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
  			spin_lock(&entity->lock);
  			rq = entity->rq;
  			spin_lock(&rq->lock);
@@ -155,7 +168,7 @@ index fe174a485..f3770bb55 100644
  							next->submit_ts);
  			spin_unlock(&rq->lock);
  			spin_unlock(&entity->lock);
-@@ -552,7 +599,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+@@ -552,7 +592,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
  
  	spin_lock(&entity->lock);
  	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
@@ -170,7 +183,7 @@ index fe174a485..f3770bb55 100644
  	if (rq != entity->rq) {
  		drm_sched_rq_remove_entity(entity->rq, entity);
  		entity->rq = rq;
-@@ -619,8 +672,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
+@@ -619,8 +665,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
  		spin_lock(&rq->lock);
  		drm_sched_rq_add_entity(rq, entity);
  
@@ -181,7 +194,7 @@ index fe174a485..f3770bb55 100644
  		spin_unlock(&rq->lock);
  		spin_unlock(&entity->lock);
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 21dc82c75..c4c3b995a 100644
+index 21dc82c75..063769581 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -84,14 +84,7 @@
@@ -199,7 +212,7 @@ index 21dc82c75..c4c3b995a 100644
  
  static u32 drm_sched_available_credits(struct drm_gpu_scheduler *sched)
  {
-@@ -133,16 +126,86 @@ static bool drm_sched_can_queue(struct drm_gpu_scheduler *sched,
+@@ -133,16 +126,78 @@ static bool drm_sched_can_queue(struct drm_gpu_scheduler *sched,
  	return drm_sched_available_credits(sched) >= s_job->credits;
  }
  
@@ -228,14 +241,29 @@ index 21dc82c75..c4c3b995a 100644
 +	u64 vtime;
 +
 +	if (entity->gpu_time_total < rq->min_gpu_vtime) {
-+		if (rq->min_gpu_vtime < INFINITY_GPU_CATCHUP_BONUS_NS)
++		/*
++		 * EMA-gated idle-start priority: if this entity has been idle
++		 * (gpu_time_ema == 0, meaning no recent GPU submissions), do
++		 * NOT apply the catch-up boost.  Use the entity's actual small
++		 * gpu_time_total so it gets sustained scheduling priority.
++		 *
++		 * This naturally handles multi-process browser architectures:
++		 * the GPU EMA is an entity-level signal that decays to 0 when
++		 * idle regardless of which OS process created the entity or
++		 * submitted the jobs.  No cross-scheduler PID tracking needed.
++		 */
++		if (entity->gpu_time_ema == 0) {
++			effective_total = entity->gpu_time_total;
++		} else if (rq->min_gpu_vtime < INFINITY_GPU_CATCHUP_BONUS_NS) {
 +			effective_total = 0;
-+		else
++		} else {
 +			effective_total = rq->min_gpu_vtime - INFINITY_GPU_CATCHUP_BONUS_NS;
++		}
 +	} else {
 +		effective_total = entity->gpu_time_total;
 +	}
-+
+ 
+-	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
 +	vtime = effective_total;
 +
 +	switch (entity->priority) {
@@ -253,35 +281,12 @@ index 21dc82c75..c4c3b995a 100644
 +	default:
 +		break;
 +	}
- 
--	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
++
 +	if (entity->gpu_time_ema > 0) {
 +		u64 ema_pct = div64_u64(entity->gpu_time_ema * 100ULL,
 +					INFINITY_GPU_EMA_CLIMB_NS);
 +		u64 boost = vtime * ema_pct / 100;
 +		vtime += boost >> 1;
-+	}
-+
-+	/*
-+	 * Cross-scheduler coupling: if the owning task is waiting on a futex
-+	 * or has zero CPU EMA, it is likely interactive -- halve vtime so it
-+	 * gets GPU priority.
-+	 */
-+	if (entity->last_user_pid) {
-+		struct task_struct *inf_p;
-+
-+		rcu_read_lock();
-+		inf_p = pid_task(entity->last_user_pid, PIDTYPE_PID);
-+		if (inf_p) {
-+			if (READ_ONCE(inf_p->infinity.futex_waiting))
-+				vtime >>= 1;
-+			if (READ_ONCE(inf_p->infinity.ema) == 0)
-+				vtime >>= 1;
-+			if (READ_ONCE(inf_p->infinity.futex_waiting) ||
-+			    READ_ONCE(inf_p->infinity.ema) == 0)
-+				atomic_inc(&infinity_gpu_cross_couplings);
-+		}
-+		rcu_read_unlock();
 +	}
 +
 +	return vtime;
@@ -292,7 +297,7 @@ index 21dc82c75..c4c3b995a 100644
  					    struct drm_sched_rq *rq)
  {
  	if (!RB_EMPTY_NODE(&entity->rb_tree_node)) {
-@@ -151,24 +214,32 @@ static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
+@@ -151,24 +206,32 @@ static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
  	}
  }
  
@@ -334,7 +339,7 @@ index 21dc82c75..c4c3b995a 100644
  }
  
  /**
-@@ -234,108 +305,43 @@ void drm_sched_rq_remove_entity(struct drm_sched_rq *rq,
+@@ -234,108 +297,43 @@ void drm_sched_rq_remove_entity(struct drm_sched_rq *rq,
  	if (rq->current_entity == entity)
  		rq->current_entity = NULL;
  
@@ -462,7 +467,7 @@ index 21dc82c75..c4c3b995a 100644
  }
  
  /**
-@@ -373,6 +379,23 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
+@@ -373,6 +371,23 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
  	atomic_sub(s_job->credits, &sched->credit_count);
  	atomic_dec(sched->score);
  
@@ -486,7 +491,7 @@ index 21dc82c75..c4c3b995a 100644
  	trace_drm_sched_job_done(s_fence);
  
  	dma_fence_get(&s_fence->finished);
-@@ -1098,18 +1121,16 @@ static struct drm_sched_entity *
+@@ -1098,18 +1113,16 @@ static struct drm_sched_entity *
  drm_sched_select_entity(struct drm_gpu_scheduler *sched)
  {
  	struct drm_sched_entity *entity;
@@ -513,7 +518,7 @@ index 21dc82c75..c4c3b995a 100644
  	return IS_ERR(entity) ? NULL : entity;
  }
  
-@@ -1138,6 +1159,37 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
+@@ -1138,6 +1151,37 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
  		/* remove job from pending_list */
  		list_del_init(&job->list);
  
@@ -551,7 +556,7 @@ index 21dc82c75..c4c3b995a 100644
  		/* cancel this job's TO timer */
  		cancel_delayed_work(&sched->work_tdr);
  
-@@ -1255,6 +1307,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
+@@ -1255,6 +1299,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
  		return;
  	}
  
@@ -562,10 +567,90 @@ index 21dc82c75..c4c3b995a 100644
  
  	atomic_add(sched_job->credits, &sched->credit_count);
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 8fab4dde6..78afb5803 100644
+index 8fab4dde6..99b16a86f 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
-@@ -805,4 +819,13 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -235,18 +235,26 @@ struct drm_sched_entity {
+ 
+ 	/**
+ 	 * @gpu_time_ema: Infinity EMA of GPU time consumed.
+-	 * Unit: ns, ceiling ~10ms. Protected by rq->lock.
++	 * Unit: ns, ceiling ~10ms. Written under sched->job_list_lock on
++	 * completion (drm_sched_get_finished_job); read under rq->lock during
++	 * scheduling (drm_sched_entity_calc_vtime).  EMA is a heuristic —
++	 * stale reads self-correct.
+ 	 */
+ 	u64				gpu_time_ema;
+ 
+ 	/**
+-	 * @gpu_time_total: Total GPU time consumed (cumulative). Protected by rq->lock.
++	 * @gpu_time_total: Total GPU time consumed (cumulative). Written under
++	 * sched->job_list_lock on completion; read under rq->lock during
++	 * scheduling.  Stale reads degrade fairness temporarily but the
++	 * cumulative value converges as more jobs complete.
+ 	 */
+ 	u64				gpu_time_total;
+ 
+ 	/**
+ 	 * @gpu_time_last_active: ktime when entity last had a job submitted.
+-	 * Used for EMA decay on idle. Protected by rq->lock.
++	 * Used for EMA decay on idle. Written under rq->lock in the
++	 * scheduling path; read under rq->lock.  Not accessed by the
++	 * completion path.
+ 	 */
+ 	ktime_t				gpu_time_last_active;
+ 
+@@ -255,12 +263,6 @@ struct drm_sched_entity {
+ 	 * Protected by rq->lock.
+ 	 */
+ 	u64				cached_gpu_vtime;
+-
+-	/**
+-	 * @last_user_pid: PID of the owning process.
+-	 * Captured in entity_init, released in entity_fini. No mid-life changes.
+-	 */
+-	struct pid			*last_user_pid;
+ };
+ 
+ /**
+@@ -393,14 +395,22 @@ struct drm_sched_job {
+ 	struct drm_sched_entity         *entity;
+ 
+ 	/**
+-	 * @infinity_entity: Entity that submitted this job, saved before
+-	 * drm_sched_entity_pop_job() clears @entity for UAF safety.  Used
+-	 * by drm_sched_job_done() to track GPU time on the submitting entity.
+-	 * Protected against UAF by sched->job_list_lock (drm_sched_entity_kill
+-	 * clears it under that lock, job_done reads it under the same lock).
++	 * @infinity_entity: Entity that submitted this job.  Used by
++	 * drm_sched_get_finished_job() to apply GPU time accounting on
++	 * completion.  Cleanup occurs in drm_sched_entity_kill() after the
++	 * entity_idle wait (at which point all in-flight jobs are in
++	 * pending_list).  Both the cleanup and the read in
++	 * get_finished_job() are under sched->job_list_lock.
+ 	 */
+ 	struct drm_sched_entity         *infinity_entity;
+ 
++	/**
++	 * @infinity_gpu_ns: GPU time for this job, written by
++	 * drm_sched_job_done() (fence callback, may run in IRQ context).
++	 * Read under sched->job_list_lock in drm_sched_get_finished_job().
++	 */
++	u64				infinity_gpu_ns;
++
+ 	enum drm_sched_priority		s_priority;
+ 	u32				credits;
+ 	/** @last_dependency: tracks @dependencies as they signal */
+@@ -632,8 +642,6 @@ struct drm_gpu_scheduler {
+ 	struct list_head		pending_list;
+ 	spinlock_t			job_list_lock;
+ 
+-	/**
+-
+ 	int				hang_limit;
+ 	atomic_t                        *score;
+ 	atomic_t                        _score;
+@@ -805,4 +813,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
  #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
  #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
  
@@ -576,7 +661,6 @@ index 8fab4dde6..78afb5803 100644
 +extern atomic_t infinity_gpu_completion_callbacks;
 +extern atomic_t infinity_gpu_accounting_applied;
 +extern atomic_t infinity_gpu_accounting_skipped;
-+extern atomic_t infinity_gpu_cross_couplings;
 +
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
@@ -596,10 +680,10 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..9699c9ca8 100644
+index 682ddfb67..65ed690ef 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -18,11 +18,35 @@
+@@ -18,11 +18,33 @@
   */
  #include <linux/math64.h>
  #include <linux/sysctl.h>
@@ -624,18 +708,16 @@ index 682ddfb67..9699c9ca8 100644
 +atomic_t infinity_gpu_completion_callbacks	= ATOMIC_INIT(0);
 +atomic_t infinity_gpu_accounting_applied	= ATOMIC_INIT(0);
 +atomic_t infinity_gpu_accounting_skipped	= ATOMIC_INIT(0);
-+atomic_t infinity_gpu_cross_couplings		= ATOMIC_INIT(0);
 +EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
 +EXPORT_SYMBOL(infinity_gpu_accounting_applied);
 +EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
-+EXPORT_SYMBOL(infinity_gpu_cross_couplings);
 +/* ------------------------------------------------------------------ */
 +
 +
  /* ------------------------------------------------------------------ */
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
-@@ -47,6 +71,228 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,6 +69,216 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
@@ -724,7 +806,7 @@ index 682ddfb67..9699c9ca8 100644
 +	 * └─────────────────────────────────────────────────────────────┘
 +	 */
 +	char buf[1024];
-+	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp, gxcp;
++	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
 +
 +	if (write)
 +		return -EROFS;
@@ -740,7 +822,6 @@ index 682ddfb67..9699c9ca8 100644
 +	gcb  = (u64)(unsigned int)atomic_read(&infinity_gpu_completion_callbacks);
 +	gapp = (u64)(unsigned int)atomic_read(&infinity_gpu_accounting_applied);
 +	gskp = (u64)(unsigned int)atomic_read(&infinity_gpu_accounting_skipped);
-+	gxcp = (u64)(unsigned int)atomic_read(&infinity_gpu_cross_couplings);
 +
 +	buf[0] = '\0';
 +
@@ -808,17 +889,6 @@ index 682ddfb67..9699c9ca8 100644
 +	fmt_val(buf, sizeof(buf), gskp, 14);
 +	strlcat(buf, "  (entity_kill race)\n", sizeof(buf));
 +
-+	strlcat(buf, "  Cross-couplings     ", sizeof(buf));
-+	fmt_val(buf, sizeof(buf), gxcp, 14);
-+	if (gapp) {
-+		u64 whole = div64_u64(gxcp * 100ULL, gapp);
-+		u64 frac  = div64_u64(gxcp * 10000ULL, gapp) % 100;
-+		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+			  "  %llu.%02llu%% of total\n", whole, frac);
-+	} else {
-+		strlcat(buf, "  N/A of total\n", sizeof(buf));
-+	}
-+
 +	/* Footer */
 +	strlcat(buf,
 +		"──────────────────────────────────────────────────────────────────────\n",
@@ -864,7 +934,7 @@ index 682ddfb67..9699c9ca8 100644
  static struct ctl_table infinity_sysctl_table[] = {
  	{
  		.procname	= "infinity_smt_divisor",
-@@ -69,6 +315,13 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +301,13 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
@@ -878,7 +948,7 @@ index 682ddfb67..9699c9ca8 100644
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +372,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +358,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
@@ -886,7 +956,7 @@ index 682ddfb67..9699c9ca8 100644
  }
  /* ------------------------------------------------------------------ */
  /* infinity_wakeup -- EMA decay on wakeup                               */
-@@ -152,6 +406,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -152,6 +392,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			}
  		}
  	}
