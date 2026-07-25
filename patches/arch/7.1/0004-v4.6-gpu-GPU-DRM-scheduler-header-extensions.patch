@@ -7,8 +7,8 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_internal.h  |  8 +--
  drivers/gpu/drm/xe/xe_gpu_scheduler_types.h |  1 -
- include/drm/gpu_scheduler.h                 | 55 +++++++++++++++++++++
- 3 files changed, 56 insertions(+), 8 deletions(-)
+ include/drm/gpu_scheduler.h                 | 67 +++++++++++++++++++++++++
+ 3 files changed, 68 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_internal.h b/drivers/gpu/drm/scheduler/sched_internal.h
 index 7ea5a6736..abd5988e2 100644
@@ -57,18 +57,26 @@ index 78e07c250..8fab4dde6 100644
  
 +	/**
 +	 * @gpu_time_ema: Infinity EMA of GPU time consumed.
-+	 * Unit: ns, ceiling ~10ms. Protected by rq->lock.
++	 * Unit: ns, ceiling ~10ms. Written under sched->job_list_lock on
++	 * completion (drm_sched_get_finished_job); read under rq->lock during
++	 * scheduling (drm_sched_entity_calc_vtime).  EMA is a heuristic —
++	 * stale reads self-correct.
 +	 */
 +	u64				gpu_time_ema;
 +
 +	/**
-+	 * @gpu_time_total: Total GPU time consumed (cumulative). Protected by rq->lock.
++	 * @gpu_time_total: Total GPU time consumed (cumulative). Written under
++	 * sched->job_list_lock on completion; read under rq->lock during
++	 * scheduling.  Stale reads degrade fairness temporarily but the
++	 * cumulative value converges as more jobs complete.
 +	 */
 +	u64				gpu_time_total;
 +
 +	/**
 +	 * @gpu_time_last_active: ktime when entity last had a job submitted.
-+	 * Used for EMA decay on idle. Protected by rq->lock.
++	 * Used for EMA decay on idle. Written under rq->lock in the
++	 * scheduling path; read under rq->lock.  Not accessed by the
++	 * completion path.
 +	 */
 +	ktime_t				gpu_time_last_active;
 +
@@ -105,15 +113,24 @@ index 78e07c250..8fab4dde6 100644
  	struct drm_sched_entity         *entity;
  
 +	/**
-+	 * @infinity_entity: Entity that submitted this job, saved before
-+	 * drm_sched_entity_pop_job() clears @entity for UAF safety.  Used
-+	 * by drm_sched_job_done() to track GPU time on the submitting entity.
-+	 * Protected against UAF by sched->job_list_lock (drm_sched_entity_kill
-+	 * clears it under that lock, job_done reads it under the same lock).
++	/**
++	 * @infinity_entity: Entity that submitted this job.  Used by
++	 * drm_sched_get_finished_job() to apply GPU time accounting on
++	 * completion.  Cleanup occurs in drm_sched_entity_kill() after the
++	 * entity_idle wait (at which point all in-flight jobs are in
++	 * pending_list).  Both the cleanup and the read in
++	 * get_finished_job() are under sched->job_list_lock.
 +	 */
 +	struct drm_sched_entity         *infinity_entity;
-+
- 	enum drm_sched_priority		s_priority;
+
++	/**
++	 * @infinity_gpu_ns: GPU time for this job, written by
++	 * drm_sched_job_done() (fence callback, may run in IRQ context).
++	 * Read under sched->job_list_lock in drm_sched_get_finished_job().
++	 */
++	u64				infinity_gpu_ns;
+
++		enum drm_sched_priority		s_priority;
  	u32				credits;
  	/** @last_dependency: tracks @dependencies as they signal */
 @@ -587,6 +631,9 @@ struct drm_gpu_scheduler {

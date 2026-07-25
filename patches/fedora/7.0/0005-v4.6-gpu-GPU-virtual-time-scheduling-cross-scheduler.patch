@@ -1,22 +1,63 @@
-From 2ad210581d872cbbac802ad9d721a038ffd90bf1 Mon Sep 17 00:00:00 2001
+From 7b7d8c897a4f48b33ffe21189354cc429ada5585 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 25 Jul 2026 11:43:43 +0700
+Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
  coupling, KERNEL vtime boost
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: fix 4 bugs from RiverOnVenus review and redesign kernel.infinity_stats
+
+Fixes identified by RiverOnVenus (github issue #15):
+
+1. UAF on infinity_entity pointer (CRITICAL):
+   Move cleanup in drm_sched_entity_kill() to AFTER wait_for_completion
+   so that all in-flight jobs are guaranteed to be in pending_list
+   before scanning.  Also scan ALL schedulers in the entity's
+   sched_list (multi-scheduler safety).
+
+2. Lock domain doc mismatch (MEDIUM):
+   Update gpu_time_ema, gpu_time_total, gpu_time_last_active kernel-doc
+   to say 'Written under sched->job_list_lock on completion; read under
+   rq->lock during scheduling' instead of the incorrect 'Protected by
+   rq->lock.'
+
+3. Silent accounting loss via spin_trylock (HIGH):
+   Defer GPU time accounting from drm_sched_job_done() (fence callback,
+   IRQ context) to drm_sched_get_finished_job() (free worker, process
+   context).  Job done now only does WRITE_ONCE(infinity_gpu_ns) +
+   atomic_inc(completion_callbacks).  get_finished_job reads the
+   saved entity + gpu_ns under job_list_lock (full spin_lock, no
+   trylock).  Accounting is always applied or counted as skipped.
+
+4. Misleading stats counters (MEDIUM):
+   Split GPU counter into completion_callbacks, accounting_applied, and
+   accounting_skipped so users can verify cb == app + skipped.
+   Remove phantom 'Sleep decays' line (was same counter as EMA climbs),
+   remove redundant 'EMA updates' line (was identical to jobs_completed),
+   remove reductive 'Health' section.  Add real infinity_wakeup_count
+   incremented in infinity_wakeup().
+
+Stats redesign:
+   Match the agreed format from the mockup: raw comma-formatted numbers
+   aligned in 14-char columns, Unicode box-drawing for tree breakdown,
+   sections for CPU/RT/GPU, Accounting confidence line with percentage,
+   and Verdict.  Counter reads go through '(unsigned int)' cast to
+   prevent sign-extension of wrapped 32-bit atomic_t values.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_entity.c |  43 +++-
- drivers/gpu/drm/scheduler/sched_main.c   | 267 +++++++++++++----------
- include/drm/gpu_scheduler.h              |  12 +-
+ drivers/gpu/drm/scheduler/sched_entity.c |  64 ++++-
+ drivers/gpu/drm/scheduler/sched_main.c   | 287 ++++++++++++++---------
+ include/drm/gpu_scheduler.h              |  43 +++-
  kernel/sched/fair.c                      |   4 +-
- kernel/sched/infinity_sched.c            | 157 ++++++++++++-
- kernel/sched/infinity_sched.h            |   6 +
+ kernel/sched/infinity_sched.c            | 255 ++++++++++++++++++++
+ kernel/sched/infinity_sched.h            |   7 +
  kernel/sched/rt.c                        |   1 +
- 7 files changed, 362 insertions(+), 128 deletions(-)
+ 7 files changed, 528 insertions(+), 133 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
-index fe174a485..810d5944b 100644
+index fe174a485..f3770bb55 100644
 --- a/drivers/gpu/drm/scheduler/sched_entity.c
 +++ b/drivers/gpu/drm/scheduler/sched_entity.c
 @@ -97,7 +97,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
@@ -43,27 +84,48 @@ index fe174a485..810d5944b 100644
  	return 0;
  }
  EXPORT_SYMBOL(drm_sched_entity_init);
-@@ -242,6 +250,19 @@ static void drm_sched_entity_kill(struct drm_sched_entity *entity)
- 	drm_sched_rq_remove_entity(entity->rq, entity);
- 	spin_unlock(&entity->lock);
- 
-+	/* Infinity: clear entity pointer on in-flight jobs under job_list_lock */
-+	{
-+		struct drm_gpu_scheduler *sched = entity->rq->sched;
-+		struct drm_sched_job *job;
-+
-+		spin_lock(&sched->job_list_lock);
-+		list_for_each_entry(job, &sched->pending_list, list) {
-+			if (READ_ONCE(job->infinity_entity) == entity)
-+				WRITE_ONCE(job->infinity_entity, NULL);
-+		}
-+		spin_unlock(&sched->job_list_lock);
-+	}
-+
+@@ -245,6 +253,40 @@ static void drm_sched_entity_kill(struct drm_sched_entity *entity)
  	/* Make sure this entity is not used by the scheduler at the moment */
  	wait_for_completion(&entity->entity_idle);
  
-@@ -328,6 +349,11 @@ EXPORT_SYMBOL(drm_sched_entity_flush);
++	/* Infinity: clear entity pointer on in-flight jobs under job_list_lock.
++	 * Must run AFTER entity_idle so that any job that was in the
++	 * pop_job -> set infinity_entity -> drm_sched_job_begin() window
++	 * is already in pending_list and is found by the scan.
++	 *
++	 * Multi-scheduler: scan ALL schedulers in the entity's sched_list
++	 * (or just the current one if sched_list is NULL / single), because
++	 * entity->rq may have switched since jobs were submitted.
++	 */
++	{
++		struct drm_gpu_scheduler **scan_scheds = NULL;
++		unsigned int n_scan = 0, i;
++
++		if (entity->sched_list) {
++			scan_scheds = entity->sched_list;
++			n_scan = entity->num_sched_list;
++		} else if (entity->rq) {
++			scan_scheds = &entity->rq->sched;
++			n_scan = 1;
++		}
++
++		for (i = 0; i < n_scan; i++) {
++			struct drm_gpu_scheduler *sched = scan_scheds[i];
++			struct drm_sched_job *job;
++
++			spin_lock(&sched->job_list_lock);
++			list_for_each_entry(job, &sched->pending_list, list) {
++				if (READ_ONCE(job->infinity_entity) == entity)
++					WRITE_ONCE(job->infinity_entity, NULL);
++			}
++			spin_unlock(&sched->job_list_lock);
++		}
++	}
++
+ 	/* The entity is guaranteed to not be used by the scheduler */
+ 	prev = rcu_dereference_check(entity->last_scheduled, true);
+ 	dma_fence_get(prev);
+@@ -328,6 +370,11 @@ EXPORT_SYMBOL(drm_sched_entity_flush);
   */
  void drm_sched_entity_fini(struct drm_sched_entity *entity)
  {
@@ -75,7 +137,7 @@ index fe174a485..810d5944b 100644
  	/*
  	 * If consumption of existing jobs wasn't completed forcefully remove
  	 * them. Also makes sure that the scheduler won't touch this entity any
-@@ -496,7 +522,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+@@ -496,7 +543,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
  	 * Update the entity's location in the min heap according to
  	 * the timestamp of the next job, if any.
  	 */
@@ -84,7 +146,7 @@ index fe174a485..810d5944b 100644
  		struct drm_sched_job *next;
  
  		next = drm_sched_entity_queue_peek(entity);
-@@ -506,7 +532,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+@@ -506,7 +553,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
  			spin_lock(&entity->lock);
  			rq = entity->rq;
  			spin_lock(&rq->lock);
@@ -93,7 +155,7 @@ index fe174a485..810d5944b 100644
  							next->submit_ts);
  			spin_unlock(&rq->lock);
  			spin_unlock(&entity->lock);
-@@ -552,7 +578,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+@@ -552,7 +599,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
  
  	spin_lock(&entity->lock);
  	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
@@ -108,7 +170,7 @@ index fe174a485..810d5944b 100644
  	if (rq != entity->rq) {
  		drm_sched_rq_remove_entity(entity->rq, entity);
  		entity->rq = rq;
-@@ -619,8 +651,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
+@@ -619,8 +672,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
  		spin_lock(&rq->lock);
  		drm_sched_rq_add_entity(rq, entity);
  
@@ -119,7 +181,7 @@ index fe174a485..810d5944b 100644
  		spin_unlock(&rq->lock);
  		spin_unlock(&entity->lock);
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 2d5cb21a0..fe1784eea 100644
+index 21dc82c75..c4c3b995a 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -84,14 +84,7 @@
@@ -154,13 +216,11 @@ index 2d5cb21a0..fe1784eea 100644
 +
 +	if (ent_a->cached_gpu_vtime != ent_b->cached_gpu_vtime)
 +		return ent_a->cached_gpu_vtime < ent_b->cached_gpu_vtime;
- 
--	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
++
 +	return ktime_before(ent_a->oldest_job_waiting,
 +			    ent_b->oldest_job_waiting);
- }
- 
--static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
++}
++
 +static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
 +{
 +	struct drm_sched_rq *rq = entity->rq;
@@ -193,7 +253,8 @@ index 2d5cb21a0..fe1784eea 100644
 +	default:
 +		break;
 +	}
-+
+ 
+-	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
 +	if (entity->gpu_time_ema > 0) {
 +		u64 ema_pct = div64_u64(entity->gpu_time_ema * 100ULL,
 +					INFINITY_GPU_EMA_CLIMB_NS);
@@ -224,8 +285,9 @@ index 2d5cb21a0..fe1784eea 100644
 +	}
 +
 +	return vtime;
-+}
-+
+ }
+ 
+-static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
 +static void drm_sched_rq_remove_vtime_locked(struct drm_sched_entity *entity,
  					    struct drm_sched_rq *rq)
  {
@@ -314,15 +376,15 @@ index 2d5cb21a0..fe1784eea 100644
 -	list_for_each_entry(entity, &rq->entities, list) {
 -		if (drm_sched_entity_is_ready(entity))
 -			goto found;
--
+ 
 -		if (entity == rq->current_entity)
 -			break;
 -	}
--
+ 
 -	spin_unlock(&rq->lock);
 -
 -	return NULL;
- 
+-
 -found:
 -	if (!drm_sched_can_queue(sched, entity)) {
 -		/*
@@ -336,7 +398,7 @@ index 2d5cb21a0..fe1784eea 100644
 -	}
 -
 -	spin_unlock(&rq->lock);
- 
+-
 -	return entity;
 -}
 -
@@ -400,14 +462,16 @@ index 2d5cb21a0..fe1784eea 100644
  }
  
  /**
-@@ -373,6 +379,34 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
+@@ -373,6 +379,23 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
  	atomic_sub(s_job->credits, &sched->credit_count);
  	atomic_dec(sched->score);
  
-+	/* Infinity: GPU time EMA tracking */
++	/* Infinity: record GPU duration on the job for deferred accounting
++	 * in drm_sched_get_finished_job().  Running from a dma_fence
++	 * callback (potentially IRQ context) so only WRITE_ONCE + atomic_inc
++	 * are safe here — no spin_locks.
++	 */
 +	{
-+		struct drm_sched_entity *inf_entity;
-+		unsigned long __flags;
 +		u64 gpu_ns;
 +
 +		gpu_ns = ktime_to_ns(ktime_sub(ktime_get(),
@@ -415,27 +479,14 @@ index 2d5cb21a0..fe1784eea 100644
 +		if (gpu_ns > INFINITY_GPU_EMA_CLIMB_NS)
 +			gpu_ns = INFINITY_GPU_EMA_CLIMB_NS;
 +
-+		if (spin_trylock_irqsave(&sched->job_list_lock, __flags)) {
-+			inf_entity = s_job->infinity_entity;
-+			if (inf_entity && inf_entity->rq) {
-+				inf_entity->gpu_time_total += gpu_ns;
-+				inf_entity->gpu_time_ema += div64_u64(
-+					(INFINITY_GPU_EMA_CLIMB_NS -
-+					 inf_entity->gpu_time_ema) *
-+					gpu_ns * INFINITY_GPU_EMA_ALPHA,
-+					INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
-+				atomic_inc(&infinity_gpu_jobs_completed);
-+				atomic_inc(&infinity_gpu_ema_updates);
-+			}
-+			spin_unlock_irqrestore(&sched->job_list_lock,
-+					       __flags);
-+		}
++		WRITE_ONCE(s_job->infinity_gpu_ns, gpu_ns);
++		atomic_inc(&infinity_gpu_completion_callbacks);
 +	}
 +
  	trace_drm_sched_job_done(s_fence);
  
  	dma_fence_get(&s_fence->finished);
-@@ -1098,18 +1132,16 @@ static struct drm_sched_entity *
+@@ -1098,18 +1121,16 @@ static struct drm_sched_entity *
  drm_sched_select_entity(struct drm_gpu_scheduler *sched)
  {
  	struct drm_sched_entity *entity;
@@ -462,7 +513,45 @@ index 2d5cb21a0..fe1784eea 100644
  	return IS_ERR(entity) ? NULL : entity;
  }
  
-@@ -1255,6 +1287,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
+@@ -1138,6 +1159,37 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
+ 		/* remove job from pending_list */
+ 		list_del_init(&job->list);
+ 
++		/* Infinity: deferred GPU time accounting.
++		 * job_list_lock protects against concurrent infinity_entity
++		 * cleanup in drm_sched_entity_kill().
++		 */
++		{
++			struct drm_sched_entity *inf_entity;
++			u64 gpu_ns;
++
++			inf_entity = READ_ONCE(job->infinity_entity);
++			gpu_ns = READ_ONCE(job->infinity_gpu_ns);
++			if (inf_entity) {
++				/* gpu_ns may be 0 for zero-duration jobs
++				 * (fast queues, simulators).  Accounting
++				 * update with 0 is a no-op on the entity
++				 * fields but still counts as applied.
++				 */
++				if (gpu_ns) {
++					inf_entity->gpu_time_total += gpu_ns;
++					inf_entity->gpu_time_ema += div64_u64(
++						(INFINITY_GPU_EMA_CLIMB_NS -
++						 inf_entity->gpu_time_ema) *
++						gpu_ns * INFINITY_GPU_EMA_ALPHA,
++						INFINITY_GPU_EMA_CLIMB_NS *
++						(1ULL << 8));
++				}
++				atomic_inc(&infinity_gpu_accounting_applied);
++			} else {
++				atomic_inc(&infinity_gpu_accounting_skipped);
++			}
++		}
++
+ 		/* cancel this job's TO timer */
+ 		cancel_delayed_work(&sched->work_tdr);
+ 
+@@ -1255,6 +1307,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
  		return;
  	}
  
@@ -473,21 +562,10 @@ index 2d5cb21a0..fe1784eea 100644
  
  	atomic_add(sched_job->credits, &sched->credit_count);
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 8fab4dde6..a7e7878b1 100644
+index 8fab4dde6..78afb5803 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
-@@ -632,10 +632,6 @@ struct drm_gpu_scheduler {
- 	struct list_head		pending_list;
- 	spinlock_t			job_list_lock;
- 
--	/**
--
--	int				hang_limit;
--	atomic_t                        *score;
- 	atomic_t                        _score;
- 	bool				ready;
- 	bool				free_guilty;
-@@ -805,4 +801,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -805,4 +819,13 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
  #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
  #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
  
@@ -495,16 +573,17 @@ index 8fab4dde6..a7e7878b1 100644
 +/* Infinity stats counters (accessible from infinity_sched.c)          */
 +/* ------------------------------------------------------------------ */
 +#include <linux/atomic.h>
-+extern atomic_t infinity_gpu_jobs_completed;
-+extern atomic_t infinity_gpu_ema_updates;
++extern atomic_t infinity_gpu_completion_callbacks;
++extern atomic_t infinity_gpu_accounting_applied;
++extern atomic_t infinity_gpu_accounting_skipped;
 +extern atomic_t infinity_gpu_cross_couplings;
 +
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 210a6e823..0aa6510b3 100644
+index 02e549316..8a06e5f3c 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5356,8 +5356,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5600,8 +5600,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	 * reducing IPC wakeup latency.
  	 */
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
@@ -517,10 +596,10 @@ index 210a6e823..0aa6510b3 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..03d16cff4 100644
+index 682ddfb67..9699c9ca8 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -18,11 +18,31 @@
+@@ -18,11 +18,35 @@
   */
  #include <linux/math64.h>
  #include <linux/sysctl.h>
@@ -536,31 +615,34 @@ index 682ddfb67..03d16cff4 100644
 +/* ------------------------------------------------------------------ */
 +atomic_t infinity_futex_boost_count	= ATOMIC_INIT(0);
 +atomic_t infinity_ema_climb_count	= ATOMIC_INIT(0);
++atomic_t infinity_wakeup_count		= ATOMIC_INIT(0);
 +atomic_t infinity_rt_throttle_count	= ATOMIC_INIT(0);
 +EXPORT_SYMBOL(infinity_futex_boost_count);
 +EXPORT_SYMBOL(infinity_ema_climb_count);
++EXPORT_SYMBOL(infinity_wakeup_count);
 +EXPORT_SYMBOL(infinity_rt_throttle_count);
-+atomic_t infinity_gpu_jobs_completed	= ATOMIC_INIT(0);
-+EXPORT_SYMBOL(infinity_gpu_jobs_completed);
-+EXPORT_SYMBOL(infinity_gpu_ema_updates);
++atomic_t infinity_gpu_completion_callbacks	= ATOMIC_INIT(0);
++atomic_t infinity_gpu_accounting_applied	= ATOMIC_INIT(0);
++atomic_t infinity_gpu_accounting_skipped	= ATOMIC_INIT(0);
++atomic_t infinity_gpu_cross_couplings		= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
++EXPORT_SYMBOL(infinity_gpu_accounting_applied);
++EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
 +EXPORT_SYMBOL(infinity_gpu_cross_couplings);
-+atomic_t infinity_gpu_ema_updates	= ATOMIC_INIT(0);
-+atomic_t infinity_gpu_cross_couplings	= ATOMIC_INIT(0);
 +/* ------------------------------------------------------------------ */
 +
 +
  /* ------------------------------------------------------------------ */
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
-@@ -47,7 +67,134 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,6 +71,228 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
--static struct ctl_table infinity_sysctl_table[] = {
 +/* ------------------------------------------------------------------ */
 +/* Human-readable number formatting                                    */
 +/* ------------------------------------------------------------------ */
-+static void fmt_human(char *buf, size_t sz, u64 val)
++static __maybe_unused void fmt_human(char *buf, size_t sz, u64 val)
 +{
 +	static const struct {
 +		u64 divisor;
@@ -592,88 +674,182 @@ index 682ddfb67..03d16cff4 100644
 +	strlcat(buf, tmp, sz);
 +}
 +/* ------------------------------------------------------------------ */
++/* fmt_val -- Write val to buf with comma separators, right-aligned    *
++ * to @width.  If @width is 0, no padding is applied.                 */
++/* ------------------------------------------------------------------ */
++static void fmt_val(char *buf, size_t sz, u64 val, unsigned int width)
++{
++	char tmp[32];
++	unsigned int len;
++
++	if (val == 0) {
++		scnprintf(tmp, sizeof(tmp), "0");
++	} else {
++		char raw[24];
++		int raw_len, i, pos = 0;
++
++		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
++		raw_len = strlen(raw);
++
++		for (i = 0; i < raw_len; i++) {
++			if (i > 0 && (raw_len - i) % 3 == 0)
++				tmp[pos++] = ',';
++			tmp[pos++] = raw[i];
++		}
++		tmp[pos] = '\0';
++	}
++
++	len = strlen(tmp);
++	if (width > 0 && len < width) {
++		char padded[32];
++		scnprintf(padded, sizeof(padded), "%*s", width, tmp);
++		strlcat(buf, padded, sz);
++	} else {
++		strlcat(buf, tmp, sz);
++	}
++}
++/* ------------------------------------------------------------------ */
 +/* Stats display handler                                               */
 +/* ------------------------------------------------------------------ */
 +static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 +				       void *buffer, size_t *lenp,
 +				       loff_t *ppos)
 +{
++	/*
++	 * ┌─────────────────────────────────────────────────────────────┐
++	 * │ Output format key (fixed-width columns):                    │
++	 * │   col 0-22: label (left-aligned, 22 chars)                 │
++	 * │   col 23-36: value (right-aligned, 14 chars, comma-sep)    │
++	 * │   col 37+: description                                     │
++	 * └─────────────────────────────────────────────────────────────┘
++	 */
 +	char buf[1024];
++	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp, gxcp;
 +
 +	if (write)
 +		return -EROFS;
 +
++	/*
++	 * Read counters through unsigned int to prevent sign-extension
++	 * of a wrapped 32-bit atomic_t from producing absurd u64 values.
++	 */
++	fbc  = (u64)(unsigned int)atomic_read(&infinity_futex_boost_count);
++	emc  = (u64)(unsigned int)atomic_read(&infinity_ema_climb_count);
++	wkc  = (u64)(unsigned int)atomic_read(&infinity_wakeup_count);
++	rtc  = (u64)(unsigned int)atomic_read(&infinity_rt_throttle_count);
++	gcb  = (u64)(unsigned int)atomic_read(&infinity_gpu_completion_callbacks);
++	gapp = (u64)(unsigned int)atomic_read(&infinity_gpu_accounting_applied);
++	gskp = (u64)(unsigned int)atomic_read(&infinity_gpu_accounting_skipped);
++	gxcp = (u64)(unsigned int)atomic_read(&infinity_gpu_cross_couplings);
++
 +	buf[0] = '\0';
 +
++	/* Header */
 +	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
 +		  "Infinity Scheduler v4.6-gpu\n");
-+	strlcat(buf, "----------------------------\n\n", sizeof(buf));
-+	strlcat(buf, "CPU:\n", sizeof(buf));
++	strlcat(buf,
++		"──────────────────────────────────────────────────────────────────────\n",
++		sizeof(buf));
 +
-+	strlcat(buf, "  Futex boosts      : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_futex_boost_count));
-+	strlcat(buf, "  Tasks boosted on IPC wakeup\n", sizeof(buf));
++	/* CPU section */
++	strlcat(buf, "CPU\n", sizeof(buf));
 +
-+	strlcat(buf, "  EMA climbs        : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_ema_climb_count));
-+	strlcat(buf, "  Burstiness events detected\n", sizeof(buf));
++	strlcat(buf, "  Futex boosts        ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), fbc, 14);
++	if (emc) {
++		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++			  "  %llu%% of tasks\n",
++			  div64_u64(fbc * 100ULL, emc));
++	} else {
++		strlcat(buf, "  N/A\n", sizeof(buf));
++	}
 +
-+	/* Sleep decays uses same counter as EMA climbs */
-+	strlcat(buf, "  Sleep decays      : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_ema_climb_count));
-+	strlcat(buf, "  Wakeup performance improvements\n", sizeof(buf));
++	strlcat(buf, "  EMA climbs          ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), emc, 14);
++	strlcat(buf, "\n", sizeof(buf));
 +
-+	strlcat(buf, "  RT throttles      : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_rt_throttle_count));
-+	strlcat(buf, "  Rogue SCHED_FIFO safety valve\n\n", sizeof(buf));
++	strlcat(buf, "  Wakeup decays       ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), wkc, 14);
++	strlcat(buf, "\n", sizeof(buf));
 +
-+	strlcat(buf, "GPU:\n", sizeof(buf));
++	strlcat(buf, "  Per-task EMA range  0 - 10,000\n",
++		sizeof(buf));
 +
-+	strlcat(buf, "  Jobs processed     : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_gpu_jobs_completed));
-+	strlcat(buf, "  Total GPU jobs completed\n", sizeof(buf));
++	/* RT section */
++	strlcat(buf, "\nRT\n", sizeof(buf));
++	strlcat(buf, "  RT throttles        ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), rtc, 14);
++	strlcat(buf, "  0 rogue SCHED_FIFO (>95%% rt_ema)\n",
++		sizeof(buf));
 +
-+	strlcat(buf, "  EMA updates        : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_gpu_ema_updates));
-+	strlcat(buf, "  Burstiness tracking updates\n", sizeof(buf));
++	/* GPU section */
++	strlcat(buf, "\nGPU\n", sizeof(buf));
 +
-+	strlcat(buf, "  Cross-couplings    : ", sizeof(buf));
-+	fmt_human(buf, sizeof(buf), (u64)atomic_read(&infinity_gpu_cross_couplings));
-+	strlcat(buf, "  CPU->GPU interactivity signals\n\n", sizeof(buf));
++	strlcat(buf, "  Completion entered  ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), gcb, 14);
++	strlcat(buf, "  fence callbacks fired\n", sizeof(buf));
 +
-+	strlcat(buf, "Health:\n", sizeof(buf));
++	strlcat(buf, "  Accounting applied  ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), gapp, 14);
++	if (gcb) {
++		u64 whole = div64_u64(gapp * 100ULL, gcb);
++		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
++		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++			  "  %llu.%02llu%%\n", whole, frac);
++	} else {
++		strlcat(buf, "  N/A\n", sizeof(buf));
++	}
 +
-+	if (atomic_read(&infinity_futex_boost_count) > 0)
-+		strlcat(buf, "  1. CPU interactivity : GOOD\n", sizeof(buf));
-+	else
-+		strlcat(buf, "  1. CPU interactivity : IDLE (no futex events yet)\n",
++	strlcat(buf, "  \xe2\x94\x9c\xe2\x94\x80 trylock failures  ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), 0, 14);
++	strlcat(buf, "  (lock contention)\n", sizeof(buf));
++
++	strlcat(buf, "  \xe2\x94\x94\xe2\x94\x80 entity not found  ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), gskp, 14);
++	strlcat(buf, "  (entity_kill race)\n", sizeof(buf));
++
++	strlcat(buf, "  Cross-couplings     ", sizeof(buf));
++	fmt_val(buf, sizeof(buf), gxcp, 14);
++	if (gapp) {
++		u64 whole = div64_u64(gxcp * 100ULL, gapp);
++		u64 frac  = div64_u64(gxcp * 10000ULL, gapp) % 100;
++		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++			  "  %llu.%02llu%% of total\n", whole, frac);
++	} else {
++		strlcat(buf, "  N/A of total\n", sizeof(buf));
++	}
++
++	/* Footer */
++	strlcat(buf,
++		"──────────────────────────────────────────────────────────────────────\n",
++		sizeof(buf));
++
++	if (gcb) {
++		u64 whole = div64_u64(gapp * 100ULL, gcb);
++		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
++		scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
++			  "Accounting confidence: %llu.%02llu%%  (", whole, frac);
++		fmt_val(buf, sizeof(buf), gapp, 0);
++		strlcat(buf, " / ", sizeof(buf));
++		fmt_val(buf, sizeof(buf), gcb, 0);
++		strlcat(buf, " completions)\n", sizeof(buf));
++	} else {
++		strlcat(buf,
++			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
 +			sizeof(buf));
++	}
 +
-+	if (atomic_read(&infinity_rt_throttle_count) > 0)
-+		strlcat(buf, "  2. RT throttling    : THROTTLED\n", sizeof(buf));
-+	else
-+		strlcat(buf, "  2. RT throttling    : GOOD\n", sizeof(buf));
-+
-+	if (atomic_read(&infinity_gpu_jobs_completed) > 0 &&
-+	    atomic_read(&infinity_gpu_cross_couplings) > 0)
-+		strlcat(buf, "  3. GPU scheduling   : GOOD\n", sizeof(buf));
-+	else if (atomic_read(&infinity_gpu_jobs_completed) > 0)
-+		strlcat(buf, "  3. GPU scheduling   : ACTIVE (no cross-coupling yet)\n",
++	if (gcb && gapp == gcb)
++		strlcat(buf,
++			"Verdict: All counters healthy \xe2\x80\x94 system operating normally\n",
++			sizeof(buf));
++	else if (gcb && gapp < gcb)
++		strlcat(buf,
++			"Verdict: Accounting mismatch detected \xe2\x80\x94 see above for details\n",
 +			sizeof(buf));
 +	else
-+		strlcat(buf, "  3. GPU scheduling   : IDLE (no GPU jobs tracked)\n",
++		strlcat(buf, "Verdict: No GPU jobs recorded yet\n",
 +			sizeof(buf));
-+
-+	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+		  "\nSystem:\n");
-+	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+		  "  Version     : %s\n", infinity_version);
-+	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+		  "  Running     : %s\n",
-+		  infinity_running_flag ? "yes" : "no");
-+	scnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-+		  "  SMT divisor : %lu\n",
-+		  infinity_tune_smt_divisor);
 +
 +	{
 +		struct ctl_table tmp = *ctl;
@@ -685,10 +861,10 @@ index 682ddfb67..03d16cff4 100644
 +/* ------------------------------------------------------------------ */
 +/* Sysctl table                                                        */
 +/* ------------------------------------------------------------------ */
+ static struct ctl_table infinity_sysctl_table[] = {
  	{
  		.procname	= "infinity_smt_divisor",
- 		.data		= &infinity_tune_smt_divisor,
-@@ -69,6 +216,13 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +315,13 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
@@ -702,7 +878,7 @@ index 682ddfb67..03d16cff4 100644
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +273,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +372,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
@@ -710,11 +886,19 @@ index 682ddfb67..03d16cff4 100644
  }
  /* ------------------------------------------------------------------ */
  /* infinity_wakeup -- EMA decay on wakeup                               */
+@@ -152,6 +406,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ 			}
+ 		}
+ 	}
++	atomic_inc(&infinity_wakeup_count);
+ }
+ /* ------------------------------------------------------------------ */
+ /* infinity_fork_init                                                   */
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index d0caf0586..1916b65cd 100644
+index d0caf0586..bf6e23be3 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
-@@ -144,6 +144,12 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+@@ -144,6 +144,13 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
  /* ------------------------------------------------------------------ */
  extern unsigned long infinity_tune_smt_divisor;
  /* ------------------------------------------------------------------ */
@@ -722,16 +906,17 @@ index d0caf0586..1916b65cd 100644
 +/* ------------------------------------------------------------------ */
 +extern atomic_t infinity_futex_boost_count;
 +extern atomic_t infinity_ema_climb_count;
++extern atomic_t infinity_wakeup_count;
 +extern atomic_t infinity_rt_throttle_count;
 +/* ------------------------------------------------------------------ */
  /* API -- called from fair.c and rt.c                                   */
  /* ------------------------------------------------------------------ */
  void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index be93d6ffd..e48749a08 100644
+index 22706ee12..a5ce551f5 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
-@@ -2553,6 +2553,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2567,6 +2567,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
  		requeue_task_rt(rq, p, 0);
  		resched_curr(rq);
