@@ -1,24 +1,17 @@
-From d02d04420181f234bf4364cf280b410af46f05c6 Mon Sep 17 00:00:00 2001
+From 121fa6ad0f3ca0df8508643b98bfb3fe83db06ef Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Thu, 9 Jul 2026 02:13:30 +0700
-Subject: [PATCH 5/6] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
+Date: Sat, 25 Jul 2026 11:37:15 +0700
+Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, cross-scheduler
  coupling, KERNEL vtime boost
-
-drm_sched_entity_calc_vtime with min_vtime normalization, priority
-scaling (KERNEL>>=2, NORMAL=1.5x, LOW=3x), EMA burstiness and
-cross-scheduler coupling via pid_task(). Unified rbtree selection
-DRM_SCHED_POLICY_INFINITY. FIFO/RR selectors deleted. KERNEL vtime
-boost. EMA decay on idle. ERR_PTR/num_rqs/IS_ERR guards. Dead code
-removed.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_entity.c |  44 +++-
- drivers/gpu/drm/scheduler/sched_main.c   | 275 +++++++++++++----------
- 2 files changed, 197 insertions(+), 122 deletions(-)
+ drivers/gpu/drm/scheduler/sched_entity.c |  43 +++-
+ drivers/gpu/drm/scheduler/sched_main.c   | 260 +++++++++++++----------
+ 2 files changed, 181 insertions(+), 122 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
-index fe174a485..7cf647987 100644
+index fe174a485..810d5944b 100644
 --- a/drivers/gpu/drm/scheduler/sched_entity.c
 +++ b/drivers/gpu/drm/scheduler/sched_entity.c
 @@ -97,7 +97,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
@@ -45,28 +38,27 @@ index fe174a485..7cf647987 100644
  	return 0;
  }
  EXPORT_SYMBOL(drm_sched_entity_init);
-@@ -242,6 +250,20 @@ static void drm_sched_entity_kill(struct drm_sched_entity *entity)
+@@ -242,6 +250,19 @@ static void drm_sched_entity_kill(struct drm_sched_entity *entity)
  	drm_sched_rq_remove_entity(entity->rq, entity);
  	spin_unlock(&entity->lock);
  
-+	/* Infinity: discard pending GPU time for this dying entity */
++	/* Infinity: clear entity pointer on in-flight jobs under job_list_lock */
 +	{
 +		struct drm_gpu_scheduler *sched = entity->rq->sched;
-+		unsigned long __flags;
++		struct drm_sched_job *job;
 +
-+		spin_lock_irqsave(&sched->infinity_pending_lock, __flags);
-+		if (sched->infinity_pending_valid &&
-+		    sched->infinity_pending_fence_ctx ==
-+		    entity->fence_context)
-+			sched->infinity_pending_valid = false;
-+		spin_unlock_irqrestore(&sched->infinity_pending_lock,
-+				       __flags);
++		spin_lock(&sched->job_list_lock);
++		list_for_each_entry(job, &sched->pending_list, list) {
++			if (READ_ONCE(job->infinity_entity) == entity)
++				WRITE_ONCE(job->infinity_entity, NULL);
++		}
++		spin_unlock(&sched->job_list_lock);
 +	}
 +
  	/* Make sure this entity is not used by the scheduler at the moment */
  	wait_for_completion(&entity->entity_idle);
  
-@@ -328,6 +350,11 @@ EXPORT_SYMBOL(drm_sched_entity_flush);
+@@ -328,6 +349,11 @@ EXPORT_SYMBOL(drm_sched_entity_flush);
   */
  void drm_sched_entity_fini(struct drm_sched_entity *entity)
  {
@@ -78,7 +70,7 @@ index fe174a485..7cf647987 100644
  	/*
  	 * If consumption of existing jobs wasn't completed forcefully remove
  	 * them. Also makes sure that the scheduler won't touch this entity any
-@@ -496,7 +523,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+@@ -496,7 +522,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
  	 * Update the entity's location in the min heap according to
  	 * the timestamp of the next job, if any.
  	 */
@@ -87,7 +79,7 @@ index fe174a485..7cf647987 100644
  		struct drm_sched_job *next;
  
  		next = drm_sched_entity_queue_peek(entity);
-@@ -506,7 +533,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
+@@ -506,7 +532,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
  			spin_lock(&entity->lock);
  			rq = entity->rq;
  			spin_lock(&rq->lock);
@@ -96,7 +88,7 @@ index fe174a485..7cf647987 100644
  							next->submit_ts);
  			spin_unlock(&rq->lock);
  			spin_unlock(&entity->lock);
-@@ -552,7 +579,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
+@@ -552,7 +578,13 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
  
  	spin_lock(&entity->lock);
  	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
@@ -111,7 +103,7 @@ index fe174a485..7cf647987 100644
  	if (rq != entity->rq) {
  		drm_sched_rq_remove_entity(entity->rq, entity);
  		entity->rq = rq;
-@@ -619,8 +652,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
+@@ -619,8 +651,7 @@ void drm_sched_entity_push_job(struct drm_sched_job *sched_job)
  		spin_lock(&rq->lock);
  		drm_sched_rq_add_entity(rq, entity);
  
@@ -122,7 +114,7 @@ index fe174a485..7cf647987 100644
  		spin_unlock(&rq->lock);
  		spin_unlock(&entity->lock);
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 21dc82c75..bb0555c4c 100644
+index 21dc82c75..4082edd3d 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -84,14 +84,7 @@
@@ -149,23 +141,21 @@ index 21dc82c75..bb0555c4c 100644
 +static __always_inline bool
 +drm_sched_entity_compare_vtime(struct rb_node *a,
 +			       const struct rb_node *b)
- {
--	struct drm_sched_entity *ent_a =  rb_entry((a), struct drm_sched_entity, rb_tree_node);
--	struct drm_sched_entity *ent_b =  rb_entry((b), struct drm_sched_entity, rb_tree_node);
++{
 +	struct drm_sched_entity *ent_a = rb_entry(a, struct drm_sched_entity, rb_tree_node);
 +	struct drm_sched_entity *ent_b = rb_entry(b, struct drm_sched_entity, rb_tree_node);
 +
 +	if (ent_a->cached_gpu_vtime != ent_b->cached_gpu_vtime)
 +		return ent_a->cached_gpu_vtime < ent_b->cached_gpu_vtime;
- 
--	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
++
 +	return ktime_before(ent_a->oldest_job_waiting,
 +			    ent_b->oldest_job_waiting);
- }
- 
--static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
++}
++
 +static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
-+{
+ {
+-	struct drm_sched_entity *ent_a =  rb_entry((a), struct drm_sched_entity, rb_tree_node);
+-	struct drm_sched_entity *ent_b =  rb_entry((b), struct drm_sched_entity, rb_tree_node);
 +	struct drm_sched_rq *rq = entity->rq;
 +	u64 effective_total;
 +	u64 vtime;
@@ -222,10 +212,12 @@ index 21dc82c75..bb0555c4c 100644
 +		}
 +		rcu_read_unlock();
 +	}
-+
+ 
+-	return ktime_before(ent_a->oldest_job_waiting, ent_b->oldest_job_waiting);
 +	return vtime;
-+}
-+
+ }
+ 
+-static void drm_sched_rq_remove_fifo_locked(struct drm_sched_entity *entity,
 +static void drm_sched_rq_remove_vtime_locked(struct drm_sched_entity *entity,
  					    struct drm_sched_rq *rq)
  {
@@ -314,13 +306,13 @@ index 21dc82c75..bb0555c4c 100644
 -	list_for_each_entry(entity, &rq->entities, list) {
 -		if (drm_sched_entity_is_ready(entity))
 -			goto found;
- 
+-
 -		if (entity == rq->current_entity)
 -			break;
 -	}
 -
 -	spin_unlock(&rq->lock);
- 
+-
 -	return NULL;
 -
 -found:
@@ -336,10 +328,10 @@ index 21dc82c75..bb0555c4c 100644
 -	}
 -
 -	spin_unlock(&rq->lock);
--
+ 
 -	return entity;
 -}
--
+ 
 -/**
 - * drm_sched_rq_select_entity_fifo - Select an entity which provides a job to run
 - *
@@ -400,32 +392,38 @@ index 21dc82c75..bb0555c4c 100644
  }
  
  /**
-@@ -373,6 +376,24 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
+@@ -373,6 +376,30 @@ static void drm_sched_job_done(struct drm_sched_job *s_job, int result)
  	atomic_sub(s_job->credits, &sched->credit_count);
  	atomic_dec(sched->score);
  
-+	/* Infinity: GPU time EMA tracking (deferred via scheduler pending fields) */
++	/* Infinity: GPU time EMA tracking */
 +	{
-+		u64 gpu_ns = ktime_to_ns(ktime_sub(ktime_get(),
-+				     s_job->submit_ts));
++		struct drm_sched_entity *inf_entity;
 +		unsigned long __flags;
++		u64 gpu_ns;
 +
++		gpu_ns = ktime_to_ns(ktime_sub(ktime_get(),
++				     s_job->submit_ts));
 +		if (gpu_ns > INFINITY_GPU_EMA_CLIMB_NS)
 +			gpu_ns = INFINITY_GPU_EMA_CLIMB_NS;
 +
-+		spin_lock_irqsave(&sched->infinity_pending_lock, __flags);
-+		sched->infinity_pending_fence_ctx =
-+			s_job->s_fence->scheduled.context;
-+		sched->infinity_pending_gpu_ns = gpu_ns;
-+		sched->infinity_pending_valid = true;
-+		spin_unlock_irqrestore(&sched->infinity_pending_lock,
-+				       __flags);
++		spin_trylock_irqsave(&sched->job_list_lock, __flags);
++		inf_entity = s_job->infinity_entity;
++		if (inf_entity && inf_entity->rq) {
++			inf_entity->gpu_time_total += gpu_ns;
++			inf_entity->gpu_time_ema += div64_u64(
++				(INFINITY_GPU_EMA_CLIMB_NS -
++				 inf_entity->gpu_time_ema) *
++				gpu_ns * INFINITY_GPU_EMA_ALPHA,
++				INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
++		}
++		spin_unlock_irqrestore(&sched->job_list_lock, __flags);
 +	}
 +
  	trace_drm_sched_job_done(s_fence);
  
  	dma_fence_get(&s_fence->finished);
-@@ -1098,18 +1119,16 @@ static struct drm_sched_entity *
+@@ -1098,18 +1125,16 @@ static struct drm_sched_entity *
  drm_sched_select_entity(struct drm_gpu_scheduler *sched)
  {
  	struct drm_sched_entity *entity;
@@ -452,44 +450,16 @@ index 21dc82c75..bb0555c4c 100644
  	return IS_ERR(entity) ? NULL : entity;
  }
  
-@@ -1248,6 +1267,28 @@ static void drm_sched_run_job_work(struct work_struct *w)
+@@ -1255,6 +1280,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
  		return;
  	}
  
-+	/* Infinity: process pending GPU time measurement for this entity */
-+	{
-+		unsigned long __flags;
++	/* Infinity: save entity for GPU time tracking in drm_sched_job_done */
++	WRITE_ONCE(sched_job->infinity_entity, entity);
 +
-+		spin_lock_irqsave(&sched->infinity_pending_lock, __flags);
-+		if (sched->infinity_pending_valid &&
-+		    sched->infinity_pending_fence_ctx ==
-+		    entity->fence_context) {
-+			u64 gpu_ns = sched->infinity_pending_gpu_ns;
-+
-+			entity->gpu_time_total += gpu_ns;
-+			entity->gpu_time_ema += div64_u64(
-+				(INFINITY_GPU_EMA_CLIMB_NS -
-+				 entity->gpu_time_ema) *
-+				gpu_ns * INFINITY_GPU_EMA_ALPHA,
-+				INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
-+			sched->infinity_pending_valid = false;
-+		}
-+		spin_unlock_irqrestore(&sched->infinity_pending_lock,
-+				       __flags);
-+	}
-+
- 	sched_job = drm_sched_entity_pop_job(entity);
- 	if (!sched_job) {
- 		complete_all(&entity->entity_idle);
-@@ -1368,6 +1409,8 @@ int drm_sched_init(struct drm_gpu_scheduler *sched, const struct drm_sched_init_
- 	init_waitqueue_head(&sched->job_scheduled);
- 	INIT_LIST_HEAD(&sched->pending_list);
- 	spin_lock_init(&sched->job_list_lock);
-+	spin_lock_init(&sched->infinity_pending_lock);
-+	sched->infinity_pending_valid = false;
- 	atomic_set(&sched->credit_count, 0);
- 	INIT_DELAYED_WORK(&sched->work_tdr, drm_sched_job_timedout);
- 	INIT_WORK(&sched->work_run_job, drm_sched_run_job_work);
+ 	s_fence = sched_job->s_fence;
+ 
+ 	atomic_add(sched_job->credits, &sched->credit_count);
 -- 
 2.55.0
 

@@ -1,53 +1,43 @@
-From 8ff86dad75606615dc85d2b29f06b4481383a605 Mon Sep 17 00:00:00 2001
+From e36ba9fbbb19c42cab1c5b6d952033c81d6e89e5 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 25 Jul 2026 02:54:22 +0700
+Date: Sat, 25 Jul 2026 11:43:41 +0700
 Subject: [PATCH 1/5] v4.5: core Infinity scheduler infrastructure
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- include/linux/sched.h         |  13 ++
- init/init_task.c              |   7 +
- kernel/futex/waitwake.c       |   5 +-
+ include/linux/sched.h         |  10 ++
+ init/init_task.c              |   8 ++
+ kernel/futex/waitwake.c       |   6 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/core.c           |   1 +
- kernel/sched/infinity_sched.c | 232 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 155 +++++++++++++++++++++++
+ kernel/sched/core.c           |   6 +
+ kernel/sched/infinity_sched.c | 234 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 156 +++++++++++++++++++++++
  kernel/sched/sched.h          |   4 +
- 8 files changed, 417 insertions(+), 1 deletion(-)
+ 8 files changed, 424 insertions(+), 1 deletion(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878de..40f3c1426 100644
+index b469878de..86c5ade87 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -35,6 +35,7 @@
- #include <linux/sched/types.h>
- #include <linux/signal_types.h>
- #include <linux/spinlock.h>
-+#include <linux/llist.h>
- #include <linux/syscall_user_dispatch_types.h>
- #include <linux/mm_types_task.h>
- #include <linux/netdevice_xmit.h>
-@@ -816,6 +817,17 @@ struct kmap_ctrl {
+@@ -816,6 +816,15 @@ struct kmap_ctrl {
  #endif
  };
  
-+
 +struct infinity_ctx {
 +	u64		ema;
-+	u64		rt_ema;
++	u64		rt_ema;		/* RT EMA: tracks RT CPU burstiness */
 +	u64		last_sleep_ns;
-+	u64		rt_last_sleep_ns;
++	u64		rt_last_sleep_ns; /* Sleep timestamp for RT EMA decay */
 +	bool		futex_waiting;
 +
 +};
 +
-+
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -870,6 +882,7 @@ struct task_struct {
+@@ -870,6 +879,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -56,10 +46,10 @@ index b469878de..40f3c1426 100644
  #ifdef CONFIG_SCHED_CLASS_EXT
  	struct sched_ext_entity		scx;
 diff --git a/init/init_task.c b/init/init_task.c
-index a55e21892..b0f048c08 100644
+index a55e21892..40b38be12 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
-@@ -122,6 +122,13 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+@@ -122,6 +122,14 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
  	.children	= LIST_HEAD_INIT(init_task.children),
  	.sibling	= LIST_HEAD_INIT(init_task.sibling),
  	.group_leader	= &init_task,
@@ -69,20 +59,22 @@ index a55e21892..b0f048c08 100644
 +				.last_sleep_ns	= 0,
 +				.rt_last_sleep_ns = 0,
 +
++
 +	},
  	RCU_POINTER_INITIALIZER(real_cred, &init_cred),
  	RCU_POINTER_INITIALIZER(cred, &init_cred),
  	.comm		= INIT_TASK_COMM,
 diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
-index e2bbe5509..56d0258d4 100644
+index e2bbe5509..024b7dda0 100644
 --- a/kernel/futex/waitwake.c
 +++ b/kernel/futex/waitwake.c
-@@ -354,8 +354,11 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
+@@ -354,8 +354,12 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
  		 * flagged for rescheduling. Only call schedule if there
  		 * is no timeout, or if it has yet to expire.
  		 */
 -		if (!timeout || timeout->task)
 +		if (!timeout || timeout->task) {
++			/* Infinity: signal futex-waiting for vslice boost on wakeup */
 +			current->infinity.futex_waiting = true;
  			schedule();
 +			current->infinity.futex_waiting = false;
@@ -100,7 +92,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index f754a60de..f657b5289 100644
+index f754a60de..cb9589c41 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -93,6 +93,7 @@
@@ -111,17 +103,29 @@ index f754a60de..f657b5289 100644
  #include "smp.h"
  
  #include "../workqueue_internal.h"
+@@ -4732,6 +4733,11 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
+ 
+ 	init_entity_runnable_average(&p->se);
+ 
++	/* Infinity: initialise EMA context for all scheduling classes */
++	{
++		struct rq *rq = this_rq();
++		infinity_fork_init(&p->infinity, READ_ONCE(rq->clock));
++	}
+ 
+ #ifdef CONFIG_SCHED_INFO
+ 	if (likely(sched_info_on()))
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..de2b83d28
+index 000000000..682ddfb67
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,234 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.c — Infinity scheduler algorithm (v4.6-gpu).
++ * infinity_sched.c -- Infinity scheduler algorithm (v4.6-gpu).
 + *
 + * Fully continuous limit-based scheduling:
 + *
@@ -140,6 +144,7 @@ index 000000000..de2b83d28
 +#include <uapi/linux/sched/types.h>
 +#include "sched.h"
 +#include "infinity_sched.h"
++
 +
 +/* ------------------------------------------------------------------ */
 +/* Sysctl tunables                                                     */
@@ -203,7 +208,7 @@ index 000000000..de2b83d28
 +}
 +late_initcall(infinity_sched_init);
 +/* ------------------------------------------------------------------ */
-+/* infinity_consume — EMA budget consumption                           */
++/* infinity_consume -- EMA budget consumption                           */
 +/* ------------------------------------------------------------------ */
 +void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 +		      unsigned long cpu_capacity)
@@ -239,7 +244,7 @@ index 000000000..de2b83d28
 +	ctx->ema += step;
 +}
 +/* ------------------------------------------------------------------ */
-+/* infinity_wakeup — EMA decay on wakeup                               */
++/* infinity_wakeup -- EMA decay on wakeup                               */
 +/* ------------------------------------------------------------------ */
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
@@ -280,6 +285,7 @@ index 000000000..de2b83d28
 +	ctx->rt_ema = 0;
 +	ctx->last_sleep_ns = now;
 +	ctx->rt_last_sleep_ns = 0;
++
 +}
 +/* ------------------------------------------------------------------ */
 +/* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
@@ -287,7 +293,7 @@ index 000000000..de2b83d28
 + *  infinity_wakeup_scale.  All subsumed by weight modulation.)         */
 +/* ------------------------------------------------------------------ */
 +/* ------------------------------------------------------------------ */
-+/* infinity_rt_consume — EMA climb on RT runtime                       */
++/* infinity_rt_consume -- EMA climb on RT runtime                       */
 +/* ------------------------------------------------------------------ */
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
@@ -308,7 +314,7 @@ index 000000000..de2b83d28
 +	ctx->rt_ema += step;
 +}
 +/* ------------------------------------------------------------------ */
-+/* infinity_rt_wakeup — RT EMA decay on wakeup                         */
++/* infinity_rt_wakeup -- RT EMA decay on wakeup                         */
 +/* ------------------------------------------------------------------ */
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
@@ -334,7 +340,7 @@ index 000000000..de2b83d28
 +	}
 +}
 +/* ------------------------------------------------------------------ */
-+/* infinity_rr_timeslice — adaptive SCHED_RR timeslice                */
++/* infinity_rr_timeslice -- adaptive SCHED_RR timeslice                */
 +/* ------------------------------------------------------------------ */
 +unsigned int infinity_rr_timeslice(struct task_struct *p,
 +				   unsigned int rr_default)
@@ -351,43 +357,43 @@ index 000000000..de2b83d28
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..653d148fe
+index 000000000..d0caf0586
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,156 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
-+ * infinity_sched.h — Infinity scheduler API (v4.6-gpu).
++ * infinity_sched.h -- Infinity scheduler API (v4.6-gpu).
 + *
 + * Architecture:
 + *
 + *   fair.c (Linux scheduler)         infinity_sched.c (Infinity algorithm)
 + *   ──────────────────────────       ─────────────────────────────────────
-+ *   update_deadline()        ──call──► infinity_update_weight() — EMA weight
-+ *   update_curr()            ──call──► infinity_consume()       — EMA budget
-+ *   enqueue_task_fair()      ──call──► infinity_wakeup()        — EMA decay
-+ *   place_entity()           ──check──► futex_waiting            — halve vslice on futex wakeup
-+ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  — sleep tracking
-+ *   update_curr_rt()         ──call──► infinity_rt_consume()    — RT EMA climb
-+ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     — RT EMA decay
++ *   update_deadline()        ──call──► infinity_update_weight() -- EMA weight
++ *   update_curr()            ──call──► infinity_consume()       -- EMA budget
++ *   enqueue_task_fair()      ──call──► infinity_wakeup()        -- EMA decay
++ *   place_entity()           ──check──► futex_waiting            -- halve vslice on futex wakeup
++ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  -- sleep tracking
++ *   update_curr_rt()         ──call──► infinity_rt_consume()    -- RT EMA climb
++ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     -- RT EMA decay
 + *   dequeue_task_rt()        ──call──► (records rt_last_sleep_ns)
-+ *   task_tick_rt()           ──call──► infinity_rr_timeslice()  — adaptive RR slice
-+ *   sched_fork()         ──call──► infinity_fork_init()     — fork init
-+ *   init/init_task.c         ──init──► infinity.{}              — static init
++ *   task_tick_rt()           ──call──► infinity_rr_timeslice()  -- adaptive RR slice
++ *   sched_fork()             ──call──► infinity_fork_init()     -- fork init
++ *   init/init_task.c         ──init──► infinity.{}              -- static init
 + *
 + * Weight-based modulation: the task's EEVDF weight is modulated by EMA.
 + * EEVDF natively computes a shorter slice and later deadline from a lower
-+ * weight — no second level of fairness logic needed.
++ * weight -- no second level of fairness logic needed.
 + *
 + * The base weight is always derived from the task's static priority (nice),
 + * never from the live weight, so the modulation is idempotent and the nice
 + * value is always honoured.
 + *
 + * Tunables:
-+ *   kernel.infinity_smt_divisor   — SMT secondary slice divisor (default 2)
-+ *   kernel.infinity_running       — read-only flag, 1 if active
++ *   kernel.infinity_smt_divisor   -- SMT secondary slice divisor (default 2)
++ *   kernel.infinity_running       -- read-only flag, 1 if active
 + *
 + * Self-stabilizing by construction: the EMA naturally converges between
 + * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -426,7 +432,7 @@ index 000000000..653d148fe
 +/* Weight calculation from EMA                                          */
 +/* ------------------------------------------------------------------ */
 +/**
-+ * infinity_calc_weight — Compute EMA-modulated EEVDF weight.
++ * infinity_calc_weight -- Compute EMA-modulated EEVDF weight.
 + * @p:    Task whose weight to compute.
 + * @ema:  Raw EMA (clamped to BUDGET_MAX).
 + *
@@ -445,7 +451,7 @@ index 000000000..653d148fe
 +{
 +	/*
 +	 * SCHED_IDLE tasks have their own weight (WEIGHT_IDLEPRIO = 3)
-+	 * that we must not override — they are designed to yield to
++	 * that we must not override -- they are designed to yield to
 +	 * everything else by construction.
 +	 */
 +	if (task_has_idle_policy(p))
@@ -475,13 +481,13 @@ index 000000000..653d148fe
 +/* ------------------------------------------------------------------ */
 +/* Cgroup EMA constants                                                */
 +/* ------------------------------------------------------------------ */
-+/** Cgroup aggregate EMA ceiling (2ms — groups converge faster). */
++/** Cgroup aggregate EMA ceiling (2ms -- groups converge faster). */
 +#define INFINITY_CGROUP_EMA_CLIMB_NS	2000000ULL
-+/** Cgroup EMA alpha — gentle slope to avoid oscillation. */
++/** Cgroup EMA alpha -- gentle slope to avoid oscillation. */
 +#define INFINITY_CGROUP_EMA_ALPHA	1
 +/** Cgroup EMA half-life for idle decay (16ms). */
 +#define INFINITY_CGROUP_EMA_HALFLIFE_NS	16000000ULL
-+/** Maximum group weight reduction (50% — never fully starves). */
++/** Maximum group weight reduction (50% -- never fully starves). */
 +#define INFINITY_CGROUP_WEIGHT_REDUCE_PCT 50
 +/* ------------------------------------------------------------------ */
 +/* RT EMA constants                                                    */
@@ -491,11 +497,17 @@ index 000000000..653d148fe
 +/** RT alpha. */
 +#define INFINITY_RT_ALPHA		4
 +/* ------------------------------------------------------------------ */
++/* RT safety valve -- requeue throttle threshold                        */
++/* ------------------------------------------------------------------ */
++/** rt_ema threshold: force rogue SCHED_FIFO to yield (>95% of 10ms). */
++#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
++
++/* ------------------------------------------------------------------ */
 +/* External sysctl tunables                                            */
 +/* ------------------------------------------------------------------ */
 +extern unsigned long infinity_tune_smt_divisor;
 +/* ------------------------------------------------------------------ */
-+/* API — called from fair.c and rt.c                                   */
++/* API -- called from fair.c and rt.c                                   */
 +/* ------------------------------------------------------------------ */
 +void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
 +void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
@@ -504,27 +516,22 @@ index 000000000..653d148fe
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 +unsigned int infinity_rr_timeslice(struct task_struct *p,
 +				   unsigned int rr_default);
-+/* ------------------------------------------------------------------ */
-+/* RT safety valve constants                                           */
-+/* ------------------------------------------------------------------ */
-+/** rt_ema threshold: force rogue FIFO to yield. */
-+#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index adfb6e340..131790813 100644
+index adfb6e340..aac00f72e 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -747,6 +747,10 @@ struct cfs_rq {
- 	/* Locally cached copy of our task_group's idle value */
- 	int			idle;
+@@ -749,6 +749,10 @@ struct cfs_rq {
  
+ #ifdef CONFIG_CFS_BANDWIDTH
+ 	int			runtime_enabled;
 +	/* Infinity: aggregate group EMA and idle timestamp */
 +	u64			group_ema;
 +	u64			group_ema_sleep_start;
 +
- #ifdef CONFIG_CFS_BANDWIDTH
- 	int			runtime_enabled;
  	s64			runtime_remaining;
+ 
+ 	u64			throttled_pelt_idle;
 -- 
 2.55.0
 

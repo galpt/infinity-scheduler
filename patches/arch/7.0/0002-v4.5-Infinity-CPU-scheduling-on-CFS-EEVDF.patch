@@ -1,15 +1,15 @@
-From c393a769f5061db2b0aad2b65abf8743df6910b9 Mon Sep 17 00:00:00 2001
+From fbf63a5ea614fd9bd18c418b649ca21bccaf2e02 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 25 Jul 2026 02:54:21 +0700
+Date: Sat, 25 Jul 2026 11:43:40 +0700
 Subject: [PATCH 2/5] v4.5: Infinity CPU scheduling on CFS/EEVDF
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c | 219 +++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 216 insertions(+), 3 deletions(-)
+ kernel/sched/fair.c | 212 +++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 209 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3bce48ad0..8fa44a8ab 100644
+index 3bce48ad0..2086a8a05 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -55,8 +55,28 @@
@@ -50,7 +50,7 @@ index 3bce48ad0..8fa44a8ab 100644
 +	 *
 +	 * Infinity: the task's EEVDF weight is modulated by EMA
 +	 * (via infinity_update_weight).  A lower weight gives EEVDF
-+	 * a shorter slice and later deadline naturally — no slice
++	 * a shorter slice and later deadline naturally -- no slice
 +	 * manipulation needed beyond optional SMT halving.
  	 */
 -	if (!se->custom_slice)
@@ -92,7 +92,7 @@ index 3bce48ad0..8fa44a8ab 100644
  	if (unlikely(delta_exec <= 0))
  		return;
  
-+	/* Infinity: EMA budget consumption */
++	/* Infinity: EMA budget consumption with adaptive alpha */
 +	if (entity_is_task(curr)) {
 +		struct task_struct *p__ = task_of(curr);
 +		infinity_consume(&p__->infinity, delta_exec,
@@ -121,7 +121,7 @@ index 3bce48ad0..8fa44a8ab 100644
 +
 +	/* Infinity: reduce group shares when aggregate EMA is elevated.
 +	 * This feeds directly into the PELT-aware reweight_entity(), so the
-+	 * load balancer sees the reduced weight consistently — unlike the old
++	 * load balancer sees the reduced weight consistently -- unlike the old
 +	 * update_deadline() approach which created a tug-of-war with
 +	 * update_cfs_group() on every tick. */
 +	if (gcfs_rq->group_ema > 0) {
@@ -183,7 +183,7 @@ index 3bce48ad0..8fa44a8ab 100644
  	return se;
  }
  
-@@ -6937,6 +7050,28 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6937,6 +7050,33 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -194,6 +194,11 @@ index 3bce48ad0..8fa44a8ab 100644
 +		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
 +			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);
 +#ifdef CONFIG_FAIR_GROUP_SCHED
++		/*
++		 * Group EMA decay: if this cfs_rq was idle (sleep_start set)
++		 * and we're the first task re-entering, apply exponential decay
++		 * using the elapsed idle time.
++		 */
 +		{
 +			struct cfs_rq *pcfs_rq = cfs_rq_of(&p->se);
 +			if (pcfs_rq->group_ema_sleep_start) {
@@ -212,12 +217,12 @@ index 3bce48ad0..8fa44a8ab 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7001,6 +7136,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
- 		flags = ENQUEUE_WAKEUP;
+@@ -7021,6 +7161,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 			h_nr_idle = 1;
  	}
  
 +	if (flags & ENQUEUE_WAKEUP) {
-+		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
++		/* Check futex_waiting before clearing -- triggers freq ramp for IPC wakeups */
 +		if (p->infinity.futex_waiting)
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 +
@@ -227,46 +232,10 @@ index 3bce48ad0..8fa44a8ab 100644
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 +	}
 +
- 	for_each_sched_entity(se) {
- 		cfs_rq = cfs_rq_of(se);
+ 	if (!rq_h_nr_queued && rq->cfs.h_nr_queued)
+ 		dl_server_start(&rq->fair_server);
  
-@@ -7079,6 +7225,17 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
- 			h_nr_runnable = 1;
- 	}
- 
-+	if (flags & ENQUEUE_WAKEUP) {
-+		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
-+		if (p->infinity.futex_waiting)
-+			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
-+
-+		p->infinity.futex_waiting = false;
-+
-+		if (p->in_iowait)
-+			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
-+	}
-+
- 	for_each_sched_entity(se) {
- 		cfs_rq = cfs_rq_of(se);
- 
-@@ -7118,6 +7275,17 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
- 		flags &= ~(DEQUEUE_DELAYED | DEQUEUE_SPECIAL);
- 	}
- 
-+	if (flags & ENQUEUE_WAKEUP) {
-+		/* Check futex_waiting before clearing — triggers freq ramp for IPC wakeups */
-+		if (p->infinity.futex_waiting)
-+			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
-+
-+		p->infinity.futex_waiting = false;
-+
-+		if (p->in_iowait)
-+			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
-+	}
-+
- 	for_each_sched_entity(se) {
- 		cfs_rq = cfs_rq_of(se);
- 
-@@ -7172,6 +7340,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7172,6 +7323,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -277,7 +246,7 @@ index 3bce48ad0..8fa44a8ab 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7184,6 +7356,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7184,6 +7339,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -294,23 +263,30 @@ index 3bce48ad0..8fa44a8ab 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -8593,6 +8775,24 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8593,6 +8758,31 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		    cpumask_test_cpu(cpu, p->cpus_ptr))
  			return cpu;
  
 +		/*
-+		 * Infinity: on asymmetric topologies (Intel hybrid, ARM big.LITTLE),
-+		 * bias interactive tasks (EMA == 0) toward the highest-capacity
-+		 * P-cores.  READ_ONCE guards the lockless ema read.
++		 * Infinity: on asymmetric topologies (Intel hybrid, ARM
++		 * big.LITTLE), bias interactive tasks (EMA == 0) toward the
++		 * highest-capacity P-cores.  This avoids placing latency-
++		 * sensitive tasks on E-cores during wakeup.
++		 *
++		 * Lockless read of p->infinity.ema: only p->pi_lock is held
++		 * here, not rq->lock.  READ_ONCE prevents compiler tearing
++		 * on 32-bit architectures.
 +		 */
 +		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
 +			struct asym_cap_data *entry;
++			int best_cpu;
++
 +			rcu_read_lock();
 +			list_for_each_entry_rcu(entry, &asym_cap_list, link) {
-+				int __cpu = cpumask_first_and(cpu_capacity_span(entry), p->cpus_ptr);
-+				if (__cpu < nr_cpu_ids) {
++				best_cpu = cpumask_first_and(cpu_capacity_span(entry), p->cpus_ptr);
++				if (best_cpu < nr_cpu_ids) {
 +					rcu_read_unlock();
-+					return __cpu;
++					return best_cpu;
 +				}
 +			}
 +			rcu_read_unlock();
@@ -319,7 +295,7 @@ index 3bce48ad0..8fa44a8ab 100644
  		if (!is_rd_overutilized(this_rq()->rd)) {
  			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
  			if (new_cpu >= 0)
-@@ -9564,6 +9764,19 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+@@ -9564,6 +9754,22 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
  		return 0;
  	}
  
@@ -332,6 +308,9 @@ index 3bce48ad0..8fa44a8ab 100644
 +	if (!(env->flags & LBF_ACTIVE_LB) &&
 +	    env->sd->nr_balance_failed <= env->sd->cache_nice_tries &&
 +	    READ_ONCE(p->infinity.ema) == 0 &&
++	    /* Only protect tasks with a real runtime history.  Newly forked
++	     * tasks start with EMA=0 and must be free to spread across CPUs
++	     * during boot, otherwise CPU 0 becomes a bottleneck. */
 +	    p->se.sum_exec_runtime > 2000000ULL) {
 +		return 0;
 +	}
