@@ -65,7 +65,7 @@ cat /proc/sys/kernel/infinity_stats   # → Raw comma-formatted CPU + GPU table
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
-| `infinity_stats` | — (ro) | — | Human-readable health statistics (CPU + GPU) |
+| `infinity_stats` | — (ro) | — | CPU + GPU accounting table with column alignment, section headers, and accounting confidence |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
 separate fair-share window is needed.  The EMA climb time constant is
