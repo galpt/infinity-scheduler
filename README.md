@@ -49,15 +49,13 @@ sysctl kernel.infinity_version        # → kernel.infinity_version = v4.6-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 
 # Check GPU scheduling health
-cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table with borders
+cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 ```
 
 > [!NOTE]
 > Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line
-> table that `sysctl` cannot display properly. The stats show CPU futex boosts,
-> EMA climbs, wakeup decays, RT throttles, and GPU completion/accounting
-> breakdown with idle compensation, cross-scheduler coupling, and lock drain
-> counters. The Accounting confidence line verifies data integrity.
+> table that `sysctl` cannot display properly. The stats include idle
+> compensation, cross-scheduler coupling, and lock drain counters.
 
 ## Tunables
 
@@ -66,7 +64,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table with bord
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
-| `infinity_stats` | — (ro) | — | CPU + GPU accounting table with section headers, raw comma-formatted numbers, idle compensation, cross-scheduler coupling counters, lock drain rounds, and accounting confidence |
+| `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and lock drain counters |
 
 Infinity uses EEVDF's native per-task weight as its control variable — no
 separate fair-share window is needed.  The EMA climb time constant is
@@ -143,132 +141,55 @@ flowchart TB
 
 ## GPU scheduling
 
-The Infinity GPU extension hooks into the DRM scheduler via
-the Infinity virtual time algorithm (sole policy — FIFO/RR removed).  Each GPU context (entity) tracks its
-GPU time via EMA — climbing on job completion, decaying on idle.  Virtual
-GPU time replaces the stock submit-timestamp sort key, scaled by entity
-priority and burstiness.
-
-Three cross-scheduler feedback mechanisms prevent the browser-after-game
-slowdown (Issue #16):
-
-1. **Proportional idle compensation** (replaces fixed 5ms catch-up): idle
-   duration blends gpu_time_total with min_gpu_vtime via 16.16 fixed-point,
-   so returning-from-idle entities get scaled-up priority without the
-   fragile EMA==0 gate that never triggered in practice.
-
-2. **CPU-to-GPU coupling**: each entity anchors its owning process via
-   `struct pid *infinity_pid` (captured once in entity_init, released in
-   entity_fini, immutable after init).  `drm_sched_entity_calc_vtime()` reads
-   `futex_waiting` and CPU `ema` under RCU lock and reduces effective_total
-   by up to 100% for interactive tasks.
-
-3. **GPU-to-CPU feedback loop**: ready-but-skipped entities increment
-   `atomic_t gpu_passovers` on the owning task.  `infinity_wakeup()` consumes
-   these to accelerate CPU EMA decay, closing the loop: GPU sidelined →
-   CPU appears more interactive → CPU→GPU coupling gives larger vtime reduction.
-
-Two-lock-domain race eliminated: all `gpu_time_total`/`gpu_time_ema` updates
-use a lock-free `atomic64_t pending_gpu_ns` accumulator on the entity,
-drained under the same `rq->lock` that protects vtime reads.
-
-Observe behavior via `infinity_stats` — idle compensation, CPU→GPU coupling,
-GPU→CPU coupling, and lock drain round counters are all reported.
-
-No fallback to FIFO exists — the legacy policy module parameter and selectors have been removed.
+Virtual GPU time replaces the stock DRM submit-timestamp sort key, scaled
+by entity priority and burstiness.  CPU-side interactivity signals (futex
+wakeups, EMA) feed into GPU vtime via cross-scheduler coupling, and a
+proportional idle compensation replaces the old fixed catch-up for
+returning-from-idle entities.  A lock-free atomic64 accumulator eliminates
+the two-lock-domain data race in GPU time accounting.  FIFO/RR policy
+fallbacks have been removed.
 
 ```mermaid
 flowchart TB
     classDef ent fill:#0000,stroke:#818cf8,stroke-width:2
     classDef algo fill:#0000,stroke:#14b8a6,stroke-width:2
     classDef dec fill:#0000,stroke:#d97706,stroke-width:2
-    classDef sig fill:#0000,stroke:#ef4444,stroke-width:2
-    classDef lock fill:#0000,stroke:#8b5cf6,stroke-width:2
 
     subgraph GPU["GPU scheduling (DRM + Infinity)"]
         ENTITY["drm_sched_entity
 ─────────────────
-gpu_time_total    (cumulative ns)
-gpu_time_ema      (burstiness EMA)
-gpu_time_last_active(decay timestamp)
-cached_gpu_vtime  (snapshotted sort key)
-pending_gpu_ns    (atomic64, lock-free acct)
-infinity_pid      (struct pid *, CPU coupling)"]
-        class ENTITY ent
+gpu_time_total / gpu_time_ema
+cached_gpu_vtime (sort key)
+pending_gpu_ns (lock-free accumulator)
+infinity_pid (CPU coupling anchor)"]
 
-        ENTITY --> DRAIN["drm_sched_rq_update_vtime_locked()
-────────────────────────────────
-1. atomic64_xchg pending_gpu_ns → drain
-   under rq->lock (eliminates two-lock
-   domain race with job_list_lock)
-2. EMA decay on idle (half-life = 32ms)
-3. Recalc cached_gpu_vtime → re-insert rbtree"]
-        class DRAIN lock
+        ENTITY --> DRAIN["rq_update_vtime_locked()
+drain pending_gpu_ns under rq->lock"]
+        DRAIN --> VTIME["calc_vtime()
+idle blend + CPU coupling + priority"]
 
-        DRAIN --> VTIME["drm_sched_entity_calc_vtime()
-─────────────────────────────
-1. normalize: proportional idle blend
-   idle_ratio = idle_ns/(idle_ns+HL)
-   eff = gpu_total×(1-idle_ratio)
-        + min_gpu_vtime×idle_ratio
-2. CPU coupling (under RCU):
-   futex_waiting → -50% effective_total
-   cpu_ema==0    → -50% effective_total
-   (up to 100% for interactive tasks)
-3. priority:     HIGH=1x, NORMAL=1.5x, LOW=3x
-4. EMA boost:    vtime += ema_pct/2
-──► cached_gpu_vtime (immutable in rbtree)"]
-        class VTIME algo
+        VTIME --> QUEUE["unified rbtree
+sorted by cached_gpu_vtime"]
 
-        VTIME --> QUEUE["drm_sched_rq.unified rbtree
-────────────────────────
-sorted by cached_gpu_vtime
-O(log n) insertion  |  O(1) selection
-min_gpu_vtime advances on each pick"]
-        class QUEUE dec
-
-        KERNEL["KERNEL priority jobs
-(VM page tables, buffer evictions)
-4x vtime boost via >>= 2"]
-        USER["HIGH / NORMAL / LOW priority jobs
-(rendering, compute, compositing)"]
-        class KERNEL sig
-        class USER ent
+        KERNEL["KERNEL (4x boost)"]
+        USER["HIGH / NORMAL / LOW"]
 
         KERNEL --> QUEUE
         USER --> QUEUE
+        QUEUE --> SELECT["select_entity()
+first ready wins
+passover→gpu_passovers"]
 
-        SELECT["drm_sched_rq_select_entity_infinity()
-─────────────────────────────────
-scan rbtree left→right
-first ready entity wins
-GPU→CPU passover: increment
-gpu_passovers on skipped ready entities"]
-        class SELECT algo
-
-        QUEUE --> SELECT
+        SELECT --> HW["GPU hardware ring"]
     end
 
-    SELECT --> HW["GPU hardware ring → job submitted"]
-    class HW ent
+    HW --> DONE["job_done()
+WRITE_ONCE gpu_ns on job"]
 
-    HW --> DONE["drm_sched_job_done()
-─────────────────
-calc gpu_ns from submit_ts delta
-WRITE_ONCE s_job->infinity_gpu_ns
-(IRQ-safe, no spin_locks)"]
-    class DONE algo
+    DONE --> FINI["get_finished_job()
+atomic64_add→pending_gpu_ns"]
 
-    DONE --> FINI["drm_sched_get_finished_job()
-─────────────────────────
-READ_ONCE infinity_entity
-atomic64_add(gpu_ns, pending_gpu_ns)
-(under job_list_lock, pairs with
-entity_kill cleanup)"]
-    class FINI lock
-
-    FINI -. "pending_gpu_ns drained
-    in update_vtime_locked (rq->lock)" .-> DRAIN
+    FINI -. "drained in rq_update_vtime_locked" .-> DRAIN
 ```
 
 ## Feature comparison
@@ -291,11 +212,9 @@ entity_kill cleanup)"]
 | GPU time tracking | No | Yes (EMA per DRM entity) |
 | Virtual GPU time scheduling | No | Yes (sole Infinity policy, FIFO/RR removed) |
 | Soft priority (anti-starvation) | No | Yes (proportional vtime scaling) |
-| Two-lock-domain accounting race fix | No | Yes (atomic64 pending accumulator) |
-| Proportional idle compensation | No | Yes (16.16 fixed-point blend, replaces fixed catch-up) |
-| CPU-to-GPU cross-scheduler coupling | No | Yes (infinity_pid + RCU-safe futex/EMA read) |
-| GPU-to-CPU starvation feedback | No | Yes (gpu_passovers accelerate CPU EMA decay) |
-| Expanded infinity_stats observability | No | Yes (idle comp, coupling, lock drain counters) |
+| Cross-scheduler CPU-GPU coupling | No | Yes (futex/EMA → GPU vtime + GPU passover → CPU) |
+| Proportional idle compensation | No | Yes (replaces fixed catch-up bonus) |
+| GPU accounting race fix | No | Yes (lock-free atomic64 accumulator) |
 
 ## License
 
