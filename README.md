@@ -20,10 +20,7 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 ## Quick start
 
 > [!NOTE]
-> The install script below is tested and working with the **Limine** bootloader.
-> Support for **GRUB** and **systemd-boot** has been added but not yet tested on
-> real hardware. If you encounter issues or have a working version for your
-> bootloader, please send a pull request.
+> The install script below is tested and working with the **Limine** bootloader. Support for **GRUB** and **systemd-boot** has been added but not yet tested on real hardware. If you encounter issues or have a working version for your bootloader, please send a pull request.
 
 ```bash
 # 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
@@ -38,8 +35,7 @@ reboot
 ```
 
 > [!TIP]
-> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity
-> scheduler boot entries — the default kernel is never touched.
+> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity scheduler boot entries — the default kernel is never touched.
 
 ```bash
 # Verify it's running
@@ -53,9 +49,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 ```
 
 > [!NOTE]
-> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line
-> table that `sysctl` cannot display properly. The stats include idle
-> compensation, cross-scheduler coupling, and lock drain counters.
+> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and lock drain counters.
 
 ## Tunables
 
@@ -66,16 +60,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 | `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
 | `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and lock drain counters |
 
-Infinity uses EEVDF's native per-task weight as its control variable — no
-separate fair-share window is needed.  The EMA climb time constant is
-approximately 0.5ms at the default alpha (3072), scaling from 0.38ms
-(alpha 4096 at max cpu_capacity) to 0.67ms (alpha 2048 at low capacity).
-This gives sub-millisecond reaction to CPU-bound threads on any hardware.
-No user tunable is needed beyond the SMT divisor.
-
 ## CPU scheduling
-
-Interactive tasks that sleep frequently naturally keep their budget while CPU-bound tasks converge toward a minimum, and real-time tasks get adaptive RR timeslices based on CPU burstiness. Built into CFS/EEVDF and RT with a focus on desktop interactivity.
 
 ```mermaid
 flowchart TB
@@ -141,14 +126,6 @@ flowchart TB
 
 ## GPU scheduling
 
-Virtual GPU time replaces the stock DRM submit-timestamp sort key, scaled
-by entity priority and burstiness.  CPU-side interactivity signals (futex
-wakeups, EMA) feed into GPU vtime via cross-scheduler coupling, and a
-proportional idle compensation replaces the old fixed catch-up for
-returning-from-idle entities.  A lock-free atomic64 accumulator eliminates
-the two-lock-domain data race in GPU time accounting.  FIFO/RR policy
-fallbacks have been removed.
-
 ```mermaid
 flowchart TB
     classDef ent fill:#0000,stroke:#818cf8,stroke-width:2
@@ -197,7 +174,7 @@ atomic64_add→pending_gpu_ns"]
 | Feature | scx_flow 3.1.0 | infinity-scheduler |
 |---|---|---|
 | Fair-share slice | Yes | Yes |
-| Budget model | Linear consumption | EMA (Limitless) |
+| Budget model | Linear consumption | EMA |
 | SMT halving | No | Yes |
 | EEVDF Invariant Assert | N/A (BPF) | Yes (WARN_ON_ONCE) |
 | Wakeup deadline boost | N/A | Asymptotic vslice |
@@ -213,8 +190,6 @@ atomic64_add→pending_gpu_ns"]
 | Virtual GPU time scheduling | No | Yes (sole Infinity policy, FIFO/RR removed) |
 | Soft priority (anti-starvation) | No | Yes (proportional vtime scaling) |
 | Cross-scheduler CPU-GPU coupling | No | Yes (futex/EMA → GPU vtime + GPU passover → CPU) |
-| Proportional idle compensation | No | Yes (replaces fixed catch-up bonus) |
-| GPU accounting race fix | No | Yes (lock-free atomic64 accumulator) |
 
 ## License
 
