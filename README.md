@@ -8,10 +8,10 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/            13 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/             13 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/             13 patches — Vanilla kernel.org 7.1
-│   └── fedora/7.0/           13 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/            14 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/             14 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/             14 patches — Vanilla kernel.org 7.1
+│   └── fedora/7.0/           14 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
