@@ -1,0 +1,45 @@
+From 8164bb3e693ce769d1611c29dadcb49a722f8cbf Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sun, 26 Jul 2026 18:40:33 +0700
+Subject: [PATCH v4.6-gpu] v4.6-gpu: batch RCU read lock across passover loop
+
+Move rcu_read_lock() outside the passover iteration loop in
+drm_sched_rq_select_entity_infinity(), holding it for the entire
+rightwards rbtree scan instead of per-entity lock/unlock pairs.
+This avoids ~10-20ns of RCU nesting overhead per entity and
+reduces the O(N) critical section under rq->lock.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index a4018d3c8..ebb3494d6 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -434,6 +434,7 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 		if (entity->infinity_pid) {
+ 			struct rb_node *rb2;
+ 
++			rcu_read_lock();
+ 			for (rb2 = rb_next(rb); rb2; rb2 = rb_next(rb2)) {
+ 				struct drm_sched_entity *e2;
+ 				struct task_struct *p;
+@@ -445,12 +446,11 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 				if (!e2->infinity_pid)
+ 					continue;
+ 
+-				rcu_read_lock();
+ 				p = pid_task(e2->infinity_pid, PIDTYPE_PID);
+ 				if (p)
+ 					atomic_inc(&p->infinity.gpu_passovers);
+-				rcu_read_unlock();
+ 			}
++			rcu_read_unlock();
+ 		}
+ 
+ 		spin_unlock(&rq->lock);
+-- 
+2.55.0
+
