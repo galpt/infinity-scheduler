@@ -1,0 +1,156 @@
+From c774f0c2f25cb5e02d3d45d765d1d54a9299e6cd Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sun, 26 Jul 2026 16:27:40 +0700
+Subject: [PATCH v4.6-gpu 4/6] v4.6-gpu: add GPU-to-CPU feedback via
+ gpu_passovers
+
+Add a closed-loop feedback path from the GPU scheduler back to the
+CPU side to break compounding GPU+CPU starvation:
+
+1. atomic_t gpu_passovers on struct infinity_ctx (task_struct):
+   - Incremented by drm_sched_rq_select_entity_infinity() for every
+     ready-but-not-selected entity to the right of the selected entity
+     in the rbtree (higher vtime).
+   - RCU-safe: pid_task() under rcu_read_lock() protects against
+     task exit during the increment.
+
+2. infinity_wakeup() change to consume gpu_passovers:
+   - atomic_xchg reads and clears the counter.
+   - Each passover is worth one extra half-life of CPU EMA decay.
+   - Capped at 8 passovers (8 half-lives ~192ms equivalent).
+   - Passeroost counter (infinity_gpu_passover_boosts) tracks
+     activations for stats observability.
+
+The feedback loop closes:
+   GPU schedules game over browser
+   -> browser entity passovers increment
+   -> browser process wakes (fence or input)
+   -> infinity_wakeup() sees passovers > 0
+   -> CPU EMA decays faster -> more interactive on CPU
+   -> CPU-to-GPU coupling (0008) reads lower CPU EMA
+   -> browser GPU entity gets larger vtime reduction
+   -> browser entity selected next time
+
+This is self-limiting: once the browser starts getting GPU time,
+passovers stop, CPU EMA normalizes, and coupling returns to baseline.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 29 ++++++++++++++++++++++++++
+ include/linux/sched.h                  |  8 +++++++
+ kernel/sched/infinity_sched.c          | 19 +++++++++++++++++
+ kernel/sched/infinity_sched.h          |  1 +
+ 4 files changed, 57 insertions(+)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index df89d26ef..4ce912987 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -423,6 +423,35 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 		if (entity->cached_gpu_vtime > rq->min_gpu_vtime)
+ 			rq->min_gpu_vtime = entity->cached_gpu_vtime;
+ 
++#ifdef CONFIG_INFINITY_SCHED
++		/* GPU-to-CPU feedback: increment gpu_passovers on all other
++		 * ready entities that are further right in the rbtree (higher
++		 * vtime), so their owning tasks' CPU-side infinity_wakeup()
++		 * can detect GPU-side starvation and accelerate EMA decay.
++		 */
++		if (entity->infinity_pid) {
++			struct rb_node *rb2;
++
++			for (rb2 = rb_next(rb); rb2; rb2 = rb_next(rb2)) {
++				struct drm_sched_entity *e2;
++				struct task_struct *p;
++
++				e2 = rb_entry(rb2, struct drm_sched_entity,
++					      rb_tree_node);
++				if (!drm_sched_entity_is_ready(e2))
++					continue;
++				if (!e2->infinity_pid)
++					continue;
++
++				rcu_read_lock();
++				p = pid_task(e2->infinity_pid, PIDTYPE_PID);
++				if (p)
++					atomic_inc(&p->infinity.gpu_passovers);
++				rcu_read_unlock();
++			}
++		}
++#endif
++
+ 		spin_unlock(&rq->lock);
+ 		return entity;
+ 	}
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 0a2ceb24d..5c7d97f9a 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -824,6 +824,14 @@ struct infinity_ctx {
+ 	u64		rt_last_sleep_ns; /* Sleep timestamp for RT EMA decay */
+ 	bool		futex_waiting;
+ 
++	/**
++	 * @gpu_passovers: GPU scheduling pass-over count.
++	 * Incremented atomically by the GPU scheduler when this task's
++	 * drm_sched_entity is ready but skipped during selection.
++	 * Read-and-cleared by infinity_wakeup() to accelerate CPU EMA
++	 * decay for GPU-sidelined tasks.
++	 */
++	atomic_t	gpu_passovers;
+ };
+ 
+ struct task_struct {
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index f7b8726cb..2239a0466 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -39,7 +39,9 @@ EXPORT_SYMBOL(infinity_rt_throttle_count);
+ atomic_t infinity_gpu_completion_callbacks	= ATOMIC_INIT(0);
+ atomic_t infinity_gpu_accounting_applied	= ATOMIC_INIT(0);
+ atomic_t infinity_gpu_accounting_skipped	= ATOMIC_INIT(0);
++atomic_t infinity_gpu_passover_boosts		= ATOMIC_INIT(0);
+ EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
++EXPORT_SYMBOL(infinity_gpu_passover_boosts);
+ EXPORT_SYMBOL(infinity_gpu_accounting_applied);
+ EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
+ /* ------------------------------------------------------------------ */
+@@ -440,6 +442,23 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ {
+ 	if (sleep_ns == 0)
+ 		return;
++
++	/* GPU-to-CPU feedback: if this task's GPU entity has been
++	 * repeatedly passed over in scheduling, accelerate the EMA
++	 * decay so the task appears more interactive on the CPU side.
++	 * Each passover is worth one extra half-life of decay.
++	 */
++	{
++		int passovers = atomic_xchg(&ctx->gpu_passovers, 0);
++
++		if (passovers > 0) {
++			u64 extra_ns = sleep_ns * min(passovers, 8);
++
++			sleep_ns += extra_ns;
++			atomic_inc(&infinity_gpu_passover_boosts);
++		}
++	}
++
+ 	/*
+ 	 * Exponential shift decay with 24ms half-life, using a 2nd-order
+ 	 * Taylor expansion for the sub-period residual to maintain a
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index bf6e23be3..e70394fb0 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -150,6 +150,7 @@ extern atomic_t infinity_futex_boost_count;
+ extern atomic_t infinity_ema_climb_count;
+ extern atomic_t infinity_wakeup_count;
+ extern atomic_t infinity_rt_throttle_count;
++extern atomic_t infinity_gpu_passover_boosts;
+ /* ------------------------------------------------------------------ */
+ /* API -- called from fair.c and rt.c                                   */
+ /* ------------------------------------------------------------------ */
+-- 
+2.55.0
+
