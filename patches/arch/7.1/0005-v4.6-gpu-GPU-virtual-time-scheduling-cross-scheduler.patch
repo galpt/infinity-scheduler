@@ -1,4 +1,4 @@
-From f08daf2472805972420b801559fcc6841a954d9b Mon Sep 17 00:00:00 2001
+From 7bc5e7cdd6b7fe6101b3e53663aaa339afbfe63d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
@@ -98,15 +98,19 @@ Also strip leading spaces from numbers in the confidence line
 should not have extra padding).
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: show EMA-per-wakeup average in stats table EMA climbs row
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_entity.c |  57 ++++-
+ drivers/gpu/drm/scheduler/sched_entity.c |  57 +++-
  drivers/gpu/drm/scheduler/sched_main.c   | 279 +++++++++++---------
  include/drm/gpu_scheduler.h              |  48 ++--
  kernel/sched/fair.c                      |   4 +-
- kernel/sched/infinity_sched.c            | 309 ++++++++++++++++++++++-
+ kernel/sched/infinity_sched.c            | 315 ++++++++++++++++++++++-
  kernel/sched/infinity_sched.h            |   7 +
  kernel/sched/rt.c                        |   1 +
- 7 files changed, 565 insertions(+), 140 deletions(-)
+ 7 files changed, 571 insertions(+), 140 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
 index fe174a485..09909eb7c 100644
@@ -698,7 +702,7 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..404129c55 100644
+index 682ddfb67..ca63e07c0 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -18,11 +18,33 @@
@@ -745,7 +749,7 @@ index 682ddfb67..404129c55 100644
  	struct ctl_table tmp = *table;
  	old = READ_ONCE(infinity_tune_smt_divisor);
  	val = old;
-@@ -47,6 +69,282 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,6 +69,288 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
@@ -914,9 +918,15 @@ index 682ddfb67..404129c55 100644
 +			  "N/A");
 +	}
 +
-+	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "EMA climbs",
-+		  fill_pretty_llu(v1, sizeof(v1), emc), "burstiness events");
++	{
++		char avg[24];
++		u64 avg_wakeup = div64_u64(emc * 100ULL, max(wkc, 1ULL));
++		scnprintf(avg, sizeof(avg), "~%llu.%02llu/wakeup",
++			  avg_wakeup / 100, avg_wakeup % 100);
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "EMA climbs",
++			  fill_pretty_llu(v1, sizeof(v1), emc), avg);
++	}
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
 +		  "Wakeup decays",
@@ -1028,7 +1038,7 @@ index 682ddfb67..404129c55 100644
  static struct ctl_table infinity_sysctl_table[] = {
  	{
  		.procname	= "infinity_smt_divisor",
-@@ -69,6 +367,13 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +373,13 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
@@ -1042,7 +1052,7 @@ index 682ddfb67..404129c55 100644
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +424,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +430,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
@@ -1050,7 +1060,7 @@ index 682ddfb67..404129c55 100644
  }
  /* ------------------------------------------------------------------ */
  /* infinity_wakeup -- EMA decay on wakeup                               */
-@@ -152,6 +458,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -152,6 +464,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			}
  		}
  	}
