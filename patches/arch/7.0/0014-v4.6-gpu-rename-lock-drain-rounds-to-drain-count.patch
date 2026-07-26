@@ -1,0 +1,34 @@
+From 756be44bcd7a8b7de3e04381c3a4d3a46523d69a Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sun, 26 Jul 2026 20:11:35 +0700
+Subject: [PATCH v4.6-gpu] v4.6-gpu: rename Lock drain rounds to Drain count in
+ stats
+
+Rename label from 'Lock drain rounds' to 'Drain count' and description
+from 'pending_ns drained' to 'batch drain operations' to clarify this
+is a cumulative operation counter, not a live pending-work gauge.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 1f05807c6..885b51be9 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -335,9 +335,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		  "passover EMA boost");
+ 
+ 	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+-		  "Lock drain rounds",
++		  "Drain count",
+ 		  fill_pretty_llu(v1, sizeof(v1), gldr),
+-		  "pending_ns drained");
++		  "batch drain operations");
+ 
+ 	strlcat(buf, SEP, bufsz);
+ 	strlcat(buf, "\n\n", bufsz);
+-- 
+2.55.0
+
