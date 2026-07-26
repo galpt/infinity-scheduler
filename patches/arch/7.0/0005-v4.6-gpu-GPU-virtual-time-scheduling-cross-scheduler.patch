@@ -1,4 +1,4 @@
-From 0f232f897f94bb42862e4e6251afd5da531df240 Mon Sep 17 00:00:00 2001
+From f08daf2472805972420b801559fcc6841a954d9b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
@@ -89,15 +89,24 @@ v4.6-gpu: fix stats table alignment -- ASCII tree chars, wider label column, cap
 - Add description to EMA climbs row
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: use >> for stats tree branch indicators, fix confidence line spacing
+
+Replace +- and \- with >> for sub-rows -- same byte count, better visual.
+Also strip leading spaces from numbers in the confidence line
+(fill_pretty_llu right-aligns to 13 chars, but the inline display
+should not have extra padding).
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_entity.c |  57 ++++-
- drivers/gpu/drm/scheduler/sched_main.c   | 279 ++++++++++++---------
+ drivers/gpu/drm/scheduler/sched_main.c   | 279 +++++++++++---------
  include/drm/gpu_scheduler.h              |  48 ++--
  kernel/sched/fair.c                      |   4 +-
- kernel/sched/infinity_sched.c            | 302 ++++++++++++++++++++++-
+ kernel/sched/infinity_sched.c            | 309 ++++++++++++++++++++++-
  kernel/sched/infinity_sched.h            |   7 +
  kernel/sched/rt.c                        |   1 +
- 7 files changed, 558 insertions(+), 140 deletions(-)
+ 7 files changed, 565 insertions(+), 140 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
 index fe174a485..09909eb7c 100644
@@ -689,7 +698,7 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..190c1ddc2 100644
+index 682ddfb67..404129c55 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -18,11 +18,33 @@
@@ -736,7 +745,7 @@ index 682ddfb67..190c1ddc2 100644
  	struct ctl_table tmp = *table;
  	old = READ_ONCE(infinity_tune_smt_divisor);
  	val = old;
-@@ -47,6 +69,275 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -47,6 +69,282 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	}
  	return ret;
  }
@@ -886,7 +895,7 @@ index 682ddfb67..190c1ddc2 100644
 +		  "Infinity Scheduler v4.6-gpu\n\n");
 +
 +	/* ---- CPU ---- */
-+	strlcat(buf, "[ cpu ]\n", bufsz);
++	strlcat(buf, "CPU\n", bufsz);
 +	strlcat(buf, SEP, bufsz);
 +	strlcat(buf, "\n", bufsz);
 +
@@ -895,53 +904,53 @@ index 682ddfb67..190c1ddc2 100644
 +		scnprintf(pct, sizeof(pct), "%llu%% of tasks",
 +			  div64_u64(fbc * 100ULL, emc));
 +		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+			  "futex boosts",
++			  "Futex boosts",
 +			  fill_pretty_llu(v1, sizeof(v1), fbc),
 +			  pct);
 +	} else {
 +		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+			  "futex boosts",
++			  "Futex boosts",
 +			  fill_pretty_llu(v1, sizeof(v1), fbc),
 +			  "N/A");
 +	}
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "ema climbs",
++		  "EMA climbs",
 +		  fill_pretty_llu(v1, sizeof(v1), emc), "burstiness events");
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "wakeup decays",
++		  "Wakeup decays",
 +		  fill_pretty_llu(v1, sizeof(v1), wkc), "");
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "per-task ema range",
++		  "Per-task EMA range",
 +		  "   0 - 10,000", "");
 +
 +	strlcat(buf, SEP, bufsz);
 +	strlcat(buf, "\n\n", bufsz);
 +
 +	/* ---- RT ---- */
-+	strlcat(buf, "[ rt ]\n", bufsz);
++	strlcat(buf, "RT\n", bufsz);
 +	strlcat(buf, SEP, bufsz);
 +	strlcat(buf, "\n", bufsz);
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "rt throttles",
++		  "RT throttles",
 +		  fill_pretty_llu(v1, sizeof(v1), rtc),
-+		  "0 rogue (threshold >95%)");
++		  "0 rogue SCHED_FIFO");
 +
 +	strlcat(buf, SEP, bufsz);
 +	strlcat(buf, "\n\n", bufsz);
 +
 +	/* ---- GPU ---- */
-+	strlcat(buf, "[ gpu ]\n", bufsz);
++	strlcat(buf, "GPU\n", bufsz);
 +	strlcat(buf, SEP, bufsz);
 +	strlcat(buf, "\n", bufsz);
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "completion entered",
++		  "Completion entered",
 +		  fill_pretty_llu(v1, sizeof(v1), gcb),
-+		  "fence callbacks");
++		  "fence callbacks fired");
 +
 +	if (gcb) {
 +		u64 whole = div64_u64(gapp * 100ULL, gcb);
@@ -949,23 +958,23 @@ index 682ddfb67..190c1ddc2 100644
 +		char v2[16];
 +		scnprintf(v2, sizeof(v2), "%llu.%02llu%%", whole, frac);
 +		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+			  "accounting applied",
++			  "Accounting applied",
 +			  fill_pretty_llu(v1, sizeof(v1), gapp),
 +			  v2);
 +	} else {
 +		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+			  "accounting applied",
++			  "Accounting applied",
 +			  fill_pretty_llu(v1, sizeof(v1), gapp),
 +			  "N/A");
 +	}
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "  +- lock",
++		  "  >> lock contention",
 +		  fill_pretty_llu(v1, sizeof(v1), 0),
 +		  "(lock contention)");
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "  \\- entity freed",
++		  "  >> entity not found",
 +		  fill_pretty_llu(v1, sizeof(v1), gskp),
 +		  "(entity_kill race)");
 +
@@ -976,12 +985,19 @@ index 682ddfb67..190c1ddc2 100644
 +	if (gcb) {
 +		u64 whole = div64_u64(gapp * 100ULL, gcb);
 +		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
-+		char w1[16], w2[16];
++		char w1[16], w2[16], *p1, *p2;
++		fill_pretty_llu(w1, sizeof(w1), gapp);
++		fill_pretty_llu(w2, sizeof(w2), gcb);
++		/* Strip leading spaces for the confidence line */
++		p1 = w1;
++		while (*p1 == ' ')
++			p1++;
++		p2 = w2;
++		while (*p2 == ' ')
++			p2++;
 +		scnprintf(buf + strlen(buf), bufsz - strlen(buf),
 +			  "Accounting confidence: %llu.%02llu%%  (%s / %s completions)\n",
-+			  whole, frac,
-+			  fill_pretty_llu(w1, sizeof(w1), gapp),
-+			  fill_pretty_llu(w2, sizeof(w2), gcb));
++			  whole, frac, p1, p2);
 +	} else {
 +		strlcat(buf,
 +			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
@@ -1012,7 +1028,7 @@ index 682ddfb67..190c1ddc2 100644
  static struct ctl_table infinity_sysctl_table[] = {
  	{
  		.procname	= "infinity_smt_divisor",
-@@ -69,6 +360,13 @@ static struct ctl_table infinity_sysctl_table[] = {
+@@ -69,6 +367,13 @@ static struct ctl_table infinity_sysctl_table[] = {
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
  	},
@@ -1026,7 +1042,7 @@ index 682ddfb67..190c1ddc2 100644
  	{}
  };
  /* ------------------------------------------------------------------ */
-@@ -119,6 +417,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -119,6 +424,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
@@ -1034,7 +1050,7 @@ index 682ddfb67..190c1ddc2 100644
  }
  /* ------------------------------------------------------------------ */
  /* infinity_wakeup -- EMA decay on wakeup                               */
-@@ -152,6 +451,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -152,6 +458,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			}
  		}
  	}
