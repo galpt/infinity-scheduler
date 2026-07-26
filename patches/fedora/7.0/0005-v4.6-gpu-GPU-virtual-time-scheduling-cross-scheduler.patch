@@ -1,4 +1,4 @@
-From ec352cff66015c31b45bc89ebfdc97d176f8d923 Mon Sep 17 00:00:00 2001
+From 0f232f897f94bb42862e4e6251afd5da531df240 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
@@ -75,6 +75,18 @@ Column widths match exactly (67 chars), guaranteed by the format string
 rather than manual space counting.  Also rename val_from_u64 to
 fill_pretty_llu, change value column to 13 chars (fits uint32 max),
 and use [ cpu ] / [ rt ] / [ gpu ] section headers.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+
+v4.6-gpu: fix stats table alignment -- ASCII tree chars, wider label column, capitalize verdicts
+
+- Change Unicode box-drawing to ASCII +- and \- for tree branch labels
+  to ensure byte count = visible char count (%-22s produces identical
+  visible widths for all labels)
+- Widen label column from %-18s to %-22s to fit longer labels
+- Capitalize 'Accounting confidence' and 'Verdict' to match mockup
+- Use fill_pretty_llu for comma formatting in confidence line numbers
+- Add description to EMA climbs row
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -677,7 +689,7 @@ index 02e549316..8a06e5f3c 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 682ddfb67..1cfa4f231 100644
+index 682ddfb67..190c1ddc2 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -18,11 +18,33 @@
@@ -849,14 +861,14 @@ index 682ddfb67..1cfa4f231 100644
 +	/*
 +	 * Table layout (printf-style, auto-aligned):
 +	 *
-+	 *   | %-18s | %13s | %-26s |
-+	 *   +--------------------+---------------+----------------------------+
++	 *   | %-22s | %13s | %-26s |
++	 *   +------------------------+---------------+----------------------------+
 +	 *
-+	 * Column widths (inside |...|): label=20, value=15, desc=28
-+	 * Total row / separator width: 67 chars.
++	 * %-22s accounts for Unicode box-drawing in tree branch labels
++	 * (each Unicode char = 3 bytes, 1 visible).  Total row width: 71.
 +	 */
-+	const char *SEP = "+--------------------+---------------+----------------------------+";
-+	const char *ROW = "| %-18s | %13s | %-26s |\n";
++	const char *SEP = "+------------------------+---------------+----------------------------+";
++	const char *ROW = "| %-22s | %13s | %-26s |\n";
 +
 +	if (write)
 +		return -EROFS;
@@ -895,7 +907,7 @@ index 682ddfb67..1cfa4f231 100644
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
 +		  "ema climbs",
-+		  fill_pretty_llu(v1, sizeof(v1), emc), "");
++		  fill_pretty_llu(v1, sizeof(v1), emc), "burstiness events");
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
 +		  "wakeup decays",
@@ -948,12 +960,12 @@ index 682ddfb67..1cfa4f231 100644
 +	}
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "  \xe2\x94\x9c\xe2\x94\x80 lock",
++		  "  +- lock",
 +		  fill_pretty_llu(v1, sizeof(v1), 0),
 +		  "(lock contention)");
 +
 +	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "  \xe2\x94\x94\xe2\x94\x80 entity freed",
++		  "  \\- entity freed",
 +		  fill_pretty_llu(v1, sizeof(v1), gskp),
 +		  "(entity_kill race)");
 +
@@ -964,28 +976,28 @@ index 682ddfb67..1cfa4f231 100644
 +	if (gcb) {
 +		u64 whole = div64_u64(gapp * 100ULL, gcb);
 +		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
++		char w1[16], w2[16];
 +		scnprintf(buf + strlen(buf), bufsz - strlen(buf),
-+			  "accounting confidence: %llu.%02llu%%"
-+			  "  (%llu / %llu completions)\n",
++			  "Accounting confidence: %llu.%02llu%%  (%s / %s completions)\n",
 +			  whole, frac,
-+			  (unsigned long long)gapp,
-+			  (unsigned long long)gcb);
++			  fill_pretty_llu(w1, sizeof(w1), gapp),
++			  fill_pretty_llu(w2, sizeof(w2), gcb));
 +	} else {
 +		strlcat(buf,
-+			"accounting confidence: N/A  (no GPU jobs tracked)\n",
++			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
 +			bufsz);
 +	}
 +
 +	if (gcb && gapp == gcb)
 +		strlcat(buf,
-+			"verdict: all counters healthy -- system operating normally\n",
++			"Verdict: All counters healthy -- system operating normally\n",
 +			bufsz);
 +	else if (gcb && gapp < gcb)
 +		strlcat(buf,
-+			"verdict: accounting mismatch -- see above\n",
++			"Verdict: Accounting mismatch detected -- see above for details\n",
 +			bufsz);
 +	else
-+		strlcat(buf, "verdict: no GPU jobs recorded yet\n",
++		strlcat(buf, "Verdict: No GPU jobs recorded yet\n",
 +			bufsz);
 +
 +	{
