@@ -49,7 +49,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 ```
 
 > [!NOTE]
-> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and lock drain counters.
+> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and drain counters.
 
 ## Tunables
 
@@ -58,7 +58,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
-| `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and lock drain counters |
+| `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and drain counters |
 
 ## CPU scheduling
 
