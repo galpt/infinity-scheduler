@@ -1,0 +1,59 @@
+From e06d33d62eca4dae2836a726bc8d077cc23cfa0d Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sun, 26 Jul 2026 22:37:26 +0700
+Subject: [PATCH v4.6-gpu] v4.6-gpu: fix idle compensation formula inversion,
+ init gpu_passovers on fork
+
+Swap the terms in the idle compensation blend formula so that idle
+entities get scheduling priority instead of active ones:
+
+  effective_total = min_gpu_vtime * (1 - idle_ratio)
+                  + gpu_time_total * idle_ratio
+
+The original had gpu_time_total and min_gpu_vtime inverted.
+
+Add atomic_set(&ctx->gpu_passovers, 0) and ctx->futex_waiting = false
+to infinity_fork_init() to prevent a forked child from inheriting
+stale GPU scheduler signals from the parent.
+
+Reported-by: RiverOnVenus <riveronvenus@github>
+Closes: https://github.com/galpt/infinity-scheduler/issues/16#issuecomment-5083978040
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 4 ++--
+ kernel/sched/infinity_sched.c          | 3 ++-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index ebb3494d6..6957208ec 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -188,9 +188,9 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+ 					       INFINITY_GPU_EMA_HALFLIFE_NS);
+ 
+ 			effective_total =
+-				(entity->gpu_time_total *
++				(rq->min_gpu_vtime *
+ 				 ((1ULL << 16) - idle_ratio) +
+-				 rq->min_gpu_vtime * idle_ratio) >> 16;
++				 entity->gpu_time_total * idle_ratio) >> 16;
+ 		}
+ 
+ 		atomic_inc(&infinity_gpu_idle_compensations);
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 885b51be9..4233dabd0 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -530,7 +530,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->rt_ema = 0;
+ 	ctx->last_sleep_ns = now;
+ 	ctx->rt_last_sleep_ns = 0;
+-
++	atomic_set(&ctx->gpu_passovers, 0);
++	ctx->futex_waiting = false;
+ }
+ /* ------------------------------------------------------------------ */
+ /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
+-- 
+2.55.0
+
