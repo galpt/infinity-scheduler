@@ -1,14 +1,14 @@
-From 63798ded15e8c53948acdfea38785ca4113c43cc Mon Sep 17 00:00:00 2001
+From 95f280f1d9783392fd7d24724cb1ed362fda0c69 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
 Subject: [PATCH 4/5] v4.6-gpu: GPU DRM scheduler header extensions
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_internal.h  |  8 +--
+ drivers/gpu/drm/scheduler/sched_internal.h  |  8 +---
  drivers/gpu/drm/xe/xe_gpu_scheduler_types.h |  1 -
- include/drm/gpu_scheduler.h                 | 55 +++++++++++++++++++++
- 3 files changed, 56 insertions(+), 8 deletions(-)
+ include/drm/gpu_scheduler.h                 | 53 +++++++++++++++++++++
+ 3 files changed, 54 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_internal.h b/drivers/gpu/drm/scheduler/sched_internal.h
 index 7ea5a6736..abd5988e2 100644
@@ -48,7 +48,7 @@ index 63d9bf925..37828e85a 100644
  
  #endif
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 78e07c250..8fab4dde6 100644
+index 78e07c250..1229f1e29 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -233,6 +233,34 @@ struct drm_sched_entity {
@@ -116,17 +116,15 @@ index 78e07c250..8fab4dde6 100644
  	enum drm_sched_priority		s_priority;
  	u32				credits;
  	/** @last_dependency: tracks @dependencies as they signal */
-@@ -587,6 +631,9 @@ struct drm_gpu_scheduler {
+@@ -587,6 +631,7 @@ struct drm_gpu_scheduler {
  	struct delayed_work		work_tdr;
  	struct list_head		pending_list;
  	spinlock_t			job_list_lock;
 +
-+	/**
-+
  	int				hang_limit;
  	atomic_t                        *score;
  	atomic_t                        _score;
-@@ -750,4 +797,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -750,4 +795,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
  		list_for_each_entry((__job), &(__sched)->pending_list, list)	\
  			for_each_if(!(__entity) || (__job)->entity == (__entity))
  
