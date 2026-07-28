@@ -1,0 +1,120 @@
+From 7b09f3975aaf73dc876b9c9f6a6069a51097f31e Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 28 Jul 2026 07:12:36 +0700
+Subject: [PATCH v4.7-gpu 1/3] v4.7-gpu: add EMA-driven cpufreq hint for
+ interactive wakeups
+
+Add SCHED_CPUFREQ_INTERACTIVE flag alongside the existing IOWAIT flag.
+When a task with EMA == 0 (fully interactive) wakes up, set the flag
+so schedutil applies the same frequency ramp as IO-wait tasks.
+
+This catches interactive wakeups from futex, timer, and other non-IO
+sources that previously got no frequency boost.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ include/linux/sched/cpufreq.h    |  1 +
+ kernel/sched/cpufreq_schedutil.c | 12 +++++++++---
+ kernel/sched/fair.c              | 26 +++++++++++++++++++++++---
+ 3 files changed, 33 insertions(+), 6 deletions(-)
+
+diff --git a/include/linux/sched/cpufreq.h b/include/linux/sched/cpufreq.h
+index bdd31ab93..336dc2366 100644
+--- a/include/linux/sched/cpufreq.h
++++ b/include/linux/sched/cpufreq.h
+@@ -9,6 +9,7 @@
+  */
+ 
+ #define SCHED_CPUFREQ_IOWAIT	(1U << 0)
++#define SCHED_CPUFREQ_INTERACTIVE	(1U << 1)
+ 
+ #ifdef CONFIG_CPU_FREQ
+ struct cpufreq_policy;
+diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
+index ae9fd211c..a5c24628d 100644
+--- a/kernel/sched/cpufreq_schedutil.c
++++ b/kernel/sched/cpufreq_schedutil.c
+@@ -265,27 +265,33 @@ static bool sugov_iowait_reset(struct sugov_cpu *sg_cpu, u64 time,
+  * sugov_iowait_boost() - Updates the IO boost status of a CPU.
+  * @sg_cpu: the sugov data for the CPU to boost
+  * @time: the update time from the caller
+- * @flags: SCHED_CPUFREQ_IOWAIT if the task is waking up after an IO wait
++ * @flags: SCHED_CPUFREQ_IOWAIT if the task is waking up after an IO wait,
++ *         SCHED_CPUFREQ_INTERACTIVE if Infinity flagged an interactive wakeup
+  *
+  * Each time a task wakes up after an IO operation, the CPU utilization can be
+  * boosted to a certain utilization which doubles at each "frequent and
+  * successive" wakeup from IO, ranging from IOWAIT_BOOST_MIN to the utilization
+  * of the maximum OPP.
+  *
++ * Infinity's SCHED_CPUFREQ_INTERACTIVE flag is treated identically, allowing
++ * interactive desktop wakeups (futex, timer) to get the same frequency ramp
++ * as IO-wait tasks without conflating the two signals for IO-wait tracking.
++ *
+  * To keep doubling, an IO boost has to be requested at least once per tick,
+  * otherwise we restart from the utilization of the minimum OPP.
+  */
+ static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
+ 			       unsigned int flags)
+ {
+-	bool set_iowait_boost = flags & SCHED_CPUFREQ_IOWAIT;
++	bool set_iowait_boost = flags & (SCHED_CPUFREQ_IOWAIT |
++					  SCHED_CPUFREQ_INTERACTIVE);
+ 
+ 	/* Reset boost if the CPU appears to have been idle enough */
+ 	if (sg_cpu->iowait_boost &&
+ 	    sugov_iowait_reset(sg_cpu, time, set_iowait_boost))
+ 		return;
+ 
+-	/* Boost only tasks waking up after IO */
++	/* Boost only tasks waking up after IO or interactive wakeups */
+ 	if (!set_iowait_boost)
+ 		return;
+ 
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 8a06e5f3c..9daf12bd3 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5902,7 +5902,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 	if (entity_is_task(se)) {
+ 		struct task_struct *p = task_of(se);
+ 		if (p->infinity.ema == 0)
+-			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
++			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
+ 	}
+ 
+ 	return se;
+@@ -9079,8 +9079,28 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		return sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
+ 
+ 	/* Fast path */
+-	if (wake_flags & WF_TTWU)
+-		return select_idle_sibling(p, prev_cpu, new_cpu);
++	if (wake_flags & WF_TTWU) {
++		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
++
++#ifdef CONFIG_INFINITY_SCHED
++		/* SMT interactive placement: if the selected CPU is an SMT
++		 * thread with a busy sibling, and the waking task has low
++		 * EMA, try the primary thread of the same core instead.
++		 * This prevents an interactive task from sharing execution
++		 * units with a batch task on the other SMT thread.
++		 */
++		if (sched_smt_active() && p->infinity.ema < 1000) {
++			int primary = cpumask_first(
++				topology_sibling_cpumask(new_cpu));
++
++			if (primary != new_cpu &&
++			    cpu_rq(primary)->nr_running == 0)
++				new_cpu = primary;
++		}
++#endif
++
++		return new_cpu;
++	}
+ 
+ 	return new_cpu;
+ }
+-- 
+2.55.0
+
