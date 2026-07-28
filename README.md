@@ -1,4 +1,4 @@
-# infinity-scheduler (v4.6-gpu)
+# infinity-scheduler (v4.7-gpu)
 
 A fair-share CPU + GPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds.
 
@@ -8,10 +8,10 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/            14 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/             14 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/             14 patches — Vanilla kernel.org 7.1
-│   └── fedora/7.0/           14 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/            17 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/             17 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/             17 patches — Vanilla kernel.org 7.1
+│   └── fedora/7.0/           17 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -41,7 +41,7 @@ reboot
 # Verify it's running
 uname -r                              # → 7.1-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
-sysctl kernel.infinity_version        # → kernel.infinity_version = v4.6-gpu
+sysctl kernel.infinity_version        # → kernel.infinity_version = v4.7-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 
 # Check GPU scheduling health
@@ -57,7 +57,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 |---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
-| `infinity_version` | v4.6-gpu (ro) | — | Branch version string |
+| `infinity_version` | v4.7-gpu (ro) | — | Branch version string |
 | `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and drain counters |
 
 ## CPU scheduling
@@ -190,6 +190,10 @@ atomic64_add→pending_gpu_ns"]
 | Virtual GPU time scheduling | No | Yes (sole Infinity policy, FIFO/RR removed) |
 | Soft priority (anti-starvation) | No | Yes (proportional vtime scaling) |
 | Cross-scheduler CPU-GPU coupling | No | Yes (futex/EMA → GPU vtime + GPU passover → CPU) |
+| EMA-driven cpufreq hint | No | Yes (v4.7: SCHED_CPUFREQ_INTERACTIVE flag) |
+| SMT interactive placement | No | Yes (v4.7: low-EMA tasks moved to idle core) |
+| GPU job-type awareness | No | Yes (v4.7: submission interval reduces compositor penalty) |
+| Per-process EMA visibility | No | Yes (v4.7: /proc/<pid>/infinity) |
 
 ## License
 
