@@ -40,6 +40,60 @@ fi
 # Map kernel version to patch directory (e.g. 7.0.12 -> 7.0, 7.1.5 -> 7.1)
 KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
 
+# resolve_latest_patch — query kernel.org for the latest stable release
+# matching a given major.minor (e.g. 7.1 → 7.1.4).  Excludes -rc and
+# -test tags.  Falls back to major.minor.0 if the query fails.
+resolve_latest_patch() {
+    local major_minor="$1"
+
+    # Try the JSON endpoint first — fast and authoritative
+    if command -v python3 &>/dev/null; then
+        local json
+        json=$(curl -s --max-time 10 "https://www.kernel.org/releases.json" 2>/dev/null \
+               || wget -q -t 2 -T 10 -O - "https://www.kernel.org/releases.json" 2>/dev/null)
+        if [ -n "$json" ]; then
+            local ver
+            ver=$(echo "$json" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    releases = data.get('releases', [])
+    versions = [r['version'] for r in releases
+                if r['version'].startswith('$major_minor.')
+                and 'rc' not in r['version'].lower()
+                and 'test' not in r['version'].lower() 2>/dev/null]
+    if versions:
+        print(max(versions, key=lambda v: [int(x) for x in v.split('.')]))
+except Exception:
+    pass
+" 2>/dev/null)
+            if [ -n "$ver" ]; then
+                echo "$ver"
+                return
+            fi
+        fi
+    fi
+
+    # Fallback: use git ls-remote on the stable git tree
+    if command -v git &>/dev/null; then
+        local tag
+        tag=$(git ls-remote --refs --tags \
+            "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" \
+            "refs/tags/v${major_minor}.*" 2>/dev/null | \
+            grep -v '\-rc' | \
+            sort -t/ -k3 -V | \
+            tail -1 | \
+            sed 's|.*refs/tags/v||')
+        if [ -n "$tag" ]; then
+            echo "$tag"
+            return
+        fi
+    fi
+
+    # Fallback: return the major.minor base
+    echo "${major_minor}.0"
+}
+
 PATCH_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/$KERNEL_MAJOR"
 PATCH_VER="$KERNEL_MAJOR"
 
@@ -69,6 +123,13 @@ if [ ! -d "$PATCH_DIR" ]; then
     PATCH_VER="$BEST_VER"
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
+
+# Resolve the latest stable patch version for the supported major.minor.
+# If patches target 7.1, find the latest non-RC 7.1.x release (e.g. 7.1.4)
+# so users running a newer kernel (e.g. 7.2) still build against a version
+# the patches are known to work on.
+KERNEL_VER="$(resolve_latest_patch "$PATCH_VER")"
+info "Using kernel source v$KERNEL_VER (patches for $PATCH_VER)."
 
 # Collect patch files sorted by name
 PATCH_FILES=()
