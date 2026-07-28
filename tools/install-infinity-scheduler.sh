@@ -58,10 +58,11 @@ import json, sys
 try:
     data = json.load(sys.stdin)
     releases = data.get('releases', [])
+    prefix = '$major_minor.'
     versions = [r['version'] for r in releases
-                if r['version'].startswith('$major_minor.')
+                if r['version'].startswith(prefix)
                 and 'rc' not in r['version'].lower()
-                and 'test' not in r['version'].lower() 2>/dev/null]
+                and 'test' not in r['version'].lower()]
     if versions:
         print(max(versions, key=lambda v: [int(x) for x in v.split('.')]))
 except Exception:
@@ -81,9 +82,9 @@ except Exception:
             "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" \
             "refs/tags/v${major_minor}.*" 2>/dev/null | \
             grep -v '\-rc' | \
-            sort -t/ -k3 -V | \
-            tail -1 | \
-            sed 's|.*refs/tags/v||')
+            sed 's|.*refs/tags/v||' | \
+            sort -t. -k1,1n -k2,2n -k3,3n | \
+            tail -1)
         if [ -n "$tag" ]; then
             echo "$tag"
             return
