@@ -1,28 +1,24 @@
-From bfe4be2f5298f4b7da29f41dcc9871dad3da0c52 Mon Sep 17 00:00:00 2001
+From 60e4cbb652beda3c49026639d22e1e6db441d3ea Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 28 Jul 2026 09:44:22 +0700
+Date: Tue, 28 Jul 2026 09:54:19 +0700
 Subject: [PATCH v4.7-gpu] v4.7-gpu: add observability counters, fix SMT race,
- clean up exports, fix version
+ clean up exports
 
-- Add infinity_cpufreq_interactive_count and infinity_smt_interactive_count
-  to CPU stats for verifying v4.7 features trigger.
-- Fix SMT data race: use available_idle_cpu() instead of unlocked
-  cpu_rq(primary)->nr_running read.
-- Remove hardcoded Per-task EMA range row (static string, no diagnostic value).
-- Reorganize all EXPORT_SYMBOL declarations to immediately follow their
-  variable definitions per kernel convention.
-- Fix infinity_version sysctl from v4.6-gpu to v4.7-gpu.
-- Make stats header dynamic via %s format reading infinity_version.
+Add infinity_cpufreq_interactive_count and infinity_smt_interactive_count
+to CPU stats for verifying v4.7 features trigger.  Fix SMT data race:
+use available_idle_cpu() instead of unlocked cpu_rq read.  Remove
+hardcoded Per-task EMA range row.  Reorganize all EXPORT_SYMBOL
+declarations per kernel convention.  Update version to v4.7-gpu.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c           |  8 ++++++--
- kernel/sched/infinity_sched.c | 33 +++++++++++++++------------------
- kernel/sched/infinity_sched.h |  2 ++
- 3 files changed, 23 insertions(+), 20 deletions(-)
+ kernel/sched/fair.c           |  7 +++--
+ kernel/sched/infinity_sched.c | 48 +++++++++++++++++++++--------------
+ kernel/sched/infinity_sched.h |  4 ++-
+ 3 files changed, 37 insertions(+), 22 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 9daf12bd3..b398759fb 100644
+index 9daf12bd3..a30d2cf39 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -5901,8 +5901,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
@@ -37,7 +33,7 @@ index 9daf12bd3..b398759fb 100644
  	}
  
  	return se;
-@@ -9094,8 +9096,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9094,8 +9096,9 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  				topology_sibling_cpumask(new_cpu));
  
  			if (primary != new_cpu &&
@@ -45,14 +41,22 @@ index 9daf12bd3..b398759fb 100644
 +			    available_idle_cpu(primary)) {
  				new_cpu = primary;
 +				atomic_inc(&infinity_smt_interactive_count);
-+			}
  		}
  #endif
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index b91d23892..1f949c453 100644
+index b91d23892..aca481ce8 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
+  *
+- * infinity_sched.c -- Infinity scheduler algorithm (v4.6-gpu).
++ * infinity_sched.c -- Infinity scheduler algorithm (v4.7-gpu).
+  *
+  * Fully continuous limit-based scheduling:
+  *
 @@ -30,36 +30,36 @@
  /* Stats counters                                                      */
  /* ------------------------------------------------------------------ */
@@ -100,11 +104,25 @@ index b91d23892..1f949c453 100644
  unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
  static int infinity_running_flag = 1;
 -static char infinity_version[] = "v4.6-gpu";
-+static char infinity_version[] = "v4.7-gpu";
++static const char infinity_version[] = "v4.7-gpu";
  static int clamp_smt_divisor(const struct ctl_table *table, int write,
  			     void *buf, size_t *lenp, loff_t *ppos)
  {
-@@ -227,7 +227,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -193,7 +193,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ {
+ 	char *buf;
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
+-	u64 gic, gcca, gpbo, gldr;
++	u64 gic, gcca, gpbo, gldr, icf, ismt;
+ 	char v1[16];
+ 	const size_t bufsz = 4096;
+ 
+@@ -224,10 +224,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	gcca = (u64)(unsigned int)atomic_read(&infinity_gpu_cpu_coupling_activations);
+ 	gpbo = (u64)(unsigned int)atomic_read(&infinity_gpu_passover_boosts);
+ 	gldr = (u64)(unsigned int)atomic_read(&infinity_gpu_lock_drain_rounds);
++	icf  = (u64)(unsigned int)atomic_read(&infinity_cpufreq_interactive_count);
++	ismt = (u64)(unsigned int)atomic_read(&infinity_smt_interactive_count);
  
  	buf[0] = '\0';
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
@@ -113,20 +131,38 @@ index b91d23892..1f949c453 100644
  
  	/* ---- CPU ---- */
  	strlcat(buf, "CPU\n", bufsz);
-@@ -263,9 +263,6 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
- 		  "Wakeup decays",
+@@ -264,8 +266,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		  fill_pretty_llu(v1, sizeof(v1), wkc), "");
  
--	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+ 	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
 -		  "Per-task EMA range",
 -		  "   0 - 10,000", "");
++		  "Interactive cpufreq",
++		  fill_pretty_llu(v1, sizeof(v1), icf),
++		  "frequency ramp events");
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "SMT placement",
++		  fill_pretty_llu(v1, sizeof(v1), ismt),
++		  "interactive moves to idle core");
++
++
  
  	strlcat(buf, SEP, bufsz);
  	strlcat(buf, "\n\n", bufsz);
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index dc10a0ff5..e06303f7c 100644
+index dc10a0ff5..11d9c77a2 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
+  *
+- * infinity_sched.h -- Infinity scheduler API (v4.6-gpu).
++ * infinity_sched.h -- Infinity scheduler API (v4.7-gpu).
+  *
+  * Architecture:
+  *
 @@ -154,6 +154,8 @@ extern atomic_t infinity_gpu_passover_boosts;
  extern atomic_t infinity_gpu_idle_compensations;
  extern atomic_t infinity_gpu_cpu_coupling_activations;
