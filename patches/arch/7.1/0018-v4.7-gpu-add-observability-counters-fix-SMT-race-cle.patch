@@ -1,8 +1,8 @@
-From 02fe766f40df74dc9e0d6ffc1a5d64ccb959c828 Mon Sep 17 00:00:00 2001
+From bfe4be2f5298f4b7da29f41dcc9871dad3da0c52 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 28 Jul 2026 08:03:46 +0700
+Date: Tue, 28 Jul 2026 09:44:22 +0700
 Subject: [PATCH v4.7-gpu] v4.7-gpu: add observability counters, fix SMT race,
- clean up exports
+ clean up exports, fix version
 
 - Add infinity_cpufreq_interactive_count and infinity_smt_interactive_count
   to CPU stats for verifying v4.7 features trigger.
@@ -11,43 +11,49 @@ Subject: [PATCH v4.7-gpu] v4.7-gpu: add observability counters, fix SMT race,
 - Remove hardcoded Per-task EMA range row (static string, no diagnostic value).
 - Reorganize all EXPORT_SYMBOL declarations to immediately follow their
   variable definitions per kernel convention.
-- Update version string to v4.7-gpu.
+- Fix infinity_version sysctl from v4.6-gpu to v4.7-gpu.
+- Make stats header dynamic via %s format reading infinity_version.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c           |  4 +++-
+ kernel/sched/fair.c           |  8 ++++++--
  kernel/sched/infinity_sched.c | 33 +++++++++++++++------------------
  kernel/sched/infinity_sched.h |  2 ++
- 3 files changed, 20 insertions(+), 19 deletions(-)
+ 3 files changed, 23 insertions(+), 20 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 9daf12bd3..ebaa23111 100644
+index 9daf12bd3..b398759fb 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5903,6 +5903,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5901,8 +5901,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 	 */
+ 	if (entity_is_task(se)) {
  		struct task_struct *p = task_of(se);
- 		if (p->infinity.ema == 0)
+-		if (p->infinity.ema == 0)
++		if (p->infinity.ema == 0) {
  			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
 +			atomic_inc(&infinity_cpufreq_interactive_count);
++		}
  	}
  
  	return se;
-@@ -9094,8 +9095,9 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9094,8 +9096,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  				topology_sibling_cpumask(new_cpu));
  
  			if (primary != new_cpu &&
 -			    cpu_rq(primary)->nr_running == 0)
 +			    available_idle_cpu(primary)) {
  				new_cpu = primary;
-+			    atomic_inc(&infinity_smt_interactive_count);
++				atomic_inc(&infinity_smt_interactive_count);
++			}
  		}
  #endif
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index b91d23892..2337a4c11 100644
+index b91d23892..1f949c453 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -30,31 +30,31 @@
+@@ -30,36 +30,36 @@
  /* Stats counters                                                      */
  /* ------------------------------------------------------------------ */
  atomic_t infinity_futex_boost_count	= ATOMIC_INIT(0);
@@ -92,31 +98,31 @@ index b91d23892..2337a4c11 100644
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
  unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+ static int infinity_running_flag = 1;
+-static char infinity_version[] = "v4.6-gpu";
++static char infinity_version[] = "v4.7-gpu";
+ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ 			     void *buf, size_t *lenp, loff_t *ppos)
+ {
 @@ -227,7 +227,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  
  	buf[0] = '\0';
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
 -		  "Infinity Scheduler v4.6-gpu\n\n");
-+		  "Infinity Scheduler v4.7-gpu\n\n");
++		  "Infinity Scheduler %s\n\n", infinity_version);
  
  	/* ---- CPU ---- */
  	strlcat(buf, "CPU\n", bufsz);
-@@ -263,10 +263,6 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -263,9 +263,6 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		  "Wakeup decays",
  		  fill_pretty_llu(v1, sizeof(v1), wkc), "");
  
 -	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
 -		  "Per-task EMA range",
 -		  "   0 - 10,000", "");
--
+ 
  	strlcat(buf, SEP, bufsz);
  	strlcat(buf, "\n\n", bufsz);
- 
-@@ -601,3 +597,4 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
- 	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
- 				      / 100ULL));
- }
-+
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 index dc10a0ff5..e06303f7c 100644
 --- a/kernel/sched/infinity_sched.h
