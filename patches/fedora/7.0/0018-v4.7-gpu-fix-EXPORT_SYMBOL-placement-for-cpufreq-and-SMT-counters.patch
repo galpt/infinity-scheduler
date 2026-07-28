@@ -1,0 +1,39 @@
+From dbb52e5c0d8ab10b47f0a16ddfc1ff31b05d4d23 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 28 Jul 2026 07:58:04 +0700
+Subject: [PATCH v4.7-gpu] v4.7-gpu: fix EXPORT_SYMBOL placement for cpufreq
+ and SMT counters
+
+Move EXPORT_SYMBOL(infinity_cpufreq_interactive_count) and
+EXPORT_SYMBOL(infinity_smt_interactive_count) to immediately follow
+their definitions, matching the kernel convention that the export
+should sit directly under the variable it exports.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index f55ee3ac9..ab090b646 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -46,13 +46,13 @@ atomic_t infinity_gpu_cpu_coupling_activations	= ATOMIC_INIT(0);
+ atomic_t infinity_gpu_lock_drain_rounds		= ATOMIC_INIT(0);
+ atomic_t infinity_cpufreq_interactive_count	= ATOMIC_INIT(0);
+ atomic_t infinity_smt_interactive_count		= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_cpufreq_interactive_count);
++EXPORT_SYMBOL(infinity_smt_interactive_count);
+ EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
+ EXPORT_SYMBOL(infinity_gpu_passover_boosts);
+ EXPORT_SYMBOL(infinity_gpu_idle_compensations);
+ EXPORT_SYMBOL(infinity_gpu_cpu_coupling_activations);
+ EXPORT_SYMBOL(infinity_gpu_lock_drain_rounds);
+-EXPORT_SYMBOL(infinity_cpufreq_interactive_count);
+-EXPORT_SYMBOL(infinity_smt_interactive_count);
+ EXPORT_SYMBOL(infinity_gpu_accounting_applied);
+ EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
+ /* ------------------------------------------------------------------ */
+-- 
+2.55.0
+
