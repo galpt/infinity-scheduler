@@ -194,7 +194,7 @@ atomic64_add→pending_gpu_ns"]
 | EMA-driven cpufreq hint | No | Yes (v4.7: SCHED_CPUFREQ_INTERACTIVE flag) |
 | SMT interactive placement | No | Yes (v4.7: low-EMA tasks moved to idle core) |
 | GPU job-type awareness | No | Yes (v4.7: submission interval reduces compositor penalty) |
-| Per-process EMA visibility | No | Yes (v4.7: /proc/<pid>/infinity) |
+| Per-process EMA visibility | No | Yes (v4.7: `/proc/<pid>/infinity`) |
 
 ## License
 
