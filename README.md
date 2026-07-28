@@ -23,8 +23,8 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 > The install script below is tested and working with the **Limine** bootloader. Support for **GRUB** and **systemd-boot** has been added but not yet tested on real hardware. If you encounter issues or have a working version for your bootloader, please send a pull request.
 
 ```bash
-# 1. Clone the repo (v4.6-gpu has GPU scheduling; v4.5 is stable CPU-only baseline)
-git clone -b v4.6-gpu --depth 1 https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the repo (v4.7-gpu adds cpufreq hint, SMT placement, GPU job-type awareness; v4.6-gpu is stable GPU baseline)
+git clone -b v4.7-gpu --depth 1 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -138,7 +138,8 @@ flowchart TB
 gpu_time_total / gpu_time_ema
 cached_gpu_vtime (sort key)
 pending_gpu_ns (lock-free accumulator)
-infinity_pid (CPU coupling anchor)"]
+infinity_pid (CPU coupling anchor)
+gpu_last_submit_interval (job-type awareness)"]
 
         ENTITY --> DRAIN["rq_update_vtime_locked()
 drain pending_gpu_ns under rq->lock"]
