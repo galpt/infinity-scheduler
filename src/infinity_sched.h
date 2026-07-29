@@ -136,8 +136,12 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /* ------------------------------------------------------------------ */
 /* RT safety valve — requeue throttle threshold                        */
 /* ------------------------------------------------------------------ */
-/** rt_ema threshold: force rogue SCHED_FIFO to yield (>95% of 10ms). */
-#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
+/**
+ * rt_ema threshold: force rogue SCHED_FIFO to yield when rt_ema exceeds
+ * 95% of INFINITY_RT_BUDGET_NS (10ms).  Expressed as a computed percentage
+ * of the budget to prevent unit mismatch errors.
+ */
+#define INFINITY_RT_DEMOTE_THRESHOLD    (INFINITY_RT_BUDGET_NS * 95ULL / 100ULL)
 
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
