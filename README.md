@@ -35,7 +35,8 @@ reboot
 ```
 
 > [!TIP]
-> `sudo bash tools/install-infinity-scheduler.sh --remove` removes only Infinity scheduler boot entries — the default kernel is never touched.
+> 1. To free up disk space after Infinity has compiled successfully, use the `bash tools/safe-clean-infinity-kernel-source.sh` command.
+> 2. To uninstall Infinity completely, use the `sudo bash tools/install-infinity-scheduler.sh --remove` command. It removes only Infinity scheduler boot entries — the default kernel is never touched.
 
 ```bash
 # Verify it's running
