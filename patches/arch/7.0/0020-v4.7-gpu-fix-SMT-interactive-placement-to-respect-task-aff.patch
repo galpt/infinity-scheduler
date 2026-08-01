@@ -1,8 +1,8 @@
-From e97d33a6f63de63ba048d8ccd55f71c4aaf27f4b Mon Sep 17 00:00:00 2001
+From 28c128e8e27df54cf8824140536943c4fee5c69a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 1 Aug 2026 06:24:15 +0700
-Subject: [PATCH] v4.7-gpu: fix SMT interactive placement to respect task CPU
- affinity
+Date: Sat, 1 Aug 2026 06:47:52 +0700
+Subject: [PATCH 48/51] v4.7-gpu: fix SMT interactive placement to respect task
+ CPU affinity
 
 The SMT interactive placement hook could move a waking task to the
 primary thread of its core even when that CPU is outside the task's
@@ -20,10 +20,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 6 insertions(+)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 10afc6d0a..a95e72908 100644
+index a7eb211e7..610655eb3 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -9097,7 +9097,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8840,7 +8840,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			int primary = cpumask_first(
  				topology_sibling_cpumask(new_cpu));
  

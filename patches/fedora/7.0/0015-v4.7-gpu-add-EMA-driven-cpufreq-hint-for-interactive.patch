@@ -1,8 +1,8 @@
-From 7b09f3975aaf73dc876b9c9f6a6069a51097f31e Mon Sep 17 00:00:00 2001
+From a5d21cf3ac61d9fd998dc486524deff51782be39 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 28 Jul 2026 07:12:36 +0700
-Subject: [PATCH v4.7-gpu 1/3] v4.7-gpu: add EMA-driven cpufreq hint for
- interactive wakeups
+Date: Sat, 1 Aug 2026 07:08:37 +0700
+Subject: [PATCH 43/51] v4.7-gpu: add EMA-driven cpufreq hint for interactive
+ wakeups
 
 Add SCHED_CPUFREQ_INTERACTIVE flag alongside the existing IOWAIT flag.
 When a task with EMA == 0 (fully interactive) wakes up, set the flag
@@ -15,8 +15,8 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  include/linux/sched/cpufreq.h    |  1 +
  kernel/sched/cpufreq_schedutil.c | 12 +++++++++---
- kernel/sched/fair.c              | 26 +++++++++++++++++++++++---
- 3 files changed, 33 insertions(+), 6 deletions(-)
+ kernel/sched/fair.c              | 19 ++++++++++++++++++-
+ 3 files changed, 28 insertions(+), 4 deletions(-)
 
 diff --git a/include/linux/sched/cpufreq.h b/include/linux/sched/cpufreq.h
 index bdd31ab93..336dc2366 100644
@@ -31,7 +31,7 @@ index bdd31ab93..336dc2366 100644
  #ifdef CONFIG_CPU_FREQ
  struct cpufreq_policy;
 diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
-index ae9fd211c..a5c24628d 100644
+index 153232dd8..75b006f9d 100644
 --- a/kernel/sched/cpufreq_schedutil.c
 +++ b/kernel/sched/cpufreq_schedutil.c
 @@ -265,27 +265,33 @@ static bool sugov_iowait_reset(struct sugov_cpu *sg_cpu, u64 time,
@@ -72,10 +72,10 @@ index ae9fd211c..a5c24628d 100644
  		return;
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 8a06e5f3c..9daf12bd3 100644
+index 0aa6510b3..363347316 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5902,7 +5902,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5664,7 +5664,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
  	if (entity_is_task(se)) {
  		struct task_struct *p = task_of(se);
  		if (p->infinity.ema == 0)
@@ -84,14 +84,10 @@ index 8a06e5f3c..9daf12bd3 100644
  	}
  
  	return se;
-@@ -9079,8 +9079,28 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
- 		return sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
- 
- 	/* Fast path */
--	if (wake_flags & WF_TTWU)
--		return select_idle_sibling(p, prev_cpu, new_cpu);
-+	if (wake_flags & WF_TTWU) {
-+		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
+@@ -8832,6 +8832,23 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 	} else if (wake_flags & WF_TTWU) { /* XXX always ? */
+ 		/* Fast path */
+ 		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
 +
 +#ifdef CONFIG_INFINITY_SCHED
 +		/* SMT interactive placement: if the selected CPU is an SMT
@@ -109,12 +105,9 @@ index 8a06e5f3c..9daf12bd3 100644
 +				new_cpu = primary;
 +		}
 +#endif
-+
-+		return new_cpu;
-+	}
+ 	}
+ 	rcu_read_unlock();
  
- 	return new_cpu;
- }
 -- 
 2.55.0
 

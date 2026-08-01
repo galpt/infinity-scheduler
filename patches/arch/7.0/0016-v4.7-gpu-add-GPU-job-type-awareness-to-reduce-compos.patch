@@ -1,7 +1,7 @@
-From da911dc096dffa0bf45ec3be9f9400b6cc224b2b Mon Sep 17 00:00:00 2001
+From 3b626ad8f257bff6224033e90593b82590455cc1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:37 +0700
-Subject: [PATCH v4.7-gpu 2/3] v4.7-gpu: add GPU job-type awareness to reduce
+Subject: [PATCH 44/51] v4.7-gpu: add GPU job-type awareness to reduce
  compositor penalty
 
 Track per-entity submission interval in gpu_last_submit_interval.
@@ -16,7 +16,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  2 files changed, 36 insertions(+)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 6957208ec..05cc8554e 100644
+index d04007c6a..b1a31cf35 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -260,6 +260,23 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)

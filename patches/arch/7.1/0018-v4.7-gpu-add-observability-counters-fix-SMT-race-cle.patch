@@ -1,7 +1,7 @@
-From 06d8c37cd62a35c46f5a9733316cd305a44c688d Mon Sep 17 00:00:00 2001
+From 56fec00448dbc41eea26ef280491cddbfef4ce46 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 10:08:54 +0700
-Subject: [PATCH v4.7-gpu] v4.7-gpu: add observability counters, fix SMT race,
+Subject: [PATCH 46/51] v4.7-gpu: add observability counters, fix SMT race,
  clean up exports
 
 Add infinity_cpufreq_interactive_count and infinity_smt_interactive_count
@@ -19,10 +19,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  4 files changed, 38 insertions(+), 28 deletions(-)
 
 diff --git a/fs/proc/base.c b/fs/proc/base.c
-index 9d388852f..c8e13ac65 100644
+index 44565014c..98818ff40 100644
 --- a/fs/proc/base.c
 +++ b/fs/proc/base.c
-@@ -3303,7 +3303,6 @@ static int proc_stack_depth(struct seq_file *m, struct pid_namespace *ns,
+@@ -3281,7 +3281,6 @@ static int proc_stack_depth(struct seq_file *m, struct pid_namespace *ns,
  }
  #endif /* CONFIG_KSTACK_ERASE_METRICS */
  
@@ -30,7 +30,7 @@ index 9d388852f..c8e13ac65 100644
  static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
  			      struct pid *pid, struct task_struct *task)
  {
-@@ -3316,7 +3315,6 @@ static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
+@@ -3294,7 +3293,6 @@ static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
  		   atomic_read(&ctx->gpu_passovers));
  	return 0;
  }
@@ -38,21 +38,21 @@ index 9d388852f..c8e13ac65 100644
  
  /*
   * Thread groups
-@@ -3342,9 +3340,7 @@ static const struct pid_entry tgid_base_stuff[] = {
+@@ -3320,9 +3318,7 @@ static const struct pid_entry tgid_base_stuff[] = {
  #ifdef CONFIG_SCHED_AUTOGROUP
  	REG("autogroup",  S_IRUGO|S_IWUSR, proc_pid_sched_autogroup_operations),
  #endif
 -#ifdef CONFIG_INFINITY_SCHED
- 	ONE("infinity",   S_IRUGO, proc_infinity_show),
+ 	ONE("infinity",   0444, proc_infinity_show),
 -#endif
  #ifdef CONFIG_TIME_NS
  	REG("timens_offsets",  S_IRUGO|S_IWUSR, proc_timens_offsets_operations),
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 9daf12bd3..2e459ce64 100644
+index 4a5efc3a2..10afc6d0a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5901,8 +5901,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5898,8 +5898,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	 */
  	if (entity_is_task(se)) {
  		struct task_struct *p = task_of(se);
@@ -64,7 +64,7 @@ index 9daf12bd3..2e459ce64 100644
  	}
  
  	return se;
-@@ -9082,7 +9084,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9085,7 +9087,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  	if (wake_flags & WF_TTWU) {
  		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
  
@@ -72,7 +72,7 @@ index 9daf12bd3..2e459ce64 100644
  		/* SMT interactive placement: if the selected CPU is an SMT
  		 * thread with a busy sibling, and the waking task has low
  		 * EMA, try the primary thread of the same core instead.
-@@ -9094,10 +9095,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9097,10 +9098,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  				topology_sibling_cpumask(new_cpu));
  
  			if (primary != new_cpu &&

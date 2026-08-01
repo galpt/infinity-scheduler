@@ -1,8 +1,8 @@
-From a8553b90460e96e9a72f623319b41b1aeff5ff84 Mon Sep 17 00:00:00 2001
+From 729b88cfa8e43c1e80ca5b2279d1f9499a8f7da7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:37 +0700
-Subject: [PATCH v4.7-gpu 3/3] v4.7-gpu: add /proc/<pid>/infinity per-process
- EMA visibility
+Subject: [PATCH 45/51] v4.7-gpu: add /proc/<pid>/infinity per-process EMA
+ visibility
 
 Show ema, rt_ema, futex_waiting, and gpu_passovers for each process.
 Allows users and developers to see which processes Infinity treats
@@ -14,7 +14,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 18 insertions(+)
 
 diff --git a/fs/proc/base.c b/fs/proc/base.c
-index d9acfa89c..9d388852f 100644
+index 4c863d17d..f6f6b1aba 100644
 --- a/fs/proc/base.c
 +++ b/fs/proc/base.c
 @@ -3303,6 +3303,21 @@ static int proc_stack_depth(struct seq_file *m, struct pid_namespace *ns,
@@ -44,7 +44,7 @@ index d9acfa89c..9d388852f 100644
  	REG("autogroup",  S_IRUGO|S_IWUSR, proc_pid_sched_autogroup_operations),
  #endif
 +#ifdef CONFIG_INFINITY_SCHED
-+	ONE("infinity",   S_IRUGO, proc_infinity_show),
++	ONE("infinity",   0444, proc_infinity_show),
 +#endif
  #ifdef CONFIG_TIME_NS
  	REG("timens_offsets",  S_IRUGO|S_IWUSR, proc_timens_offsets_operations),

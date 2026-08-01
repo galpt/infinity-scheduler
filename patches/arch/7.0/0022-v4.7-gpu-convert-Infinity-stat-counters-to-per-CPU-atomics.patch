@@ -1,7 +1,8 @@
-From 42dcb820a0a5db29cdfb0e76b59272fb1dd5e556 Mon Sep 17 00:00:00 2001
+From 2390bfd660997e52853d28573a54c7f0db330f8c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 1 Aug 2026 06:30:49 +0700
-Subject: [PATCH] v4.7-gpu: convert Infinity stat counters to per-CPU atomics
+Date: Sat, 1 Aug 2026 06:50:25 +0700
+Subject: [PATCH 50/51] v4.7-gpu: convert Infinity stat counters to per-CPU
+ atomics
 
 The global atomic stat counters are incremented from every CPU (the
 EMA climb counter on every tick).  On multi-node machines this bounces
@@ -25,7 +26,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  6 files changed, 94 insertions(+), 69 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 05cc8554e..e8d8cf588 100644
+index b1a31cf35..b6cda9ee8 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -193,7 +193,7 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -102,10 +103,10 @@ index 232a2c7b5..3ecc07dfc 100644
  
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index d9b4a7ab9..ac79e6626 100644
+index 2ffa8f71c..7f7b1d905 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5591,7 +5591,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5353,7 +5353,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
  	    task_of(se)->infinity.futex_waiting) {
  		vslice >>= 1;
@@ -114,7 +115,7 @@ index d9b4a7ab9..ac79e6626 100644
  	}
  
  	/*
-@@ -5900,7 +5900,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5660,7 +5660,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  		struct task_struct *p = task_of(se);
  		if (p->infinity.ema == 0) {
  			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
@@ -123,7 +124,7 @@ index d9b4a7ab9..ac79e6626 100644
  		}
  	}
  
-@@ -9129,7 +9129,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8872,7 +8872,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			    cpumask_test_cpu(primary, p->cpus_ptr) &&
  			    available_idle_cpu(primary)) {
  				new_cpu = primary;
@@ -131,7 +132,7 @@ index d9b4a7ab9..ac79e6626 100644
 +				atomic_inc(this_cpu_ptr(&infinity_smt_interactive_count));
  			}
  		}
- 
+ 	}
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 index aca481ce8..a49518bf9 100644
 --- a/kernel/sched/infinity_sched.c
@@ -318,10 +319,10 @@ index c83839405..18bf07d9f 100644
  /* API -- called from fair.c and rt.c                                   */
  /* ------------------------------------------------------------------ */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index a5ce551f5..5fbf54a8d 100644
+index 634480322..a0d1c124b 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
-@@ -2567,7 +2567,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2562,7 +2562,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
  		requeue_task_rt(rq, p, 0);
  		resched_curr(rq);

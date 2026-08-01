@@ -1,8 +1,8 @@
-From dcc520da34f8c8a27453df771057e4e8345529bd Mon Sep 17 00:00:00 2001
+From 397cc2eaa2774070478ec4434d090a5bfdfc904b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 06:31:28 +0700
-Subject: [PATCH] v4.7-gpu: apply cgroup EMA decay when a migrated task ends an
- idle period
+Subject: [PATCH 51/51] v4.7-gpu: apply cgroup EMA decay when a migrated task
+ ends an idle period
 
 The group EMA idle window (group_ema_sleep_start) was only consumed on
 ENQUEUE_WAKEUP.  When a task arrived via ENQUEUE_MIGRATED, the window
