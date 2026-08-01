@@ -1,0 +1,46 @@
+From b80c55ea86d3337722abdc556450ee8313c66a04 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sat, 1 Aug 2026 13:30:48 +0700
+Subject: [PATCH 13/13] v4.7-gpu: fix infinity_stats sysctl read returning
+ EFAULT
+
+The infinity_stats handler copied its formatted table to userspace with
+simple_read_from_buffer(), but since the sysctl core refactor the buffer
+handed to proc handlers is kernel-allocated and the core copies it to
+userspace itself.  copy_to_user() on that kernel address fails access_ok,
+so every read returned -EFAULT ("Bad address").
+
+Route the output through proc_dostring() on a const ctl_table instead,
+which writes into the kernel buffer with memcpy and preserves partial-
+read, EOF and trailing-newline behavior.  Read-only semantics are
+unchanged.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 361e9f568..a83a08475 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -318,8 +318,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 			"Verdict: Accounting mismatch detected -- see above for details\n",
+ 			bufsz);
+ 
+-	*lenp = simple_read_from_buffer(buffer, *lenp, ppos, buf,
+-					strnlen(buf, bufsz));
++	{
++		const struct ctl_table tmp = {
++			.data		= buf,
++			.maxlen		= bufsz,
++		};
++
++		proc_dostring(&tmp, write, buffer, lenp, ppos);
++	}
+ 	kfree(buf);
+ 	return 0;
+ }
+-- 
+2.55.0
+
