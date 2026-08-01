@@ -131,6 +131,8 @@ flowchart TB
 
 ## GPU scheduling
 
+### 7.1 layout (7.0 / 7.1 / 6.18 / Fedora)
+
 ```mermaid
 flowchart TB
     classDef ent fill:#0000,stroke:#818cf8,stroke-width:2
@@ -173,6 +175,71 @@ WRITE_ONCE gpu_ns on job"]
 atomic64_add→pending_gpu_ns"]
 
     FINI -. "drained in rq_update_vtime_locked" .-> DRAIN
+```
+
+### 7.2 layout (upstream fair scheduler + Infinity)
+
+```mermaid
+flowchart TB
+    classDef ent fill:#0000,stroke:#818cf8,stroke-width:2
+    classDef algo fill:#0000,stroke:#14b8a6,stroke-width:2
+    classDef dec fill:#0000,stroke:#d97706,stroke-width:2
+
+    subgraph GPU72["GPU scheduling 7.2 (DRM fair scheduler + Infinity)"]
+        ENTITY["drm_sched_entity
+─────────────────
+infinity_pid (CPU coupling anchor)"]
+        class ENTITY ent
+
+        ENTITY --> STATS["drm_sched_entity_stats
+refcounted, shared with jobs
+─────────────────
+runtime (gpu_time_total equivalent)
+vruntime (rbtree sort key)
+gpu_time_ema / gpu_time_last_active
+gpu_last_submit_interval (job-type awareness)"]
+        class STATS ent
+
+        STATS --> DONE["job completes
+drm_sched_entity_stats_job_add_gpu_time()
+runtime += duration (stats->lock)"]
+        class DONE algo
+
+        DONE --> FOLD["vruntime fold
+drm_sched_entity_update_vruntime()
+─────────────────
+EMA climb on the accounted delta
+EMA idle decay by half-lives
+burst penalty: delta += (delta×ema_pct/100)/2
+  (quarter penalty for <8ms submissions)
+CPU coupling: futex / CPU EMA==0 → growth ×50% each
+vruntime += delta << vruntime_shift[prio]"]
+        class FOLD algo
+
+        PRIO["priority via vruntime_shift
+KERNEL 1 / HIGH 2 / NORMAL 4 / LOW 7
+(lower shift → slower growth → more GPU time)"]
+
+        PRIO --> FOLD
+        FOLD --> QUEUE["unified rbtree
+sorted by vruntime"]
+        class QUEUE dec
+
+        REJOIN["re-join (rq_add_entity)
+restore_vruntime()
+min_vruntime normalization
+(built-in idle catch-up)"]
+        class REJOIN algo
+
+        REJOIN --> QUEUE
+
+        QUEUE --> SELECT["drm_sched_select_entity()
+first ready entity wins (credits-gated)
+passover → gpu_passovers (GPU→CPU feedback)"]
+        class SELECT algo
+
+        SELECT --> HW["GPU hardware ring"]
+    end
 ```
 
 ## Feature comparison
