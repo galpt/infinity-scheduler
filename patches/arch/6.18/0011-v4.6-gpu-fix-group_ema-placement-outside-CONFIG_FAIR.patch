@@ -1,7 +1,7 @@
-From 489fe63759a144b982cf2d7e4c3259a24ae1a5e4 Mon Sep 17 00:00:00 2001
+From 52f5d99c14ef3586cbdfbde80463c25350266b7d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sun, 26 Jul 2026 16:57:38 +0700
-Subject: [PATCH v4.6-gpu 6/6] v4.6-gpu: fix group_ema placement outside
+Date: Sat, 1 Aug 2026 07:50:52 +0700
+Subject: [PATCH 11/23] v4.6-gpu: fix group_ema placement outside
  CONFIG_FAIR_GROUP_SCHED guard
 
 The group_ema and group_ema_sleep_start fields in struct cfs_rq were
@@ -17,14 +17,14 @@ regardless of the FAIR_GROUP_SCHED config.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/sched.h | 8 ++++----
- 1 file changed, 4 insertions(+), 4 deletions(-)
+ kernel/sched/sched.h | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 22f34f7fd..5e3bf3175 100644
+index c01eb83e5..24f63cacb 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -716,6 +716,10 @@ struct cfs_rq {
+@@ -713,6 +713,10 @@ struct cfs_rq {
  		unsigned long	runnable_avg;
  	} removed;
  
@@ -35,17 +35,16 @@ index 22f34f7fd..5e3bf3175 100644
  #ifdef CONFIG_FAIR_GROUP_SCHED
  	u64			last_update_tg_load_avg;
  	unsigned long		tg_load_avg_contrib;
-@@ -749,10 +753,6 @@ struct cfs_rq {
- 	/* Locally cached copy of our task_group's idle value */
- 	int			idle;
+@@ -750,9 +754,6 @@ struct cfs_rq {
  
+ #ifdef CONFIG_CFS_BANDWIDTH
+ 	int			runtime_enabled;
 -	/* Infinity: aggregate group EMA and idle timestamp */
 -	u64			group_ema;
 -	u64			group_ema_sleep_start;
--
- # ifdef CONFIG_CFS_BANDWIDTH
- 	int			runtime_enabled;
+ 
  	s64			runtime_remaining;
+ 
 -- 
 2.55.0
 

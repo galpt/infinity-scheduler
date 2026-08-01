@@ -1,8 +1,8 @@
-From c8c53183ccc1324152714ab4b47d1375d897ff81 Mon Sep 17 00:00:00 2001
+From ffed152196457e772dda36dd633d3ddc18b87fcc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:42 +0700
-Subject: [PATCH 3/5] v4.5: Infinity RT scheduling -- adaptive RR timeslice and
- requeue safety valve
+Subject: [PATCH 03/23] v4.5: Infinity RT scheduling -- adaptive RR timeslice
+ and requeue safety valve
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -10,7 +10,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 32 insertions(+), 2 deletions(-)
 
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 7936d4333..7b0444fb2 100644
+index 3e81b9d83..ccf9e2625 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
@@ -64,7 +64,7 @@ index 7936d4333..7b0444fb2 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -2512,6 +2531,17 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2517,6 +2536,17 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  
  	watchdog(rq, p);
  
@@ -82,7 +82,7 @@ index 7936d4333..7b0444fb2 100644
  	/*
  	 * RR tasks need a special form of time-slice management.
  	 * FIFO tasks have no timeslices.
-@@ -2522,7 +2552,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2527,7 +2557,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
  

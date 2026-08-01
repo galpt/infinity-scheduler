@@ -1,8 +1,8 @@
-From bfb01508e9bf554f6ab97c650cdfe6d57538ada4 Mon Sep 17 00:00:00 2001
+From 72e3b66a73b99b80b4d203b6ed05c48e97158b85 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sun, 26 Jul 2026 16:23:31 +0700
-Subject: [PATCH v4.6-gpu 3/6] v4.6-gpu: add CPU-to-GPU cross-scheduler
- interactive coupling
+Date: Sat, 1 Aug 2026 07:46:40 +0700
+Subject: [PATCH 08/23] v4.6-gpu: add CPU-to-GPU cross-scheduler interactive
+ coupling
 
 Add a pid-based cross-scheduler signal path from the CPU scheduler to
 the GPU scheduler:
@@ -80,7 +80,7 @@ index 09909eb7c..7a5d59358 100644
  EXPORT_SYMBOL(drm_sched_entity_fini);
  
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index f274c4521..df89d26ef 100644
+index 8a9242d9a..0640d4819 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -196,6 +196,45 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -130,7 +130,7 @@ index f274c4521..df89d26ef 100644
  
  	switch (entity->priority) {
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 19a835846..8891662b3 100644
+index ae84455a5..61932bb89 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -26,6 +26,7 @@

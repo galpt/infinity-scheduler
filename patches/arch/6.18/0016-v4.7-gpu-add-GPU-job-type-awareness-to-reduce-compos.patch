@@ -1,7 +1,7 @@
-From da911dc096dffa0bf45ec3be9f9400b6cc224b2b Mon Sep 17 00:00:00 2001
+From 518d9817191585f9020c936fc83cb95056e9c976 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 28 Jul 2026 07:12:37 +0700
-Subject: [PATCH v4.7-gpu 2/3] v4.7-gpu: add GPU job-type awareness to reduce
+Date: Sat, 1 Aug 2026 07:56:22 +0700
+Subject: [PATCH 16/23] v4.7-gpu: add GPU job-type awareness to reduce
  compositor penalty
 
 Track per-entity submission interval in gpu_last_submit_interval.
@@ -16,7 +16,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  2 files changed, 36 insertions(+)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 6957208ec..05cc8554e 100644
+index a801691aa..c0301a365 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -260,6 +260,23 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -60,7 +60,7 @@ index 6957208ec..05cc8554e 100644
  
  	entity->cached_gpu_vtime = drm_sched_entity_calc_vtime(entity);
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index bdaf46ba3..232a2c7b5 100644
+index 000287d05..22b87dbab 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -255,6 +255,15 @@ struct drm_sched_entity {
@@ -79,7 +79,7 @@ index bdaf46ba3..232a2c7b5 100644
  	/**
  	 * @cached_gpu_vtime: Snapshotted vtime, immutable while in rbtree.
  	 * Protected by rq->lock.
-@@ -833,6 +842,7 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -781,6 +790,7 @@ void drm_sched_entity_modify_sched(struct drm_sched_entity *entity,
  #define INFINITY_GPU_EMA_CLIMB_NS       10000000ULL
  #define INFINITY_GPU_EMA_ALPHA          4
  #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL

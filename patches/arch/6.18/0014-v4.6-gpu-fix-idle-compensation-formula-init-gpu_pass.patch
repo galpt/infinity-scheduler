@@ -1,7 +1,7 @@
-From a49ae96d3ca0194a1ce2d4cf384fb0183f5b5ff3 Mon Sep 17 00:00:00 2001
+From 8f4f19a149b73d606412661b78ca95b3ae56e1e4 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Mon, 27 Jul 2026 19:14:40 +0700
-Subject: [PATCH v4.6-gpu] v4.6-gpu: fix idle compensation formula, init
+Date: Sat, 1 Aug 2026 07:54:40 +0700
+Subject: [PATCH 14/23] v4.6-gpu: fix idle compensation formula, init
  gpu_passovers on fork, clean up stats descriptions
 
 - Swap the terms in the idle compensation blend formula so that idle
@@ -28,7 +28,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  2 files changed, 7 insertions(+), 6 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index ebb3494d6..6957208ec 100644
+index 6b2896076..a801691aa 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -188,9 +188,9 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)

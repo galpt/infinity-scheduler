@@ -1,7 +1,7 @@
-From e36ba9fbbb19c42cab1c5b6d952033c81d6e89e5 Mon Sep 17 00:00:00 2001
+From 3abd59fac487e5cb5cafe6173ff5cc8706c6f939 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 25 Jul 2026 11:43:41 +0700
-Subject: [PATCH 1/5] v4.5: core Infinity scheduler infrastructure
+Date: Sat, 1 Aug 2026 07:41:20 +0700
+Subject: [PATCH 01/23] v4.5: core Infinity scheduler infrastructure
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
@@ -18,10 +18,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b469878de..86c5ade87 100644
+index 5dea369fc..77ef536f1 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -816,6 +816,15 @@ struct kmap_ctrl {
+@@ -817,6 +817,15 @@ struct kmap_ctrl {
  #endif
  };
  
@@ -37,7 +37,7 @@ index b469878de..86c5ade87 100644
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -870,6 +879,7 @@ struct task_struct {
+@@ -871,6 +880,7 @@ struct task_struct {
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
@@ -92,7 +92,7 @@ index 8ae86371d..601556b31 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index f754a60de..cb9589c41 100644
+index b5b5897b5..b16494fc5 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -93,6 +93,7 @@
@@ -103,7 +103,7 @@ index f754a60de..cb9589c41 100644
  #include "smp.h"
  
  #include "../workqueue_internal.h"
-@@ -4732,6 +4733,11 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
+@@ -4739,6 +4740,11 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
  
  	init_entity_runnable_average(&p->se);
  
@@ -518,10 +518,10 @@ index 000000000..d0caf0586
 +				   unsigned int rr_default);
 +#endif /* __INFINITY_SCHED_H */
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index adfb6e340..aac00f72e 100644
+index 668841022..c01eb83e5 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -749,6 +749,10 @@ struct cfs_rq {
+@@ -750,6 +750,10 @@ struct cfs_rq {
  
  #ifdef CONFIG_CFS_BANDWIDTH
  	int			runtime_enabled;

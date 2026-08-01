@@ -1,8 +1,8 @@
-From dcc520da34f8c8a27453df771057e4e8345529bd Mon Sep 17 00:00:00 2001
+From 135d4cf93f71ca1a285e6ce877aed02d766abb7f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 1 Aug 2026 06:31:28 +0700
-Subject: [PATCH] v4.7-gpu: apply cgroup EMA decay when a migrated task ends an
- idle period
+Date: Sat, 1 Aug 2026 07:58:55 +0700
+Subject: [PATCH 23/23] v4.7-gpu: apply cgroup EMA decay when a migrated task
+ ends an idle period
 
 The group EMA idle window (group_ema_sleep_start) was only consumed on
 ENQUEUE_WAKEUP.  When a task arrived via ENQUEUE_MIGRATED, the window
@@ -19,10 +19,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 21 insertions(+), 18 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index ac79e6626..1a5818514 100644
+index 5de92adad..c0d3a3db7 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7318,27 +7318,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7103,27 +7103,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
  		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
  			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);

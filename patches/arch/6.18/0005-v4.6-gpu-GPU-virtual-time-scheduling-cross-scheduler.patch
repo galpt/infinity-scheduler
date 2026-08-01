@@ -1,7 +1,7 @@
-From e3896e55411923c440deba5a35582442b23d43fe Mon Sep 17 00:00:00 2001
+From 9ca5d6a3d152b82a41dd2013ca4bd38e7f4f3b46 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 25 Jul 2026 11:37:15 +0700
-Subject: [PATCH 5/5] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
+Date: Sat, 1 Aug 2026 07:43:40 +0700
+Subject: [PATCH 05/23] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
  boost, idle-start, deferred accounting, em dash fix
 
 Includes timeout path UAF fix: clear infinity_entity under job_list_lock
@@ -123,7 +123,7 @@ index fe174a485..09909eb7c 100644
  		spin_unlock(&rq->lock);
  		spin_unlock(&entity->lock);
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 21dc82c75..73fa33af4 100644
+index 3f138776d..589534831 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -84,14 +84,7 @@
@@ -296,9 +296,9 @@ index 21dc82c75..73fa33af4 100644
 -			      struct drm_sched_rq *rq)
 -{
 -	struct drm_sched_entity *entity;
- 
+-
 -	spin_lock(&rq->lock);
- 
+-
 -	entity = rq->current_entity;
 -	if (entity) {
 -		list_for_each_entry_continue(entity, &rq->entities, list) {
@@ -332,10 +332,10 @@ index 21dc82c75..73fa33af4 100644
 -	}
 -
 -	spin_unlock(&rq->lock);
--
+ 
 -	return entity;
 -}
--
+ 
 -/**
 - * drm_sched_rq_select_entity_fifo - Select an entity which provides a job to run
 - *
@@ -439,7 +439,7 @@ index 21dc82c75..73fa33af4 100644
  		spin_unlock(&sched->job_list_lock);
  
  		status = job->sched->ops->timedout_job(job);
-@@ -1098,18 +1125,16 @@ static struct drm_sched_entity *
+@@ -1096,18 +1123,16 @@ static struct drm_sched_entity *
  drm_sched_select_entity(struct drm_gpu_scheduler *sched)
  {
  	struct drm_sched_entity *entity;
@@ -466,7 +466,7 @@ index 21dc82c75..73fa33af4 100644
  	return IS_ERR(entity) ? NULL : entity;
  }
  
-@@ -1138,6 +1163,37 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
+@@ -1136,6 +1161,37 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
  		/* remove job from pending_list */
  		list_del_init(&job->list);
  
@@ -504,7 +504,7 @@ index 21dc82c75..73fa33af4 100644
  		/* cancel this job's TO timer */
  		cancel_delayed_work(&sched->work_tdr);
  
-@@ -1255,6 +1311,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
+@@ -1248,6 +1304,9 @@ static void drm_sched_run_job_work(struct work_struct *w)
  		return;
  	}
  
@@ -515,7 +515,7 @@ index 21dc82c75..73fa33af4 100644
  
  	atomic_add(sched_job->credits, &sched->credit_count);
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 1229f1e29..99b16a86f 100644
+index eb47bc39e..cede76aa8 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -235,18 +235,26 @@ struct drm_sched_entity {
@@ -589,7 +589,7 @@ index 1229f1e29..99b16a86f 100644
  	enum drm_sched_priority		s_priority;
  	u32				credits;
  	/** @last_dependency: tracks @dependencies as they signal */
-@@ -803,4 +813,12 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -751,4 +761,12 @@ void drm_sched_entity_modify_sched(struct drm_sched_entity *entity,
  #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
  #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
  
@@ -603,10 +603,10 @@ index 1229f1e29..99b16a86f 100644
 +
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 02e549316..8a06e5f3c 100644
+index 3e2246b8e..a8af94d40 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5600,8 +5600,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5395,8 +5395,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	 * reducing IPC wakeup latency.
  	 */
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
@@ -1005,10 +1005,10 @@ index d0caf0586..bf6e23be3 100644
  /* ------------------------------------------------------------------ */
  void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 22706ee12..a5ce551f5 100644
+index ccf9e2625..d168cb288 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
-@@ -2567,6 +2567,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2544,6 +2544,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
  		requeue_task_rt(rq, p, 0);
  		resched_curr(rq);

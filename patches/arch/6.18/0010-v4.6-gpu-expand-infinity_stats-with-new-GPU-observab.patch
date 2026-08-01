@@ -1,7 +1,7 @@
-From 1de4398fd2254033f528cbcd571c8f341197bd0e Mon Sep 17 00:00:00 2001
+From d4bb70632b7ea182835495d9670a14664d435584 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sun, 26 Jul 2026 16:34:53 +0700
-Subject: [PATCH v4.6-gpu 5/6] v4.6-gpu: expand infinity_stats with new GPU
+Date: Sat, 1 Aug 2026 07:46:51 +0700
+Subject: [PATCH 10/23] v4.6-gpu: expand infinity_stats with new GPU
  observability counters
 
 Add four new counters to infinity_stats for diagnosing GPU scheduling
@@ -32,7 +32,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  4 files changed, 54 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 4ce912987..fb335dd97 100644
+index ff4076586..d0720b2d3 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -192,6 +192,8 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -63,10 +63,10 @@ index 4ce912987..fb335dd97 100644
  	}
  
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index 8891662b3..bdaf46ba3 100644
+index 61932bb89..000287d05 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
-@@ -842,5 +842,9 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+@@ -790,5 +790,9 @@ void drm_sched_entity_modify_sched(struct drm_sched_entity *entity,
  extern atomic_t infinity_gpu_completion_callbacks;
  extern atomic_t infinity_gpu_accounting_applied;
  extern atomic_t infinity_gpu_accounting_skipped;

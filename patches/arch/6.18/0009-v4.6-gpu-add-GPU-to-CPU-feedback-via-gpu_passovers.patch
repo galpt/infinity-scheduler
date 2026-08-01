@@ -1,8 +1,7 @@
-From c774f0c2f25cb5e02d3d45d765d1d54a9299e6cd Mon Sep 17 00:00:00 2001
+From 4374d2923828bc69176e2494bb7304126fd18899 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sun, 26 Jul 2026 16:27:40 +0700
-Subject: [PATCH v4.6-gpu 4/6] v4.6-gpu: add GPU-to-CPU feedback via
- gpu_passovers
+Date: Sat, 1 Aug 2026 07:46:40 +0700
+Subject: [PATCH 09/23] v4.6-gpu: add GPU-to-CPU feedback via gpu_passovers
 
 Add a closed-loop feedback path from the GPU scheduler back to the
 CPU side to break compounding GPU+CPU starvation:
@@ -43,7 +42,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  4 files changed, 57 insertions(+)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index df89d26ef..4ce912987 100644
+index 0640d4819..ff4076586 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -423,6 +423,35 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
@@ -83,7 +82,7 @@ index df89d26ef..4ce912987 100644
  		return entity;
  	}
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 0a2ceb24d..5c7d97f9a 100644
+index 77ef536f1..c77a9bcd3 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -824,6 +824,14 @@ struct infinity_ctx {
