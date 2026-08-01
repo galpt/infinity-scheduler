@@ -1,6 +1,6 @@
-From a25a9c18613653c11197c021890d08d75015d46d Mon Sep 17 00:00:00 2001
+From 6864b60fe516189a3af7ddb22ed0c28528321f43 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Sat, 1 Aug 2026 13:28:53 +0700
+Date: Sat, 1 Aug 2026 14:31:04 +0700
 Subject: [PATCH 24/24] v4.7-gpu: fix infinity_stats sysctl read returning
  EFAULT
 
@@ -15,15 +15,29 @@ which writes into the kernel buffer with memcpy and preserves partial-
 read, EOF and trailing-newline behavior.  Read-only semantics are
 unchanged.
 
+While here, restore the description-column separator to 32 characters to
+match the %-30s rows again; the 27-character separator no longer lined
+up with the row borders once the descriptions grew.  The separator is
+declared without const to stay within checkpatch's 100-column limit.
+
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/infinity_sched.c | 10 ++++++++--
- 1 file changed, 8 insertions(+), 2 deletions(-)
+ kernel/sched/infinity_sched.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index f105c929a..341e73bdb 100644
+index f105c929a..098020571 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
+@@ -233,7 +233,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	 *   | %-22s | %13s | %-30s |
+ 	 *   +------------------------+---------------+--------------------------------+
+ 	 */
+-	const char *SEP = "+------------------------+---------------+---------------------------+";
++	char *SEP = "+------------------------+---------------+--------------------------------+";
+ 	const char *ROW = "| %-22s | %13s | %-30s |\n";
+ 
+ 	if (write)
 @@ -421,8 +421,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  			"Verdict: Accounting mismatch detected -- see above for details\n",
  			bufsz);
