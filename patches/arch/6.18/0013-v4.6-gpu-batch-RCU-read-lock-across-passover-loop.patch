@@ -1,4 +1,4 @@
-From 305b9171272ffc650991b908f8551fdd89a69e5b Mon Sep 17 00:00:00 2001
+From 99c7cc05f8c83f38afd2447f5c3d45cc78e3f648 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:54:40 +0700
 Subject: [PATCH 13/23] v4.6-gpu: batch RCU read lock across passover loop
@@ -15,10 +15,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 58db586b1..6b2896076 100644
+index 9d91e1607..0b9fedff8 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
-@@ -434,6 +434,7 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+@@ -435,6 +435,7 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
  		if (entity->infinity_pid) {
  			struct rb_node *rb2;
  
@@ -26,7 +26,7 @@ index 58db586b1..6b2896076 100644
  			for (rb2 = rb_next(rb); rb2; rb2 = rb_next(rb2)) {
  				struct drm_sched_entity *e2;
  				struct task_struct *p;
-@@ -445,12 +446,11 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+@@ -446,12 +447,11 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
  				if (!e2->infinity_pid)
  					continue;
  

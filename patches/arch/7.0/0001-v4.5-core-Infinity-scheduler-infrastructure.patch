@@ -1,22 +1,43 @@
-From bb0f69913978bbd64a4b31ea6bed7f0d4369856e Mon Sep 17 00:00:00 2001
+From d27f88702dee666df9e3a4838b1963c8a644005f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:40 +0700
-Subject: [PATCH 1/5] v4.5: core Infinity scheduler infrastructure
+Subject: [PATCH 01/23] v4.5: core Infinity scheduler infrastructure
+
+Add struct infinity_ctx to task_struct, futex_waiting flag for IPC
+wakeup boost, infinity_sched.c/h algorithm implementation, fork init
+in sched_fork(), cfs_rq group_ema/cgroup fields, infinity_version
+sysctl, and scheduler Makefile entry.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
+ MAINTAINERS                   |   7 +
  include/linux/sched.h         |  10 ++
  init/init_task.c              |   8 ++
  kernel/futex/waitwake.c       |   6 +-
  kernel/sched/Makefile         |   1 +
- kernel/sched/core.c           |   6 +
- kernel/sched/infinity_sched.c | 234 ++++++++++++++++++++++++++++++++++
- kernel/sched/infinity_sched.h | 156 +++++++++++++++++++++++
+ kernel/sched/core.c           |   7 +
+ kernel/sched/infinity_sched.c | 241 ++++++++++++++++++++++++++++++++++
+ kernel/sched/infinity_sched.h | 156 ++++++++++++++++++++++
  kernel/sched/sched.h          |   4 +
- 8 files changed, 424 insertions(+), 1 deletion(-)
+ 9 files changed, 439 insertions(+), 1 deletion(-)
  create mode 100644 kernel/sched/infinity_sched.c
  create mode 100644 kernel/sched/infinity_sched.h
 
+diff --git a/MAINTAINERS b/MAINTAINERS
+index d1cc0e12f..b0df49894 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -29213,3 +29213,10 @@ S:	Buried alive in reporters
+ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+ F:	*
+ F:	*/
++
++INFINITY SCHEDULER
++M:	Galih Tama <galpt@v.recipes>
++L:	https://github.com/galpt/infinity-scheduler
++S:	Maintained
++F:	kernel/sched/infinity_sched.c
++F:	kernel/sched/infinity_sched.h
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index d41e7a8f9..88cebf967 100644
 --- a/include/linux/sched.h
@@ -92,7 +113,7 @@ index b1f1a3670..9bea3857e 100644
  obj-y += build_utility.o
 +obj-y += infinity_sched.o
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 567b1b1ef..4fbf61f49 100644
+index 567b1b1ef..1f8ec7035 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -93,6 +93,7 @@
@@ -103,13 +124,14 @@ index 567b1b1ef..4fbf61f49 100644
  #include "smp.h"
  
  #include "../workqueue_internal.h"
-@@ -4682,6 +4683,11 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
+@@ -4682,6 +4683,12 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
  
  	init_entity_runnable_average(&p->se);
  
 +	/* Infinity: initialise EMA context for all scheduling classes */
 +	{
 +		struct rq *rq = this_rq();
++
 +		infinity_fork_init(&p->infinity, READ_ONCE(rq->clock));
 +	}
  
@@ -117,11 +139,11 @@ index 567b1b1ef..4fbf61f49 100644
  	if (likely(sched_info_on()))
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 new file mode 100644
-index 000000000..682ddfb67
+index 000000000..88ecf8b74
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.c
-@@ -0,0 +1,234 @@
-+/* SPDX-License-Identifier: GPL-2.0 */
+@@ -0,0 +1,241 @@
++// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
 + *
@@ -151,18 +173,19 @@ index 000000000..682ddfb67
 +/* ------------------------------------------------------------------ */
 +unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 +static int infinity_running_flag = 1;
-+static char infinity_version[] = "v4.6-gpu";
++static const char infinity_version[] = "v4.6-gpu";
 +static int clamp_smt_divisor(const struct ctl_table *table, int write,
 +			     void *buf, size_t *lenp, loff_t *ppos)
 +{
++	unsigned long old;
 +	int ret;
-+	unsigned long old, val;
-+	struct ctl_table tmp = *table;
++
 +	old = READ_ONCE(infinity_tune_smt_divisor);
-+	val = old;
-+	tmp.data = &val;
-+	ret = proc_doulongvec_minmax(&tmp, write, buf, lenp, ppos);
++	ret = proc_doulongvec_minmax(table, write, buf, lenp, ppos);
 +	if (write && ret == 0) {
++		unsigned long val;
++
++		val = READ_ONCE(infinity_tune_smt_divisor);
 +		val = clamp(val, INFINITY_SMT_DIVISOR_MIN, INFINITY_SMT_DIVISOR_MAX);
 +		if (val != old)
 +			pr_info("Infinity: smt_divisor %lu -> %lu\n", old, val);
@@ -170,7 +193,7 @@ index 000000000..682ddfb67
 +	}
 +	return ret;
 +}
-+static struct ctl_table infinity_sysctl_table[] = {
++static const struct ctl_table infinity_sysctl_table[] = {
 +	{
 +		.procname	= "infinity_smt_divisor",
 +		.data		= &infinity_tune_smt_divisor,
@@ -257,6 +280,7 @@ index 000000000..682ddfb67
 +	 */
 +	{
 +		u64 periods, residual;
++
 +		periods = div64_u64_rem(sleep_ns, 24000000ULL, &residual);
 +		if (periods > 63) {
 +			ctx->ema = 0;
@@ -290,7 +314,8 @@ index 000000000..682ddfb67
 +/* ------------------------------------------------------------------ */
 +/* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
 + *  prev_ema, infinity_slice, infinity_vruntime_scale,                  *
-+ *  infinity_wakeup_scale.  All subsumed by weight modulation.)         */
++ *  infinity_wakeup_scale.  All subsumed by weight modulation.)
++ */
 +/* ------------------------------------------------------------------ */
 +/* ------------------------------------------------------------------ */
 +/* infinity_rt_consume -- EMA climb on RT runtime                       */
@@ -298,6 +323,7 @@ index 000000000..682ddfb67
 +void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 +{
 +	u64 step;
++
 +	if (unlikely(ctx->rt_ema >= INFINITY_RT_BUDGET_NS)) {
 +		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
 +		return;
@@ -305,7 +331,8 @@ index 000000000..682ddfb67
 +	/* Clamp delta_ns to prevent u64 overflow in the numerator for
 +	 * tickless (NO_HZ_FULL) configurations where delta_ns can span
 +	 * hundreds of seconds between calls.  Matches the same clamp
-+	 * used in infinity_consume for the Fair class. */
++	 * used in infinity_consume for the Fair class.
++	 */
 +	if (delta_ns > INFINITY_RT_BUDGET_NS)
 +		delta_ns = INFINITY_RT_BUDGET_NS;
 +	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
@@ -319,6 +346,7 @@ index 000000000..682ddfb67
 +void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 +{
 +	u64 periods, residual;
++
 +	if (sleep_ns == 0)
 +		return;
 +	periods = div64_u64_rem(sleep_ns, 160000000ULL, &residual);
@@ -346,6 +374,7 @@ index 000000000..682ddfb67
 +				   unsigned int rr_default)
 +{
 +	u64 decay_pct;
++
 +	if (!p->infinity.rt_ema)
 +		return rr_default;
 +	decay_pct = div64_u64(p->infinity.rt_ema * 90ULL,
@@ -357,7 +386,7 @@ index 000000000..682ddfb67
 +}
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
 new file mode 100644
-index 000000000..d0caf0586
+index 000000000..e6a9db06b
 --- /dev/null
 +++ b/kernel/sched/infinity_sched.h
 @@ -0,0 +1,156 @@
@@ -370,11 +399,11 @@ index 000000000..d0caf0586
 + * Architecture:
 + *
 + *   fair.c (Linux scheduler)         infinity_sched.c (Infinity algorithm)
-+ *   ──────────────────────────       ─────────────────────────────────────
++ *   ────────────────   ──────────────
 + *   update_deadline()        ──call──► infinity_update_weight() -- EMA weight
 + *   update_curr()            ──call──► infinity_consume()       -- EMA budget
 + *   enqueue_task_fair()      ──call──► infinity_wakeup()        -- EMA decay
-+ *   place_entity()           ──check──► futex_waiting            -- halve vslice on futex wakeup
++ *   place_entity()   ──check──► futex_waiting   -- halve vslice on wakeup
 + *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  -- sleep tracking
 + *   update_curr_rt()         ──call──► infinity_rt_consume()    -- RT EMA climb
 + *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     -- RT EMA decay

@@ -1,7 +1,7 @@
-From 07151479afce23c1b45a1cfc9aec3f78cad4e43f Mon Sep 17 00:00:00 2001
+From 320977a43e2a44e4aa21d69cf92d55c708b2fb58 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 18:24:46 +0700
-Subject: [PATCH v4.6-gpu] v4.6-gpu: fix stats double-count, column widths,
+Subject: [PATCH 12/23] v4.6-gpu: fix stats double-count, column widths,
  coupling guards
 
 - Remove double-count of infinity_gpu_accounting_applied: keep the
@@ -55,7 +55,7 @@ index 7a5d59358..f5557c3cb 100644
  EXPORT_SYMBOL(drm_sched_entity_fini);
  
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index fb335dd97..a4018d3c8 100644
+index b8234f3f7..6fdaa44d5 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -198,7 +198,6 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -74,7 +74,7 @@ index fb335dd97..a4018d3c8 100644
  
  	vtime = effective_total;
  
-@@ -312,7 +310,6 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
+@@ -313,7 +311,6 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
  				climb_ns * INFINITY_GPU_EMA_ALPHA,
  				INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
  
@@ -82,7 +82,7 @@ index fb335dd97..a4018d3c8 100644
  			atomic_inc(&infinity_gpu_lock_drain_rounds);
  		}
  	}
-@@ -429,7 +426,6 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+@@ -430,7 +427,6 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
  		if (entity->cached_gpu_vtime > rq->min_gpu_vtime)
  			rq->min_gpu_vtime = entity->cached_gpu_vtime;
  
@@ -90,7 +90,7 @@ index fb335dd97..a4018d3c8 100644
  		/* GPU-to-CPU feedback: increment gpu_passovers on all other
  		 * ready entities that are further right in the rbtree (higher
  		 * vtime), so their owning tasks' CPU-side infinity_wakeup()
-@@ -456,7 +452,6 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+@@ -457,7 +453,6 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
  				rcu_read_unlock();
  			}
  		}
@@ -99,10 +99,10 @@ index fb335dd97..a4018d3c8 100644
  		spin_unlock(&rq->lock);
  		return entity;
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 02faf4413..1f05807c6 100644
+index f760ce087..237d4a9c3 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -200,14 +200,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -205,14 +205,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	/*
  	 * Table layout (printf-style, auto-aligned):
  	 *
@@ -116,12 +116,12 @@ index 02faf4413..1f05807c6 100644
  	 */
 -	const char *SEP = "+------------------------+---------------+----------------------------+";
 -	const char *ROW = "| %-22s | %13s | %-26s |\n";
-+	const char *SEP = "+------------------------+---------------+--------------------------------+";
++	const char *SEP = "+------------------------+---------------+---------------------------+";
 +	const char *ROW = "| %-22s | %13s | %-30s |\n";
  
  	if (write)
  		return -EROFS;
-@@ -368,17 +365,17 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -377,17 +374,17 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  			bufsz);
  	}
  
@@ -142,8 +142,8 @@ index 02faf4413..1f05807c6 100644
 -		strlcat(buf, "Verdict: No GPU jobs recorded yet\n",
 -			bufsz);
  
- 	{
- 		struct ctl_table tmp = *ctl;
+ 	*lenp = simple_read_from_buffer(buffer, *lenp, ppos, buf,
+ 					strnlen(buf, bufsz));
 -- 
 2.55.0
 

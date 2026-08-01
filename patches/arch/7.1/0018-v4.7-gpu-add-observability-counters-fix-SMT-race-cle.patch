@@ -1,7 +1,7 @@
-From 56fec00448dbc41eea26ef280491cddbfef4ce46 Mon Sep 17 00:00:00 2001
+From 14b41a43c2509a01811bb9e779a7895dbfcf0396 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 10:08:54 +0700
-Subject: [PATCH 46/51] v4.7-gpu: add observability counters, fix SMT race,
+Subject: [PATCH 18/23] v4.7-gpu: add observability counters, fix SMT race,
  clean up exports
 
 Add infinity_cpufreq_interactive_count and infinity_smt_interactive_count
@@ -12,11 +12,11 @@ declarations per kernel convention.  Update version to v4.7-gpu.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- fs/proc/base.c                |  4 ---
- kernel/sched/fair.c           | 10 +++++---
- kernel/sched/infinity_sched.c | 48 +++++++++++++++++++++--------------
- kernel/sched/infinity_sched.h |  4 ++-
- 4 files changed, 38 insertions(+), 28 deletions(-)
+ fs/proc/base.c                |  4 ----
+ kernel/sched/fair.c           | 10 ++++++----
+ kernel/sched/infinity_sched.c | 30 ++++++++++++++++++++----------
+ kernel/sched/infinity_sched.h |  4 +++-
+ 4 files changed, 29 insertions(+), 19 deletions(-)
 
 diff --git a/fs/proc/base.c b/fs/proc/base.c
 index 44565014c..98818ff40 100644
@@ -49,13 +49,13 @@ index 44565014c..98818ff40 100644
  	REG("timens_offsets",  S_IRUGO|S_IWUSR, proc_timens_offsets_operations),
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 4a5efc3a2..10afc6d0a 100644
+index 106f555ba..4fbef41d3 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5898,8 +5898,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
- 	 */
+@@ -5904,8 +5904,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	if (entity_is_task(se)) {
  		struct task_struct *p = task_of(se);
+ 
 -		if (p->infinity.ema == 0)
 +		if (p->infinity.ema == 0) {
  			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
@@ -64,7 +64,7 @@ index 4a5efc3a2..10afc6d0a 100644
  	}
  
  	return se;
-@@ -9085,7 +9087,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9093,7 +9095,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  	if (wake_flags & WF_TTWU) {
  		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
  
@@ -72,7 +72,7 @@ index 4a5efc3a2..10afc6d0a 100644
  		/* SMT interactive placement: if the selected CPU is an SMT
  		 * thread with a busy sibling, and the waking task has low
  		 * EMA, try the primary thread of the same core instead.
-@@ -9097,10 +9098,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9105,10 +9106,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  				topology_sibling_cpumask(new_cpu));
  
  			if (primary != new_cpu &&
@@ -87,7 +87,7 @@ index 4a5efc3a2..10afc6d0a 100644
  		return new_cpu;
  	}
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index b91d23892..aca481ce8 100644
+index d8badbd07..054865196 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -2,7 +2,7 @@
@@ -99,40 +99,10 @@ index b91d23892..aca481ce8 100644
   *
   * Fully continuous limit-based scheduling:
   *
-@@ -30,36 +30,36 @@
- /* Stats counters                                                      */
- /* ------------------------------------------------------------------ */
- atomic_t infinity_futex_boost_count	= ATOMIC_INIT(0);
--atomic_t infinity_ema_climb_count	= ATOMIC_INIT(0);
--atomic_t infinity_wakeup_count		= ATOMIC_INIT(0);
--atomic_t infinity_rt_throttle_count	= ATOMIC_INIT(0);
- EXPORT_SYMBOL(infinity_futex_boost_count);
-+atomic_t infinity_ema_climb_count	= ATOMIC_INIT(0);
- EXPORT_SYMBOL(infinity_ema_climb_count);
-+atomic_t infinity_wakeup_count		= ATOMIC_INIT(0);
- EXPORT_SYMBOL(infinity_wakeup_count);
-+atomic_t infinity_rt_throttle_count	= ATOMIC_INIT(0);
- EXPORT_SYMBOL(infinity_rt_throttle_count);
- atomic_t infinity_gpu_completion_callbacks	= ATOMIC_INIT(0);
-+EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
- atomic_t infinity_gpu_accounting_applied	= ATOMIC_INIT(0);
-+EXPORT_SYMBOL(infinity_gpu_accounting_applied);
- atomic_t infinity_gpu_accounting_skipped	= ATOMIC_INIT(0);
-+EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
- atomic_t infinity_gpu_passover_boosts		= ATOMIC_INIT(0);
--atomic_t infinity_gpu_idle_compensations	= ATOMIC_INIT(0);
--atomic_t infinity_gpu_cpu_coupling_activations	= ATOMIC_INIT(0);
--atomic_t infinity_gpu_lock_drain_rounds		= ATOMIC_INIT(0);
--EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
- EXPORT_SYMBOL(infinity_gpu_passover_boosts);
-+atomic_t infinity_gpu_idle_compensations	= ATOMIC_INIT(0);
- EXPORT_SYMBOL(infinity_gpu_idle_compensations);
-+atomic_t infinity_gpu_cpu_coupling_activations	= ATOMIC_INIT(0);
+@@ -52,15 +52,15 @@ atomic_t infinity_gpu_cpu_coupling_activations	= ATOMIC_INIT(0);
  EXPORT_SYMBOL(infinity_gpu_cpu_coupling_activations);
-+atomic_t infinity_gpu_lock_drain_rounds		= ATOMIC_INIT(0);
+ atomic_t infinity_gpu_lock_drain_rounds		= ATOMIC_INIT(0);
  EXPORT_SYMBOL(infinity_gpu_lock_drain_rounds);
--EXPORT_SYMBOL(infinity_gpu_accounting_applied);
--EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
 -/* ------------------------------------------------------------------ */
 -
 -
@@ -145,12 +115,12 @@ index b91d23892..aca481ce8 100644
  /* ------------------------------------------------------------------ */
  unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
  static int infinity_running_flag = 1;
--static char infinity_version[] = "v4.6-gpu";
+-static const char infinity_version[] = "v4.6-gpu";
 +static const char infinity_version[] = "v4.7-gpu";
  static int clamp_smt_divisor(const struct ctl_table *table, int write,
  			     void *buf, size_t *lenp, loff_t *ppos)
  {
-@@ -193,7 +193,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -198,7 +198,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  {
  	char *buf;
  	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
@@ -159,7 +129,7 @@ index b91d23892..aca481ce8 100644
  	char v1[16];
  	const size_t bufsz = 4096;
  
-@@ -224,10 +224,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -229,10 +229,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	gcca = (u64)(unsigned int)atomic_read(&infinity_gpu_cpu_coupling_activations);
  	gpbo = (u64)(unsigned int)atomic_read(&infinity_gpu_passover_boosts);
  	gldr = (u64)(unsigned int)atomic_read(&infinity_gpu_lock_drain_rounds);
@@ -173,7 +143,7 @@ index b91d23892..aca481ce8 100644
  
  	/* ---- CPU ---- */
  	strlcat(buf, "CPU\n", bufsz);
-@@ -264,8 +266,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -271,8 +273,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		  fill_pretty_llu(v1, sizeof(v1), wkc), "");
  
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
@@ -193,7 +163,7 @@ index b91d23892..aca481ce8 100644
  	strlcat(buf, SEP, bufsz);
  	strlcat(buf, "\n\n", bufsz);
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index dc10a0ff5..11d9c77a2 100644
+index 346092aa9..36983bd2d 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
 @@ -2,7 +2,7 @@

@@ -1,7 +1,7 @@
-From 480f867e8c55794249af1af8d3ad27a7296e904b Mon Sep 17 00:00:00 2001
+From 1f3844c3c365c2618f5e6fc164d55ef48980ccce Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 06:48:30 +0700
-Subject: [PATCH 49/51] v4.7-gpu: constrain interactive P-core bias to the home
+Subject: [PATCH 21/23] v4.7-gpu: constrain interactive P-core bias to the home
  NUMA node
 
 The asymmetric-capacity wakeup bias returned the first allowed
@@ -20,10 +20,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 32 insertions(+), 9 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 610655eb3..2ffa8f71c 100644
+index 624b10267..835424ef5 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8763,10 +8763,14 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8771,10 +8771,14 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			return cpu;
  
  		/*
@@ -42,7 +42,7 @@ index 610655eb3..2ffa8f71c 100644
  		 *
  		 * Lockless read of p->infinity.ema: only p->pi_lock is held
  		 * here, not rq->lock.  READ_ONCE prevents compiler tearing
-@@ -8774,17 +8778,36 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8782,17 +8786,36 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		 */
  		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
  			struct asym_cap_data *entry;

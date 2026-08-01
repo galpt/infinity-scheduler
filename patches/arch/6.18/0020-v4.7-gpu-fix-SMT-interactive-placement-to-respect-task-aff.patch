@@ -1,4 +1,4 @@
-From eeabacded7e1a37e500dbbba3c3aab09c9d046c4 Mon Sep 17 00:00:00 2001
+From f55928a120dff4082364ff98aa0023b45d45cd99 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:58:54 +0700
 Subject: [PATCH 20/23] v4.7-gpu: fix SMT interactive placement to respect task
@@ -20,10 +20,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 6 insertions(+)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index b0130b626..e91834447 100644
+index f64fe534b..a262453fb 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8897,7 +8897,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8905,7 +8905,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			int primary = cpumask_first(
  				topology_sibling_cpumask(new_cpu));
  

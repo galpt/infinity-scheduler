@@ -1,7 +1,7 @@
-From 1de4398fd2254033f528cbcd571c8f341197bd0e Mon Sep 17 00:00:00 2001
+From 2918543ab00fcb25a78bb4629deac0d03848e244 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:34:53 +0700
-Subject: [PATCH v4.6-gpu 5/6] v4.6-gpu: expand infinity_stats with new GPU
+Subject: [PATCH 10/23] v4.6-gpu: expand infinity_stats with new GPU
  observability counters
 
 Add four new counters to infinity_stats for diagnosing GPU scheduling
@@ -27,12 +27,12 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_main.c |  6 ++++
  include/drm/gpu_scheduler.h            |  4 +++
- kernel/sched/infinity_sched.c          | 44 ++++++++++++++++++++++++--
+ kernel/sched/infinity_sched.c          | 41 ++++++++++++++++++++++++--
  kernel/sched/infinity_sched.h          |  3 ++
- 4 files changed, 54 insertions(+), 3 deletions(-)
+ 4 files changed, 52 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 4ce912987..fb335dd97 100644
+index 31bb72396..33eaf6323 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -192,6 +192,8 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -54,7 +54,7 @@ index 4ce912987..fb335dd97 100644
  		effective_total -= coupling_boost;
  	}
  #endif
-@@ -308,6 +313,7 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
+@@ -309,6 +314,7 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
  				INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
  
  			atomic_inc(&infinity_gpu_accounting_applied);
@@ -77,33 +77,31 @@ index 8891662b3..bdaf46ba3 100644
  
  #endif
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 2239a0466..02faf4413 100644
+index 0197df93b..f760ce087 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -17,6 +17,7 @@
-  * (uclamp declarations, EMA tracking, futex_waiting flag).
+@@ -18,6 +18,7 @@
   */
+ #include <linux/fs.h>
  #include <linux/math64.h>
 +#include <linux/slab.h>
  #include <linux/sysctl.h>
  #include <linux/string.h>
  #include <uapi/linux/sched/types.h>
-@@ -40,8 +41,14 @@ atomic_t infinity_gpu_completion_callbacks	= ATOMIC_INIT(0);
- atomic_t infinity_gpu_accounting_applied	= ATOMIC_INIT(0);
- atomic_t infinity_gpu_accounting_skipped	= ATOMIC_INIT(0);
- atomic_t infinity_gpu_passover_boosts		= ATOMIC_INIT(0);
-+atomic_t infinity_gpu_idle_compensations	= ATOMIC_INIT(0);
-+atomic_t infinity_gpu_cpu_coupling_activations	= ATOMIC_INIT(0);
-+atomic_t infinity_gpu_lock_drain_rounds		= ATOMIC_INIT(0);
- EXPORT_SYMBOL(infinity_gpu_completion_callbacks);
- EXPORT_SYMBOL(infinity_gpu_passover_boosts);
-+EXPORT_SYMBOL(infinity_gpu_idle_compensations);
-+EXPORT_SYMBOL(infinity_gpu_cpu_coupling_activations);
-+EXPORT_SYMBOL(infinity_gpu_lock_drain_rounds);
- EXPORT_SYMBOL(infinity_gpu_accounting_applied);
+@@ -45,6 +46,12 @@ atomic_t infinity_gpu_accounting_skipped	= ATOMIC_INIT(0);
  EXPORT_SYMBOL(infinity_gpu_accounting_skipped);
+ atomic_t infinity_gpu_passover_boosts		= ATOMIC_INIT(0);
+ EXPORT_SYMBOL(infinity_gpu_passover_boosts);
++atomic_t infinity_gpu_idle_compensations	= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_gpu_idle_compensations);
++atomic_t infinity_gpu_cpu_coupling_activations	= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_gpu_cpu_coupling_activations);
++atomic_t infinity_gpu_lock_drain_rounds		= ATOMIC_INIT(0);
++EXPORT_SYMBOL(infinity_gpu_lock_drain_rounds);
  /* ------------------------------------------------------------------ */
-@@ -184,10 +191,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 
+@@ -189,10 +196,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  				       void *buffer, size_t *lenp,
  				       loff_t *ppos)
  {
@@ -117,7 +115,7 @@ index 2239a0466..02faf4413 100644
  
  	/*
  	 * Table layout (printf-style, auto-aligned):
-@@ -204,6 +212,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -209,6 +217,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	if (write)
  		return -EROFS;
  
@@ -128,7 +126,7 @@ index 2239a0466..02faf4413 100644
  	fbc  = (u64)(unsigned int)atomic_read(&infinity_futex_boost_count);
  	emc  = (u64)(unsigned int)atomic_read(&infinity_ema_climb_count);
  	wkc  = (u64)(unsigned int)atomic_read(&infinity_wakeup_count);
-@@ -211,6 +223,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -216,6 +228,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	gcb  = (u64)(unsigned int)atomic_read(&infinity_gpu_completion_callbacks);
  	gapp = (u64)(unsigned int)atomic_read(&infinity_gpu_accounting_applied);
  	gskp = (u64)(unsigned int)atomic_read(&infinity_gpu_accounting_skipped);
@@ -139,7 +137,7 @@ index 2239a0466..02faf4413 100644
  
  	buf[0] = '\0';
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
-@@ -306,6 +322,26 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -314,6 +330,26 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		  fill_pretty_llu(v1, sizeof(v1), gskp),
  		  "(entity_kill race)");
  
@@ -166,19 +164,16 @@ index 2239a0466..02faf4413 100644
  	strlcat(buf, SEP, bufsz);
  	strlcat(buf, "\n\n", bufsz);
  
-@@ -348,7 +384,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
- 		struct ctl_table tmp = *ctl;
- 		tmp.data = buf;
- 		tmp.maxlen = bufsz;
--		return proc_dostring(&tmp, write, buffer, lenp, ppos);
-+		proc_dostring(&tmp, write, buffer, lenp, ppos);
-+		kfree(buf);
-+		return 0;
- 	}
+@@ -355,6 +391,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 	*lenp = simple_read_from_buffer(buffer, *lenp, ppos, buf,
+ 					strnlen(buf, bufsz));
++	kfree(buf);
+ 	return 0;
  }
  /* ------------------------------------------------------------------ */
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index e70394fb0..dc10a0ff5 100644
+index f6692c525..346092aa9 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
 @@ -151,6 +151,9 @@ extern atomic_t infinity_ema_climb_count;

@@ -1,7 +1,7 @@
-From 2bc35572a430e6a8e56674a38f50c873ef99ed15 Mon Sep 17 00:00:00 2001
+From f72d21e603eb4bd58ebb8733c8bc64fa1bc74df6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 29 Jul 2026 22:06:05 +0700
-Subject: [PATCH 47/51] v4.7-gpu: fix RT demote threshold off-by-1000 causing
+Subject: [PATCH 19/23] v4.7-gpu: fix RT demote threshold off-by-1000 causing
  false-positive SCHED_FIFO requeues
 
 INFINITY_RT_DEMOTE_THRESHOLD was defined as 9500 (9.5 us) instead of
@@ -19,7 +19,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index 11d9c77a2..c83839405 100644
+index 36983bd2d..578821140 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
 @@ -136,8 +136,12 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)

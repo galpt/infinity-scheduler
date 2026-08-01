@@ -1,7 +1,7 @@
-From 397cc2eaa2774070478ec4434d090a5bfdfc904b Mon Sep 17 00:00:00 2001
+From a695a613d29df61e1f7884f28fbac7bbdc00d886 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 06:31:28 +0700
-Subject: [PATCH 51/51] v4.7-gpu: apply cgroup EMA decay when a migrated task
+Subject: [PATCH 23/23] v4.7-gpu: apply cgroup EMA decay when a migrated task
  ends an idle period
 
 The group EMA idle window (group_ema_sleep_start) was only consumed on
@@ -15,15 +15,15 @@ reflects the actual idle duration of the cfs_rq.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c | 39 +++++++++++++++++++++------------------
- 1 file changed, 21 insertions(+), 18 deletions(-)
+ kernel/sched/fair.c | 40 +++++++++++++++++++++-------------------
+ 1 file changed, 21 insertions(+), 19 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index ac79e6626..1a5818514 100644
+index 0b6f803f7..bd1ab7691 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7318,27 +7318,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
- 		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
+@@ -7325,28 +7325,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 
  		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
  			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);
 +	}
@@ -35,6 +35,7 @@ index ac79e6626..1a5818514 100644
 -		 */
 -		{
 -			struct cfs_rq *pcfs_rq = cfs_rq_of(&p->se);
+-
 -			if (pcfs_rq->group_ema_sleep_start) {
 -				u64 sleep_ns = now - pcfs_rq->group_ema_sleep_start;
 -				u64 periods = div64_u64(sleep_ns,

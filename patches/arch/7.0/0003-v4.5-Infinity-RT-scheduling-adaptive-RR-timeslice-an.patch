@@ -1,16 +1,20 @@
-From 9c811271c2b042ba8a3d83d1b3fad1de2168c44f Mon Sep 17 00:00:00 2001
+From 97521a44a6ec8de335e37790cbf364ffc2bdf58a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:40 +0700
-Subject: [PATCH 3/5] v4.5: Infinity RT scheduling -- adaptive RR timeslice and
- requeue safety valve
+Subject: [PATCH 03/23] v4.5: Infinity RT scheduling -- adaptive RR timeslice
+ and requeue safety valve
+
+infinity_rt_consume tracks rt_ema. infinity_rr_timeslice shrinks RR
+slice from 100ms to 10ms. task_tick_rt forces rogue SCHED_FIFO at
+95% rt_ema to yield via requeue_task_rt + resched_curr.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/rt.c | 34 ++++++++++++++++++++++++++++++++--
- 1 file changed, 32 insertions(+), 2 deletions(-)
+ kernel/sched/rt.c | 36 ++++++++++++++++++++++++++++++++++--
+ 1 file changed, 34 insertions(+), 2 deletions(-)
 
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 0cbee0318..65af4aefa 100644
+index 0cbee0318..11acf1ca2 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -6,6 +6,7 @@
@@ -33,7 +37,7 @@ index 0cbee0318..65af4aefa 100644
  #ifdef CONFIG_RT_GROUP_SCHED
  	struct sched_rt_entity *rt_se = &donor->rt;
  
-@@ -1432,9 +1438,18 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1432,9 +1438,19 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct sched_rt_entity *rt_se = &p->rt;
  
@@ -44,6 +48,7 @@ index 0cbee0318..65af4aefa 100644
 +		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
 +		if (p->infinity.rt_last_sleep_ns) {
 +			u64 now = rq_clock(rq);
++
 +			if (now > p->infinity.rt_last_sleep_ns)
 +				infinity_rt_wakeup(&p->infinity,
 +					now - p->infinity.rt_last_sleep_ns);
@@ -53,7 +58,7 @@ index 0cbee0318..65af4aefa 100644
  	check_schedstat_required();
  	update_stats_wait_start_rt(rt_rq_of_se(rt_se), rt_se);
  
-@@ -1454,6 +1469,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+@@ -1454,6 +1470,10 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  	update_curr_rt(rq);
  	dequeue_rt_entity(rt_se, flags);
  
@@ -64,13 +69,14 @@ index 0cbee0318..65af4aefa 100644
  	dequeue_pushable_task(rq, p);
  
  	return true;
-@@ -2535,6 +2554,17 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2535,6 +2555,18 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  
  	watchdog(rq, p);
  
 +	/* Infinity: force a rogue SCHED_FIFO (>95% rt_ema) to yield natively
 +	 * within the RT class -- no cross-class demotion needed.  Kernel
-+	 * threads (migration, watchdog, IRQ handlers) are exempt. */
++	 * threads (migration, watchdog, IRQ handlers) are exempt.
++	 */
 +	if (p->policy != SCHED_RR &&
 +	    !(p->flags & PF_KTHREAD) &&
 +	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
@@ -82,7 +88,7 @@ index 0cbee0318..65af4aefa 100644
  	/*
  	 * RR tasks need a special form of time-slice management.
  	 * FIFO tasks have no timeslices.
-@@ -2545,7 +2575,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2545,7 +2577,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	if (--p->rt.time_slice)
  		return;
  

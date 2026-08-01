@@ -1,7 +1,7 @@
-From 28c128e8e27df54cf8824140536943c4fee5c69a Mon Sep 17 00:00:00 2001
+From f8ddef082109f1016b6151e738c1d53f711ac6ec Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 06:47:52 +0700
-Subject: [PATCH 48/51] v4.7-gpu: fix SMT interactive placement to respect task
+Subject: [PATCH 20/23] v4.7-gpu: fix SMT interactive placement to respect task
  CPU affinity
 
 The SMT interactive placement hook could move a waking task to the
@@ -20,10 +20,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 6 insertions(+)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index a7eb211e7..610655eb3 100644
+index cba86099d..624b10267 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8840,7 +8840,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8848,7 +8848,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			int primary = cpumask_first(
  				topology_sibling_cpumask(new_cpu));
  

@@ -1,7 +1,7 @@
-From 489fe63759a144b982cf2d7e4c3259a24ae1a5e4 Mon Sep 17 00:00:00 2001
+From 429b51826eaca9bc29a01da14eae564687e056bd Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:57:38 +0700
-Subject: [PATCH v4.6-gpu 6/6] v4.6-gpu: fix group_ema placement outside
+Subject: [PATCH 11/23] v4.6-gpu: fix group_ema placement outside
  CONFIG_FAIR_GROUP_SCHED guard
 
 The group_ema and group_ema_sleep_start fields in struct cfs_rq were

@@ -1,7 +1,7 @@
-From 9c30e506eb921ccc9aad5f0bf65e97a796eddccc Mon Sep 17 00:00:00 2001
+From 45d313278d7bc9e87dd90933169d3a87fb4a40a0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:37 +0700
-Subject: [PATCH 44/51] v4.7-gpu: add GPU job-type awareness to reduce
+Subject: [PATCH 16/23] v4.7-gpu: add GPU job-type awareness to reduce
  compositor penalty
 
 Track per-entity submission interval in gpu_last_submit_interval.
@@ -11,19 +11,18 @@ reduction in the EMA burst penalty, while infrequent submitters
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_main.c | 26 ++++++++++++++++++++++++++
+ drivers/gpu/drm/scheduler/sched_main.c | 25 +++++++++++++++++++++++++
  include/drm/gpu_scheduler.h            | 10 ++++++++++
- 2 files changed, 36 insertions(+)
+ 2 files changed, 35 insertions(+)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index d04007c6a..b1a31cf35 100644
+index cd523b51f..2b6614228 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
-@@ -260,6 +260,23 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
- 		u64 ema_pct = div64_u64(entity->gpu_time_ema * 100ULL,
+@@ -261,6 +261,22 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
  					INFINITY_GPU_EMA_CLIMB_NS);
  		u64 boost = vtime * ema_pct / 100;
-+
+ 
 +		/* GPU job-type awareness: entities that submit jobs
 +		 * frequently (every 1-8ms) follow a compositor-like
 +		 * pattern -- many small, short-lived jobs.  These
@@ -43,7 +42,7 @@ index d04007c6a..b1a31cf35 100644
  		vtime += boost >> 1;
  	}
  
-@@ -325,6 +342,15 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
+@@ -326,6 +342,15 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
  		else if (periods)
  			entity->gpu_time_ema >>= periods;
  	}

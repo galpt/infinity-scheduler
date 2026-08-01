@@ -1,7 +1,7 @@
-From 51a0affbb87089411c5472b61b32f01708c6cdaa Mon Sep 17 00:00:00 2001
+From fcd65d0f72db70ade5631a2c4d9684caf961c5ff Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:36 +0700
-Subject: [PATCH 43/51] v4.7-gpu: add EMA-driven cpufreq hint for interactive
+Subject: [PATCH 15/23] v4.7-gpu: add EMA-driven cpufreq hint for interactive
  wakeups
 
 Add SCHED_CPUFREQ_INTERACTIVE flag alongside the existing IOWAIT flag.
@@ -72,19 +72,19 @@ index a4e689eef..985a91ede 100644
  		return;
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 03568168f..4a5efc3a2 100644
+index 82b53afe0..106f555ba 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5899,7 +5899,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
- 	if (entity_is_task(se)) {
+@@ -5905,7 +5905,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  		struct task_struct *p = task_of(se);
+ 
  		if (p->infinity.ema == 0)
 -			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 +			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
  	}
  
  	return se;
-@@ -9082,8 +9082,28 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9090,8 +9090,28 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		return sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
  
  	/* Fast path */

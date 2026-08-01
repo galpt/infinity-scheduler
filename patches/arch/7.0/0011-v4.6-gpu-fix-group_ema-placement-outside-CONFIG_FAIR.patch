@@ -1,7 +1,7 @@
-From 489fe63759a144b982cf2d7e4c3259a24ae1a5e4 Mon Sep 17 00:00:00 2001
+From fddd2b10d477d8d476648c6a12afa07a4937e0e8 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:57:38 +0700
-Subject: [PATCH v4.6-gpu 6/6] v4.6-gpu: fix group_ema placement outside
+Subject: [PATCH 11/23] v4.6-gpu: fix group_ema placement outside
  CONFIG_FAIR_GROUP_SCHED guard
 
 The group_ema and group_ema_sleep_start fields in struct cfs_rq were
@@ -21,10 +21,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 22f34f7fd..5e3bf3175 100644
+index 7d1933dd8..22f3a0514 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -716,6 +716,10 @@ struct cfs_rq {
+@@ -715,6 +715,10 @@ struct cfs_rq {
  		unsigned long	runnable_avg;
  	} removed;
  
@@ -35,7 +35,7 @@ index 22f34f7fd..5e3bf3175 100644
  #ifdef CONFIG_FAIR_GROUP_SCHED
  	u64			last_update_tg_load_avg;
  	unsigned long		tg_load_avg_contrib;
-@@ -749,10 +753,6 @@ struct cfs_rq {
+@@ -748,10 +752,6 @@ struct cfs_rq {
  	/* Locally cached copy of our task_group's idle value */
  	int			idle;
  

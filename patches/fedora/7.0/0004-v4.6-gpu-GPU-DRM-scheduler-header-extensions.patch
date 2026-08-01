@@ -1,7 +1,14 @@
-From 95f280f1d9783392fd7d24724cb1ed362fda0c69 Mon Sep 17 00:00:00 2001
+From 341c92b8f12c56a9f1735a871be73f026721e9f7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
-Subject: [PATCH 4/5] v4.6-gpu: GPU DRM scheduler header extensions
+Subject: [PATCH 04/23] v4.6-gpu: GPU DRM scheduler header extensions
+
+Extend the DRM scheduler data structures for Infinity's GPU virtual
+time scheduling: per-entity EMA/total/activity fields, the runqueue's
+monotonic minimum vtime, per-job entity tracking for completion
+accounting, and the Infinity GPU scheduling constants.  Rename
+drm_sched_rq_update_fifo_locked() to drm_sched_rq_update_vtime_locked()
+and drop the unused FIFO/RR policy externs.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---

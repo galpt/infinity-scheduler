@@ -1,7 +1,7 @@
-From 2390bfd660997e52853d28573a54c7f0db330f8c Mon Sep 17 00:00:00 2001
+From a15deab56814e8f4f2e2847abb3281077d340af6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 06:50:25 +0700
-Subject: [PATCH 50/51] v4.7-gpu: convert Infinity stat counters to per-CPU
+Subject: [PATCH 22/23] v4.7-gpu: convert Infinity stat counters to per-CPU
  atomics
 
 The global atomic stat counters are incremented from every CPU (the
@@ -26,7 +26,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  6 files changed, 94 insertions(+), 69 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index b1a31cf35..b6cda9ee8 100644
+index 2b6614228..6f50e49c4 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -193,7 +193,7 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -65,7 +65,7 @@ index b1a31cf35..b6cda9ee8 100644
  	}
  
  	trace_drm_sched_job_done(s_fence);
-@@ -1332,9 +1332,9 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
+@@ -1334,9 +1334,9 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
  				if (gpu_ns)
  					atomic64_add(gpu_ns,
  						     &inf_entity->pending_gpu_ns);
@@ -103,10 +103,10 @@ index 232a2c7b5..3ecc07dfc 100644
  
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 2ffa8f71c..7f7b1d905 100644
+index 835424ef5..846c230b1 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5353,7 +5353,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5358,7 +5358,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
  	    task_of(se)->infinity.futex_waiting) {
  		vslice >>= 1;
@@ -115,8 +115,8 @@ index 2ffa8f71c..7f7b1d905 100644
  	}
  
  	/*
-@@ -5660,7 +5660,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
- 		struct task_struct *p = task_of(se);
+@@ -5666,7 +5666,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 
  		if (p->infinity.ema == 0) {
  			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
 -			atomic_inc(&infinity_cpufreq_interactive_count);
@@ -124,7 +124,7 @@ index 2ffa8f71c..7f7b1d905 100644
  		}
  	}
  
-@@ -8872,7 +8872,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8880,7 +8880,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			    cpumask_test_cpu(primary, p->cpus_ptr) &&
  			    available_idle_cpu(primary)) {
  				new_cpu = primary;
@@ -134,10 +134,10 @@ index 2ffa8f71c..7f7b1d905 100644
  		}
  	}
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index aca481ce8..a49518bf9 100644
+index 054865196..c8065f01e 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -29,32 +29,38 @@
+@@ -30,32 +30,38 @@
  /* ------------------------------------------------------------------ */
  /* Stats counters                                                      */
  /* ------------------------------------------------------------------ */
@@ -202,7 +202,7 @@ index aca481ce8..a49518bf9 100644
  /* Sysctl tunables                                                     */
  /* ------------------------------------------------------------------ */
  unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
-@@ -187,6 +193,24 @@ static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
+@@ -192,6 +198,24 @@ static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
  /* ------------------------------------------------------------------ */
  /* Stats display handler                                               */
  /* ------------------------------------------------------------------ */
@@ -227,7 +227,7 @@ index aca481ce8..a49518bf9 100644
  static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  				       void *buffer, size_t *lenp,
  				       loff_t *ppos)
-@@ -213,19 +237,19 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -218,19 +242,19 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	if (!buf)
  		return -ENOMEM;
  
@@ -260,7 +260,7 @@ index aca481ce8..a49518bf9 100644
  
  	buf[0] = '\0';
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
-@@ -478,7 +502,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -483,7 +507,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  			 alpha,
  			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
  	ctx->ema += step;
@@ -269,7 +269,7 @@ index aca481ce8..a49518bf9 100644
  }
  /* ------------------------------------------------------------------ */
  /* infinity_wakeup -- EMA decay on wakeup                               */
-@@ -500,7 +524,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -505,7 +529,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			u64 extra_ns = sleep_ns * min(passovers, 8);
  
  			sleep_ns += extra_ns;
@@ -278,7 +278,7 @@ index aca481ce8..a49518bf9 100644
  		}
  	}
  
-@@ -529,7 +553,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -535,7 +559,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			}
  		}
  	}
@@ -288,7 +288,7 @@ index aca481ce8..a49518bf9 100644
  /* ------------------------------------------------------------------ */
  /* infinity_fork_init                                                   */
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index c83839405..18bf07d9f 100644
+index 578821140..83623a5da 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
 @@ -150,16 +150,16 @@ extern unsigned long infinity_tune_smt_divisor;
@@ -319,10 +319,10 @@ index c83839405..18bf07d9f 100644
  /* API -- called from fair.c and rt.c                                   */
  /* ------------------------------------------------------------------ */
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 634480322..a0d1c124b 100644
+index ce3ec3441..ff8ba38f5 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
-@@ -2562,7 +2562,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+@@ -2564,7 +2564,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
  	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
  		requeue_task_rt(rq, p, 0);
  		resched_curr(rq);

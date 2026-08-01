@@ -1,4 +1,4 @@
-From 72e3b66a73b99b80b4d203b6ed05c48e97158b85 Mon Sep 17 00:00:00 2001
+From 0de1d9ca0c2227e1d263895f4810b8c79d29a368 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:46:40 +0700
 Subject: [PATCH 08/23] v4.6-gpu: add CPU-to-GPU cross-scheduler interactive
@@ -80,7 +80,7 @@ index 09909eb7c..7a5d59358 100644
  EXPORT_SYMBOL(drm_sched_entity_fini);
  
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 8a9242d9a..0640d4819 100644
+index e7104b436..6b5be4e80 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -196,6 +196,45 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)

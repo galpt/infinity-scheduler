@@ -1,7 +1,7 @@
-From a49ae96d3ca0194a1ce2d4cf384fb0183f5b5ff3 Mon Sep 17 00:00:00 2001
+From 8fecbafbfbd6d6c3a5d75175a1c41bbee18fc2b8 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 27 Jul 2026 19:14:40 +0700
-Subject: [PATCH v4.6-gpu] v4.6-gpu: fix idle compensation formula, init
+Subject: [PATCH 14/23] v4.6-gpu: fix idle compensation formula, init
  gpu_passovers on fork, clean up stats descriptions
 
 - Swap the terms in the idle compensation blend formula so that idle
@@ -28,7 +28,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  2 files changed, 7 insertions(+), 6 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index ebb3494d6..6957208ec 100644
+index e4eac93e1..cd523b51f 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -188,9 +188,9 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
@@ -44,10 +44,10 @@ index ebb3494d6..6957208ec 100644
  
  		atomic_inc(&infinity_gpu_idle_compensations);
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 1f05807c6..b91d23892 100644
+index 237d4a9c3..d8badbd07 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -278,7 +278,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -285,7 +285,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
  		  "RT throttles",
  		  fill_pretty_llu(v1, sizeof(v1), rtc),
@@ -56,7 +56,7 @@ index 1f05807c6..b91d23892 100644
  
  	strlcat(buf, SEP, bufsz);
  	strlcat(buf, "\n\n", bufsz);
-@@ -335,9 +335,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -343,9 +343,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		  "passover EMA boost");
  
  	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
@@ -68,7 +68,7 @@ index 1f05807c6..b91d23892 100644
  
  	strlcat(buf, SEP, bufsz);
  	strlcat(buf, "\n\n", bufsz);
-@@ -530,7 +530,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+@@ -536,7 +536,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
  	ctx->rt_ema = 0;
  	ctx->last_sleep_ns = now;
  	ctx->rt_last_sleep_ns = 0;

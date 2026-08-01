@@ -1,4 +1,4 @@
-From a080663840ba004242feb8267c872d50987655fc Mon Sep 17 00:00:00 2001
+From 2d569f62c0e2c0708aa17d96ed1764a0d1faf4ba Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:43:51 +0700
 Subject: [PATCH 07/23] v4.6-gpu: replace fixed catch-up with proportional idle
@@ -27,14 +27,14 @@ Properties:
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- drivers/gpu/drm/scheduler/sched_main.c | 51 ++++++++++++++++++++------
- 1 file changed, 39 insertions(+), 12 deletions(-)
+ drivers/gpu/drm/scheduler/sched_main.c | 54 +++++++++++++++++++-------
+ 1 file changed, 41 insertions(+), 13 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index f30abd594..8a9242d9a 100644
+index 1bf0a490b..e7104b436 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
-@@ -148,22 +148,49 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+@@ -148,22 +148,50 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
  
  	if (entity->gpu_time_total < rq->min_gpu_vtime) {
  		/*
@@ -66,7 +66,7 @@ index f30abd594..8a9242d9a 100644
 +		 * After 64+ half-lives (~2s) the entity gets its actual
 +		 * gpu_time_total with no catch-up at all.
  		 */
--		if (entity->gpu_time_ema == 0) {
+-		if (entity->gpu_time_ema == 0)
 +		u64 idle_ns;
 +		u64 idle_ratio;
 +
@@ -81,10 +81,11 @@ index f30abd594..8a9242d9a 100644
 +
 +		if (idle_ns >= INFINITY_GPU_EMA_HALFLIFE_NS * 64ULL) {
  			effective_total = entity->gpu_time_total;
--		} else if (rq->min_gpu_vtime < INFINITY_GPU_CATCHUP_BONUS_NS) {
+-		else if (rq->min_gpu_vtime < INFINITY_GPU_CATCHUP_BONUS_NS)
 -			effective_total = 0;
- 		} else {
+-		else
 -			effective_total = rq->min_gpu_vtime - INFINITY_GPU_CATCHUP_BONUS_NS;
++		} else {
 +			idle_ratio = div64_u64(idle_ns * (1ULL << 16),
 +					       idle_ns +
 +					       INFINITY_GPU_EMA_HALFLIFE_NS);
@@ -93,9 +94,10 @@ index f30abd594..8a9242d9a 100644
 +				(entity->gpu_time_total *
 +				 ((1ULL << 16) - idle_ratio) +
 +				 rq->min_gpu_vtime * idle_ratio) >> 16;
- 		}
++		}
  	} else {
  		effective_total = entity->gpu_time_total;
+ 	}
 -- 
 2.55.0
 

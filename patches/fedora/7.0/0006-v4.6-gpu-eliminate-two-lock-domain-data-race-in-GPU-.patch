@@ -1,8 +1,8 @@
-From ba6a1401a285280de3d619807f89c540f9cf6c0c Mon Sep 17 00:00:00 2001
+From 2ccb67ac086b13a8807529d1a6202883c259c367 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:16:18 +0700
-Subject: [PATCH v4.6-gpu 1/6] v4.6-gpu: eliminate two-lock-domain data race in
- GPU time accounting
+Subject: [PATCH 06/23] v4.6-gpu: eliminate two-lock-domain data race in GPU
+ time accounting
 
 Replace the direct gpu_time_total/gpu_time_ema writes in
 drm_sched_get_finished_job() (under job_list_lock) with a lock-free
@@ -33,7 +33,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  2 files changed, 55 insertions(+), 26 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
-index 73fa33af4..503c1c882 100644
+index f61d8fb7f..362ed1aae 100644
 --- a/drivers/gpu/drm/scheduler/sched_main.c
 +++ b/drivers/gpu/drm/scheduler/sched_main.c
 @@ -216,6 +216,35 @@ void drm_sched_rq_update_vtime_locked(struct drm_sched_entity *entity,
@@ -72,7 +72,7 @@ index 73fa33af4..503c1c882 100644
  	/* Infinity EMA decay on idle */
  	if (entity->gpu_time_last_active) {
  		u64 idle_ns = ktime_to_ns(ktime_sub(ts,
-@@ -1165,7 +1194,11 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
+@@ -1167,7 +1196,11 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
  
  		/* Infinity: deferred GPU time accounting.
  		 * job_list_lock protects against concurrent infinity_entity
@@ -85,7 +85,7 @@ index 73fa33af4..503c1c882 100644
  		 */
  		{
  			struct drm_sched_entity *inf_entity;
-@@ -1174,20 +1207,9 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
+@@ -1176,20 +1209,9 @@ drm_sched_get_finished_job(struct drm_gpu_scheduler *sched, bool *have_more)
  			inf_entity = READ_ONCE(job->infinity_entity);
  			gpu_ns = READ_ONCE(job->infinity_gpu_ns);
  			if (inf_entity) {
