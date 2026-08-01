@@ -1,4 +1,4 @@
-From 4899d3400e6586ecb831f82090d074d0aa145cd7 Mon Sep 17 00:00:00 2001
+From 8519ab67d8392c2d7a75ca42f8d19a87580f3bda Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 14:31:04 +0700
 Subject: [PATCH 13/13] v4.7-gpu: fix infinity_stats sysctl read returning
@@ -20,13 +20,13 @@ Restore the description-column separator to 32 characters to match the
 the row borders once the descriptions grew.  The separator is declared
 without const to stay within checkpatch's 100-column limit.
 
-Scale the stats table to any counter magnitude: format the counts with
-K/M/B/T/Qa/Qi suffixes (two decimals, floor-truncated) so the output is
-bounded to 8 characters and the columns never shift, and widen the
-per-CPU counters from atomic_t to atomic64_t so the totals stay exact
-instead of wrapping at 2^31 per CPU under sustained load.  Percentage
-and average math uses mul_u64_u32_div() so it cannot overflow for any
-u64 value; the audit line keeps exact comma-separated counts.
+Scale the stats table to any counter magnitude: format every count,
+including the accounting-confidence audit line, with K/M/B/T/Qa/Qi
+suffixes (two decimals, floor-truncated) so the output is bounded to 8
+characters and the columns never shift, and widen the per-CPU counters
+from atomic_t to atomic64_t so the totals stay exact instead of
+wrapping at 2^31 per CPU under sustained load.  Percentage and average
+math uses mul_u64_u32_div() so it cannot overflow for any u64 value.
 
 Fix the stray double parenthesis in the per-CPU counter exports that
 prevented the 6.18 and Fedora 7.0 targets from compiling, and cast the
@@ -39,9 +39,9 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  drivers/gpu/drm/scheduler/sched_rq.c     |   6 +-
  include/drm/gpu_scheduler.h              |  10 +-
  kernel/sched/fair.c                      |   4 +-
- kernel/sched/infinity_sched.c            | 156 ++++++++++++++---------
+ kernel/sched/infinity_sched.c            | 129 ++++++++++++-----------
  kernel/sched/infinity_sched.h            |  22 ++--
- 6 files changed, 118 insertions(+), 84 deletions(-)
+ 6 files changed, 91 insertions(+), 84 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
 index 03c48b77e..90fad7598 100644
@@ -132,7 +132,7 @@ index 9691b5ed2..a1b511472 100644
  		}
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 361e9f568..c0a74f0b6 100644
+index 361e9f568..fe2eb62b3 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -33,27 +33,27 @@
@@ -174,7 +174,7 @@ index 361e9f568..c0a74f0b6 100644
  EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
  
  /* ------------------------------------------------------------------ */
-@@ -84,34 +84,69 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -84,34 +84,42 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  /* ------------------------------------------------------------------ */
  /* Stats output                                                        */
  /* ------------------------------------------------------------------ */
@@ -201,6 +201,18 @@ index 361e9f568..c0a74f0b6 100644
 -	char raw[24];
 -	char tmp[32];
 -	int raw_len, i, pos = 0, keep;
+-
+-	if (val == 0) {
+-		scnprintf(tmp, sizeof(tmp), "0");
+-	} else {
+-		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
+-		raw_len = strlen(raw);
+-		for (i = 0; i < raw_len; i++) {
+-			if (i > 0 && (raw_len - i) % 3 == 0)
+-				tmp[pos++] = ',';
+-			tmp[pos++] = raw[i];
+-		}
+-		tmp[pos] = '\0';
 +	u64 q, r, frac;
 +	int i;
 +
@@ -214,34 +226,6 @@ index 361e9f568..c0a74f0b6 100644
 +			  (unsigned long long)q, (unsigned long long)frac,
 +			  infinity_suffixes[i].suffix);
 +		return buf;
-+	}
-+
-+	scnprintf(buf, sz, "%llu", (unsigned long long)val);
-+	return buf;
-+}
-+
-+/*
-+ * fill_comma_llu - exact comma-separated form for the audit line so
-+ * the raw counts stay readable at any magnitude.
-+ */
-+static char *fill_comma_llu(char *buf, size_t sz, u64 val)
-+{
-+	char raw[24], tmp[32];
-+	int raw_len, i, pos = 0;
- 
- 	if (val == 0) {
--		scnprintf(tmp, sizeof(tmp), "0");
--	} else {
--		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
--		raw_len = strlen(raw);
--		for (i = 0; i < raw_len; i++) {
--			if (i > 0 && (raw_len - i) % 3 == 0)
--				tmp[pos++] = ',';
--			tmp[pos++] = raw[i];
--		}
--		tmp[pos] = '\0';
-+		scnprintf(buf, sz, "0");
-+		return buf;
  	}
  
 -	/* Truncate leftmost digits if too long for the 14-char column */
@@ -252,20 +236,12 @@ index 361e9f568..c0a74f0b6 100644
 -		scnprintf(buf, sz, "%13s", tmp + keep);
 -	} else {
 -		scnprintf(buf, sz, "%13s", tmp);
-+	scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
-+	raw_len = strlen(raw);
-+	for (i = 0; i < raw_len; i++) {
-+		if (i > 0 && (raw_len - i) % 3 == 0)
-+			tmp[pos++] = ',';
-+		tmp[pos++] = raw[i];
- 	}
-+	tmp[pos] = '\0';
-+
-+	scnprintf(buf, sz, "%s", tmp);
+-	}
++	scnprintf(buf, sz, "%llu", (unsigned long long)val);
  	return buf;
  }
  
-@@ -119,16 +154,16 @@ static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
+@@ -119,16 +127,16 @@ static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
   * infinity_stats_total - sum a per-CPU stat counter across all CPUs.
   *
   * Each increment lands on exactly one CPU's counter, so the sum is the
@@ -286,7 +262,7 @@ index 361e9f568..c0a74f0b6 100644
  
  	return total;
  }
-@@ -147,9 +182,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -147,9 +155,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	 * Table layout (printf-style, auto-aligned):
  	 *
  	 *   | %-22s | %13s | %-30s |
@@ -298,7 +274,7 @@ index 361e9f568..c0a74f0b6 100644
  	const char *ROW = "| %-22s | %13s | %-30s |\n";
  
  	if (write)
-@@ -184,7 +219,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -184,7 +192,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		char pct[16];
  
  		scnprintf(pct, sizeof(pct), "%llu%% of tasks",
@@ -307,7 +283,7 @@ index 361e9f568..c0a74f0b6 100644
  		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
  			  "Futex boosts",
  			  fill_pretty_llu(v1, sizeof(v1), fbc),
-@@ -197,8 +232,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -197,8 +205,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	}
  
  	{
@@ -318,7 +294,7 @@ index 361e9f568..c0a74f0b6 100644
  
  		scnprintf(avg, sizeof(avg), "~%llu.%02llu/wakeup",
  			  avg_wakeup / 100, avg_wakeup % 100);
-@@ -248,8 +283,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -248,8 +256,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  		  "fence callbacks fired");
  
  	if (gcb) {
@@ -329,16 +305,19 @@ index 361e9f568..c0a74f0b6 100644
  		char v2[16];
  
  		scnprintf(v2, sizeof(v2), "%llu.%02llu%%", whole, frac);
-@@ -284,22 +319,15 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -284,22 +292,15 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  
  	/* Footer */
  	if (gcb) {
 -		u64 whole = div64_u64(gapp * 100ULL, gcb);
 -		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
 -		char w1[16], w2[16], *p1, *p2;
--
--		fill_pretty_llu(w1, sizeof(w1), gapp);
--		fill_pretty_llu(w2, sizeof(w2), gcb);
++		u64 whole = mul_u64_u32_div(gapp, 100, gcb);
++		u64 frac  = mul_u64_u32_div(gapp, 10000, gcb) % 100;
++		char w1[16], w2[16];
+ 
+ 		fill_pretty_llu(w1, sizeof(w1), gapp);
+ 		fill_pretty_llu(w2, sizeof(w2), gcb);
 -		/* Strip leading spaces for the confidence line */
 -		p1 = w1;
 -		while (*p1 == ' ')
@@ -346,12 +325,6 @@ index 361e9f568..c0a74f0b6 100644
 -		p2 = w2;
 -		while (*p2 == ' ')
 -			p2++;
-+		u64 whole = mul_u64_u32_div(gapp, 100, gcb);
-+		u64 frac  = mul_u64_u32_div(gapp, 10000, gcb) % 100;
-+		char w1[32], w2[32];
-+
-+		fill_comma_llu(w1, sizeof(w1), gapp);
-+		fill_comma_llu(w2, sizeof(w2), gcb);
  		scnprintf(buf + strlen(buf), bufsz - strlen(buf),
  			  "Accounting confidence: %llu.%02llu%%  (%s / %s completions)\n",
 -			  whole, frac, p1, p2);
@@ -359,7 +332,7 @@ index 361e9f568..c0a74f0b6 100644
  	} else {
  		strlcat(buf,
  			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
-@@ -318,8 +346,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -318,8 +319,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  			"Verdict: Accounting mismatch detected -- see above for details\n",
  			bufsz);
  
@@ -376,7 +349,7 @@ index 361e9f568..c0a74f0b6 100644
  	kfree(buf);
  	return 0;
  }
-@@ -340,7 +374,7 @@ static const struct ctl_table infinity_sysctl_table[] = {
+@@ -340,7 +347,7 @@ static const struct ctl_table infinity_sysctl_table[] = {
  	},
  	{
  		.procname	= "infinity_version",
@@ -385,7 +358,7 @@ index 361e9f568..c0a74f0b6 100644
  		.maxlen		= sizeof(infinity_version),
  		.mode		= 0444,
  		.proc_handler	= proc_dostring,
-@@ -423,7 +457,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -423,7 +430,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			u64 extra_ns = sleep_ns * min(passovers, 8);
  
  			sleep_ns += extra_ns;
