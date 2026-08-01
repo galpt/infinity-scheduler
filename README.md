@@ -4,6 +4,9 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 
 ## Project structure
 
+> [!NOTE]
+> If you want support for a specific distro (e.g., Debian/Ubuntu) or a specific kernel version (e.g., 7.1 for Fedora), please open a new [Issue](https://github.com/galpt/infinity-scheduler/issues) for that.
+
 ```
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
