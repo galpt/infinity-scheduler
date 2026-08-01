@@ -61,15 +61,6 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 | `infinity_version` | v4.7-gpu (ro) | — | Branch version string |
 | `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and drain counters |
 
-## Multi-node (NUMA) behavior
-
-Infinity is designed to stay correct and low-overhead on machines with more than one physical CPU package:
-
-- **Stat counters are per-CPU** — the hot tick-rate counters never bounce a shared cache line across sockets, and the stats table sums all CPUs on read.
-- **Interactive-task stickiness is intentional** — the migration hysteresis keeps low-latency tasks cache-warm on their home node. The kernel's NUMA balancing path is not affected and still places tasks on their preferred node.
-- **Asymmetric-core wakeup bias prefers the home node** — an interactive task is placed on a high-capacity core of its current node first, and only falls back to a remote one when no local option exists.
-- **SMT interactive placement honors CPU affinity** — a waking task is never moved to a core outside its allowed set.
-
 ## CPU scheduling
 
 ```mermaid
