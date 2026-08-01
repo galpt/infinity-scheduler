@@ -1,4 +1,4 @@
-From 74109672671f553493aa639737d7b8daae92e1e4 Mon Sep 17 00:00:00 2001
+From 4899d3400e6586ecb831f82090d074d0aa145cd7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 14:31:04 +0700
 Subject: [PATCH 13/13] v4.7-gpu: fix infinity_stats sysctl read returning
@@ -15,21 +15,278 @@ which writes into the kernel buffer with memcpy and preserves partial-
 read, EOF and trailing-newline behavior.  Read-only semantics are
 unchanged.
 
-While here, restore the description-column separator to 32 characters to
-match the %-30s rows again; the 27-character separator no longer lined
-up with the row borders once the descriptions grew.  The separator is
-declared without const to stay within checkpatch's 100-column limit.
+Restore the description-column separator to 32 characters to match the
+%-30s rows again; the 27-character separator no longer lined up with
+the row borders once the descriptions grew.  The separator is declared
+without const to stay within checkpatch's 100-column limit.
+
+Scale the stats table to any counter magnitude: format the counts with
+K/M/B/T/Qa/Qi suffixes (two decimals, floor-truncated) so the output is
+bounded to 8 characters and the columns never shift, and widen the
+per-CPU counters from atomic_t to atomic64_t so the totals stay exact
+instead of wrapping at 2^31 per CPU under sustained load.  Percentage
+and average math uses mul_u64_u32_div() so it cannot overflow for any
+u64 value; the audit line keeps exact comma-separated counts.
+
+Fix the stray double parenthesis in the per-CPU counter exports that
+prevented the 6.18 and Fedora 7.0 targets from compiling, and cast the
+version string at its sysctl table entry so the build no longer warns
+about discarding the const qualifier.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/infinity_sched.c | 14 ++++++++++----
- 1 file changed, 10 insertions(+), 4 deletions(-)
+ drivers/gpu/drm/scheduler/sched_entity.c |   4 +-
+ drivers/gpu/drm/scheduler/sched_rq.c     |   6 +-
+ include/drm/gpu_scheduler.h              |  10 +-
+ kernel/sched/fair.c                      |   4 +-
+ kernel/sched/infinity_sched.c            | 156 ++++++++++++++---------
+ kernel/sched/infinity_sched.h            |  22 ++--
+ 6 files changed, 118 insertions(+), 84 deletions(-)
 
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index 03c48b77e..90fad7598 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -91,8 +91,8 @@ ktime_t drm_sched_entity_stats_job_add_gpu_time(struct drm_sched_job *job)
+ 	 * object, so accounting can never miss the entity -- no separate
+ 	 * entity-not-found path exists on this scheduler layout.
+ 	 */
+-	atomic_inc(this_cpu_ptr(&infinity_gpu_completion_callbacks));
+-	atomic_inc(this_cpu_ptr(&infinity_gpu_accounting_applied));
++	atomic64_inc(this_cpu_ptr(&infinity_gpu_completion_callbacks));
++	atomic64_inc(this_cpu_ptr(&infinity_gpu_accounting_applied));
+ 
+ 	return duration;
+ }
+diff --git a/drivers/gpu/drm/scheduler/sched_rq.c b/drivers/gpu/drm/scheduler/sched_rq.c
+index b72e75dfb..0669aab48 100644
+--- a/drivers/gpu/drm/scheduler/sched_rq.c
++++ b/drivers/gpu/drm/scheduler/sched_rq.c
+@@ -269,7 +269,7 @@ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ 
+ 		stats->gpu_last_submit_interval = idle_ns;
+ 		if (periods)
+-			atomic_inc(this_cpu_ptr(&infinity_gpu_idle_compensations));
++			atomic64_inc(this_cpu_ptr(&infinity_gpu_idle_compensations));
+ 	} else {
+ 		stats->gpu_last_submit_interval = 0;
+ 	}
+@@ -326,7 +326,7 @@ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ 			delta_ns = delta_ns * (100 - 50 * coupling) / 100;
+ 			if (delta_ns < 0)
+ 				delta_ns = 0;
+-			atomic_inc(this_cpu_ptr(&infinity_gpu_cpu_coupling_activations));
++			atomic64_inc(this_cpu_ptr(&infinity_gpu_cpu_coupling_activations));
+ 		}
+ 	}
+ 
+@@ -502,7 +502,7 @@ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ 						     PIDTYPE_PID);
+ 					if (p) {
+ 						atomic_inc(&p->infinity.gpu_passovers);
+-						atomic_inc(this_cpu_ptr(
++						atomic64_inc(this_cpu_ptr(
+ 							&infinity_gpu_passover_boosts));
+ 					}
+ 				}
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index c79bf46c2..323dba6e1 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -773,10 +773,10 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+ #include <linux/atomic.h>
+ #include <linux/percpu.h>
+ #include <linux/pid.h>
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_completion_callbacks);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_accounting_applied);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_idle_compensations);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_cpu_coupling_activations);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_passover_boosts);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_completion_callbacks);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_accounting_applied);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_idle_compensations);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_passover_boosts);
+ 
+ #endif
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 9691b5ed2..a1b511472 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6502,7 +6502,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 
+ 		if (p->infinity.ema == 0) {
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
+-			atomic_inc(this_cpu_ptr(&infinity_cpufreq_interactive_count));
++			atomic64_inc(this_cpu_ptr(&infinity_cpufreq_interactive_count));
+ 		}
+ 	}
+ 
+@@ -9849,7 +9849,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 			    cpumask_test_cpu(primary, p->cpus_ptr) &&
+ 			    available_idle_cpu(primary)) {
+ 				new_cpu = primary;
+-				atomic_inc(this_cpu_ptr(&infinity_smt_interactive_count));
++				atomic64_inc(this_cpu_ptr(&infinity_smt_interactive_count));
+ 			}
+ 		}
+ 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 361e9f568..1a2a79e29 100644
+index 361e9f568..c0a74f0b6 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -147,9 +147,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -33,27 +33,27 @@
+  * one cache line across sockets on multi-node machines.  Per-CPU storage
+  * keeps the hot increments local; infinity_stats_total() sums all CPUs.
+  */
+-DEFINE_PER_CPU(atomic_t, infinity_futex_boost_count);
++DEFINE_PER_CPU(atomic64_t, infinity_futex_boost_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_futex_boost_count);
+-DEFINE_PER_CPU(atomic_t, infinity_ema_climb_count);
++DEFINE_PER_CPU(atomic64_t, infinity_ema_climb_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_ema_climb_count);
+-DEFINE_PER_CPU(atomic_t, infinity_wakeup_count);
++DEFINE_PER_CPU(atomic64_t, infinity_wakeup_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_wakeup_count);
+-DEFINE_PER_CPU(atomic_t, infinity_rt_throttle_count);
++DEFINE_PER_CPU(atomic64_t, infinity_rt_throttle_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_rt_throttle_count);
+-DEFINE_PER_CPU(atomic_t, infinity_gpu_completion_callbacks);
++DEFINE_PER_CPU(atomic64_t, infinity_gpu_completion_callbacks);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_completion_callbacks);
+-DEFINE_PER_CPU(atomic_t, infinity_gpu_accounting_applied);
++DEFINE_PER_CPU(atomic64_t, infinity_gpu_accounting_applied);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_accounting_applied);
+-DEFINE_PER_CPU(atomic_t, infinity_gpu_idle_compensations);
++DEFINE_PER_CPU(atomic64_t, infinity_gpu_idle_compensations);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_idle_compensations);
+-DEFINE_PER_CPU(atomic_t, infinity_gpu_cpu_coupling_activations);
++DEFINE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_cpu_coupling_activations);
+-DEFINE_PER_CPU(atomic_t, infinity_gpu_passover_boosts);
++DEFINE_PER_CPU(atomic64_t, infinity_gpu_passover_boosts);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_passover_boosts);
+-DEFINE_PER_CPU(atomic_t, infinity_cpufreq_interactive_count);
++DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
+-DEFINE_PER_CPU(atomic_t, infinity_smt_interactive_count);
++DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+ 
+ /* ------------------------------------------------------------------ */
+@@ -84,34 +84,69 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ /* ------------------------------------------------------------------ */
+ /* Stats output                                                        */
+ /* ------------------------------------------------------------------ */
++/*
++ * fill_pretty_llu - format u64 with K/M/B/T/Qa/Qi suffixes, two
++ * decimal digits, floor-truncated (1230 -> "1.23K").  The output is
++ * at most 8 characters, so the table columns never shift regardless
++ * of how large the counters grow.
++ */
++static const struct infinity_suffix {
++	u64		base;
++	const char	*suffix;
++} infinity_suffixes[] = {
++	{ 1000000000000000000ULL, "Qi" },
++	{ 1000000000000000ULL,    "Qa" },
++	{ 1000000000000ULL,       "T"  },
++	{ 1000000000ULL,          "B"  },
++	{ 1000000ULL,             "M"  },
++	{ 1000ULL,                "K"  },
++};
++
+ static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
+ {
+-	char raw[24];
+-	char tmp[32];
+-	int raw_len, i, pos = 0, keep;
++	u64 q, r, frac;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(infinity_suffixes); i++) {
++		if (val < infinity_suffixes[i].base)
++			continue;
++
++		q = div64_u64_rem(val, infinity_suffixes[i].base, &r);
++		frac = mul_u64_u32_div(r, 100, infinity_suffixes[i].base);
++		scnprintf(buf, sz, "%llu.%02llu%s",
++			  (unsigned long long)q, (unsigned long long)frac,
++			  infinity_suffixes[i].suffix);
++		return buf;
++	}
++
++	scnprintf(buf, sz, "%llu", (unsigned long long)val);
++	return buf;
++}
++
++/*
++ * fill_comma_llu - exact comma-separated form for the audit line so
++ * the raw counts stay readable at any magnitude.
++ */
++static char *fill_comma_llu(char *buf, size_t sz, u64 val)
++{
++	char raw[24], tmp[32];
++	int raw_len, i, pos = 0;
+ 
+ 	if (val == 0) {
+-		scnprintf(tmp, sizeof(tmp), "0");
+-	} else {
+-		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
+-		raw_len = strlen(raw);
+-		for (i = 0; i < raw_len; i++) {
+-			if (i > 0 && (raw_len - i) % 3 == 0)
+-				tmp[pos++] = ',';
+-			tmp[pos++] = raw[i];
+-		}
+-		tmp[pos] = '\0';
++		scnprintf(buf, sz, "0");
++		return buf;
+ 	}
+ 
+-	/* Truncate leftmost digits if too long for the 14-char column */
+-	pos = strlen(tmp);
+-	if (pos > 14) {
+-		keep = pos - 14;
+-		/* Advance past the truncation point */
+-		scnprintf(buf, sz, "%13s", tmp + keep);
+-	} else {
+-		scnprintf(buf, sz, "%13s", tmp);
++	scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
++	raw_len = strlen(raw);
++	for (i = 0; i < raw_len; i++) {
++		if (i > 0 && (raw_len - i) % 3 == 0)
++			tmp[pos++] = ',';
++		tmp[pos++] = raw[i];
+ 	}
++	tmp[pos] = '\0';
++
++	scnprintf(buf, sz, "%s", tmp);
+ 	return buf;
+ }
+ 
+@@ -119,16 +154,16 @@ static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
+  * infinity_stats_total - sum a per-CPU stat counter across all CPUs.
+  *
+  * Each increment lands on exactly one CPU's counter, so the sum is the
+- * true total.  Cast through unsigned int to preserve the 32-bit wrap
+- * semantics of atomic_read() (no sign extension for counters past 2^31).
++ * true total.  64-bit counters cannot wrap in practice, so the sum is
++ * exact for any value the kernel can produce.
+  */
+-static u64 infinity_stats_total(const atomic_t __percpu *counter)
++static u64 infinity_stats_total(const atomic64_t __percpu *counter)
+ {
+ 	u64 total = 0;
+ 	int cpu;
+ 
+ 	for_each_possible_cpu(cpu)
+-		total += (u64)(unsigned int)atomic_read(per_cpu_ptr(counter, cpu));
++		total += atomic64_read(per_cpu_ptr(counter, cpu));
+ 
+ 	return total;
+ }
+@@ -147,9 +182,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	 * Table layout (printf-style, auto-aligned):
  	 *
  	 *   | %-22s | %13s | %-30s |
@@ -41,7 +298,68 @@ index 361e9f568..1a2a79e29 100644
  	const char *ROW = "| %-22s | %13s | %-30s |\n";
  
  	if (write)
-@@ -318,8 +318,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+@@ -184,7 +219,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		char pct[16];
+ 
+ 		scnprintf(pct, sizeof(pct), "%llu%% of tasks",
+-			  div64_u64(fbc * 100ULL, emc));
++			  mul_u64_u32_div(fbc, 100, emc));
+ 		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+ 			  "Futex boosts",
+ 			  fill_pretty_llu(v1, sizeof(v1), fbc),
+@@ -197,8 +232,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	}
+ 
+ 	{
+-		char avg[24];
+-		u64 avg_wakeup = div64_u64(emc * 100ULL, max(wkc, 1ULL));
++		char avg[32];
++		u64 avg_wakeup = mul_u64_u32_div(emc, 100, max(wkc, 1ULL));
+ 
+ 		scnprintf(avg, sizeof(avg), "~%llu.%02llu/wakeup",
+ 			  avg_wakeup / 100, avg_wakeup % 100);
+@@ -248,8 +283,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		  "fence callbacks fired");
+ 
+ 	if (gcb) {
+-		u64 whole = div64_u64(gapp * 100ULL, gcb);
+-		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
++		u64 whole = mul_u64_u32_div(gapp, 100, gcb);
++		u64 frac  = mul_u64_u32_div(gapp, 10000, gcb) % 100;
+ 		char v2[16];
+ 
+ 		scnprintf(v2, sizeof(v2), "%llu.%02llu%%", whole, frac);
+@@ -284,22 +319,15 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 	/* Footer */
+ 	if (gcb) {
+-		u64 whole = div64_u64(gapp * 100ULL, gcb);
+-		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
+-		char w1[16], w2[16], *p1, *p2;
+-
+-		fill_pretty_llu(w1, sizeof(w1), gapp);
+-		fill_pretty_llu(w2, sizeof(w2), gcb);
+-		/* Strip leading spaces for the confidence line */
+-		p1 = w1;
+-		while (*p1 == ' ')
+-			p1++;
+-		p2 = w2;
+-		while (*p2 == ' ')
+-			p2++;
++		u64 whole = mul_u64_u32_div(gapp, 100, gcb);
++		u64 frac  = mul_u64_u32_div(gapp, 10000, gcb) % 100;
++		char w1[32], w2[32];
++
++		fill_comma_llu(w1, sizeof(w1), gapp);
++		fill_comma_llu(w2, sizeof(w2), gcb);
+ 		scnprintf(buf + strlen(buf), bufsz - strlen(buf),
+ 			  "Accounting confidence: %llu.%02llu%%  (%s / %s completions)\n",
+-			  whole, frac, p1, p2);
++			  whole, frac, w1, w2);
+ 	} else {
+ 		strlcat(buf,
+ 			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
+@@ -318,8 +346,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  			"Verdict: Accounting mismatch detected -- see above for details\n",
  			bufsz);
  
@@ -58,6 +376,57 @@ index 361e9f568..1a2a79e29 100644
  	kfree(buf);
  	return 0;
  }
+@@ -340,7 +374,7 @@ static const struct ctl_table infinity_sysctl_table[] = {
+ 	},
+ 	{
+ 		.procname	= "infinity_version",
+-		.data		= infinity_version,
++		.data		= (char *)infinity_version,
+ 		.maxlen		= sizeof(infinity_version),
+ 		.mode		= 0444,
+ 		.proc_handler	= proc_dostring,
+@@ -423,7 +457,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ 			u64 extra_ns = sleep_ns * min(passovers, 8);
+ 
+ 			sleep_ns += extra_ns;
+-			atomic_inc(this_cpu_ptr(&infinity_gpu_passover_boosts));
++			atomic64_inc(this_cpu_ptr(&infinity_gpu_passover_boosts));
+ 		}
+ 	}
+ 
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index e564ccfa8..2b9e6eff2 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -150,17 +150,17 @@ extern unsigned long infinity_tune_smt_divisor;
+ 
+ /* Stats counters                                                      */
+ /* ------------------------------------------------------------------ */
+-DECLARE_PER_CPU(atomic_t, infinity_futex_boost_count);
+-DECLARE_PER_CPU(atomic_t, infinity_ema_climb_count);
+-DECLARE_PER_CPU(atomic_t, infinity_wakeup_count);
+-DECLARE_PER_CPU(atomic_t, infinity_rt_throttle_count);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_completion_callbacks);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_accounting_applied);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_idle_compensations);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_cpu_coupling_activations);
+-DECLARE_PER_CPU(atomic_t, infinity_gpu_passover_boosts);
+-DECLARE_PER_CPU(atomic_t, infinity_cpufreq_interactive_count);
+-DECLARE_PER_CPU(atomic_t, infinity_smt_interactive_count);
++DECLARE_PER_CPU(atomic64_t, infinity_futex_boost_count);
++DECLARE_PER_CPU(atomic64_t, infinity_ema_climb_count);
++DECLARE_PER_CPU(atomic64_t, infinity_wakeup_count);
++DECLARE_PER_CPU(atomic64_t, infinity_rt_throttle_count);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_completion_callbacks);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_accounting_applied);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_idle_compensations);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
++DECLARE_PER_CPU(atomic64_t, infinity_gpu_passover_boosts);
++DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
++DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ /* ------------------------------------------------------------------ */
+ /* API -- called from fair.c and rt.c                                   */
+ /* ------------------------------------------------------------------ */
 -- 
 2.55.0
 
