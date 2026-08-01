@@ -1,0 +1,42 @@
+From 7c52b475aeb2b169edc806434ea965299f2e96ab Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 29 Jul 2026 22:06:05 +0700
+Subject: [PATCH 08/12] v4.7-gpu: fix RT demote threshold off-by-1000 causing
+ false-positive SCHED_FIFO requeues
+
+INFINITY_RT_DEMOTE_THRESHOLD was defined as 9500 (9.5 us) instead of
+the intended 9500000 (9.5 ms = 95% of INFINITY_RT_BUDGET_NS).  This
+caused every SCHED_FIFO user task to trigger the safety valve after
+~0.6 ms of continuous runtime, producing cascading resched_curr IPIs
+and visible desktop stutter.
+
+Express the threshold as a computed percentage of INFINITY_RT_BUDGET_NS
+to prevent future unit confusion.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.h | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 314a23c03..68d88bbf4 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -136,8 +136,12 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+ /* ------------------------------------------------------------------ */
+ /* RT safety valve -- requeue throttle threshold                        */
+ /* ------------------------------------------------------------------ */
+-/** rt_ema threshold: force rogue SCHED_FIFO to yield (>95% of 10ms). */
+-#define INFINITY_RT_DEMOTE_THRESHOLD    9500ULL
++/**
++ * rt_ema threshold: force rogue SCHED_FIFO to yield when rt_ema exceeds
++ * 95% of INFINITY_RT_BUDGET_NS (10ms).  Expressed as a computed percentage
++ * of the budget to prevent unit mismatch errors.
++ */
++#define INFINITY_RT_DEMOTE_THRESHOLD    (INFINITY_RT_BUDGET_NS * 95ULL / 100ULL)
+ 
+ /* ------------------------------------------------------------------ */
+ /* External sysctl tunables                                            */
+-- 
+2.55.0
+

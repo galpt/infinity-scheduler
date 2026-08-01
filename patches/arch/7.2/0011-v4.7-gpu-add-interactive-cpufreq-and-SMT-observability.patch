@@ -1,0 +1,173 @@
+From 65a946c3452ce6e3d06fbcd5ce7812a3d710f496 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sat, 1 Aug 2026 11:42:07 +0700
+Subject: [PATCH 11/12] v4.7-gpu: add interactive cpufreq and SMT placement
+ observability
+
+Wire up the EMA-driven cpufreq hint and SMT interactive placement
+counters on the 7.2 layout: per-CPU counter definitions, stats rows,
+and this_cpu_ptr() increments in pick_next_entity() and the SMT
+placement fast path.  The SMT data race fix (available_idle_cpu)
+and the affinity-safe primary-thread selection carry over from the
+7.1 series.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ fs/proc/base.c                |  4 ----
+ kernel/sched/fair.c           | 10 ++++++----
+ kernel/sched/infinity_sched.c | 20 ++++++++++++++++++--
+ kernel/sched/infinity_sched.h |  4 +++-
+ 4 files changed, 27 insertions(+), 11 deletions(-)
+
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index fdebf0751..841f5261e 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -3273,7 +3273,6 @@ static int proc_stack_depth(struct seq_file *m, struct pid_namespace *ns,
+ }
+ #endif /* CONFIG_KSTACK_ERASE_METRICS */
+ 
+-#ifdef CONFIG_INFINITY_SCHED
+ static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
+ 			      struct pid *pid, struct task_struct *task)
+ {
+@@ -3286,7 +3285,6 @@ static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
+ 		   atomic_read(&ctx->gpu_passovers));
+ 	return 0;
+ }
+-#endif
+ 
+ /*
+  * Thread groups
+@@ -3312,9 +3310,7 @@ static const struct pid_entry tgid_base_stuff[] = {
+ #ifdef CONFIG_SCHED_AUTOGROUP
+ 	REG("autogroup",  S_IRUGO|S_IWUSR, proc_pid_sched_autogroup_operations),
+ #endif
+-#ifdef CONFIG_INFINITY_SCHED
+ 	ONE("infinity",   0444, proc_infinity_show),
+-#endif
+ #ifdef CONFIG_TIME_NS
+ 	REG("timens_offsets",  S_IRUGO|S_IWUSR, proc_timens_offsets_operations),
+ #endif
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 38cc715a9..6ad682033 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6500,8 +6500,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+ 	if (entity_is_task(se)) {
+ 		struct task_struct *p = task_of(se);
+ 
+-		if (p->infinity.ema == 0)
++		if (p->infinity.ema == 0) {
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
++			atomic_inc(this_cpu_ptr(&infinity_cpufreq_interactive_count));
++		}
+ 	}
+ 
+ 	return se;
+@@ -9828,7 +9830,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 	if (wake_flags & WF_TTWU) {
+ 		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
+ 
+-#ifdef CONFIG_INFINITY_SCHED
+ 		/* SMT interactive placement: if the selected CPU is an SMT
+ 		 * thread with a busy sibling, and the waking task has low
+ 		 * EMA, try the primary thread of the same core instead.
+@@ -9840,10 +9841,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 				topology_sibling_cpumask(new_cpu));
+ 
+ 			if (primary != new_cpu &&
+-			    cpu_rq(primary)->nr_running == 0)
++			    available_idle_cpu(primary)) {
+ 				new_cpu = primary;
++				atomic_inc(this_cpu_ptr(&infinity_smt_interactive_count));
++			}
+ 		}
+-#endif
+ 
+ 		return new_cpu;
+ 	}
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 957b598a8..361e9f568 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
+  *
+- * infinity_sched.c -- Infinity scheduler algorithm (v4.6-gpu).
++ * infinity_sched.c -- Infinity scheduler algorithm (v4.7-gpu).
+  *
+  * Fully continuous limit-based scheduling:
+  *
+@@ -51,6 +51,10 @@ DEFINE_PER_CPU(atomic_t, infinity_gpu_cpu_coupling_activations);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_cpu_coupling_activations);
+ DEFINE_PER_CPU(atomic_t, infinity_gpu_passover_boosts);
+ EXPORT_PER_CPU_SYMBOL(infinity_gpu_passover_boosts);
++DEFINE_PER_CPU(atomic_t, infinity_cpufreq_interactive_count);
++EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
++DEFINE_PER_CPU(atomic_t, infinity_smt_interactive_count);
++EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+ 
+ /* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
+@@ -135,7 +139,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ {
+ 	char *buf;
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp;
+-	u64 gic, gcca, gpbo;
++	u64 gic, gcca, gpbo, icf, ismt;
+ 	char v1[16];
+ 	const size_t bufsz = 4096;
+ 
+@@ -164,6 +168,8 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	gic  = infinity_stats_total(&infinity_gpu_idle_compensations);
+ 	gcca = infinity_stats_total(&infinity_gpu_cpu_coupling_activations);
+ 	gpbo = infinity_stats_total(&infinity_gpu_passover_boosts);
++	icf  = infinity_stats_total(&infinity_cpufreq_interactive_count);
++	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+ 
+ 	buf[0] = '\0';
+ 	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
+@@ -205,6 +211,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		  "Wakeup decays",
+ 		  fill_pretty_llu(v1, sizeof(v1), wkc), "");
+ 
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "Interactive cpufreq",
++		  fill_pretty_llu(v1, sizeof(v1), icf),
++		  "frequency ramp events");
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "SMT placement",
++		  fill_pretty_llu(v1, sizeof(v1), ismt),
++		  "interactive moves to idle core");
++
+ 	strlcat(buf, SEP, bufsz);
+ 	strlcat(buf, "\n\n", bufsz);
+ 
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 68d88bbf4..e564ccfa8 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
+  *
+- * infinity_sched.h -- Infinity scheduler API (v4.6-gpu).
++ * infinity_sched.h -- Infinity scheduler API (v4.7-gpu).
+  *
+  * Architecture:
+  *
+@@ -159,6 +159,8 @@ DECLARE_PER_CPU(atomic_t, infinity_gpu_accounting_applied);
+ DECLARE_PER_CPU(atomic_t, infinity_gpu_idle_compensations);
+ DECLARE_PER_CPU(atomic_t, infinity_gpu_cpu_coupling_activations);
+ DECLARE_PER_CPU(atomic_t, infinity_gpu_passover_boosts);
++DECLARE_PER_CPU(atomic_t, infinity_cpufreq_interactive_count);
++DECLARE_PER_CPU(atomic_t, infinity_smt_interactive_count);
+ /* ------------------------------------------------------------------ */
+ /* API -- called from fair.c and rt.c                                   */
+ /* ------------------------------------------------------------------ */
+-- 
+2.55.0
+
