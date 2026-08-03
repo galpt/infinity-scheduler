@@ -1,4 +1,4 @@
-# infinity-scheduler (v4.7-gpu)
+# infinity-scheduler (v4.8-gpu)
 
 A fair-share CPU + GPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds.
 
@@ -27,8 +27,8 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 > The install script below is tested and working with the **Limine** bootloader. Support for **GRUB** and **systemd-boot** has been added but not yet tested on real hardware. If you encounter issues or have a working version for your bootloader, please send a pull request.
 
 ```bash
-# 1. Clone the repo (v4.7-gpu adds cpufreq hint, SMT placement, GPU job-type awareness; v4.6-gpu is stable GPU baseline)
-git clone -b v4.7-gpu --depth 1 https://github.com/galpt/infinity-scheduler.git
+# 1. Clone the repo (v4.8-gpu: IPC-wakeup boost, continuous cgroup shield with cross-CPU detection, RT valve hysteresis, PELT diagnostics — all always-on, no new knobs)
+git clone -b v4.8-gpu --depth 1 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
 # 2. Build and install (detects running kernel version automatically)
@@ -46,7 +46,7 @@ reboot
 # Verify it's running
 uname -r                              # → 7.1-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
-sysctl kernel.infinity_version        # → kernel.infinity_version = v4.7-gpu
+sysctl kernel.infinity_version        # → kernel.infinity_version = v4.8-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
 
 # Check GPU scheduling health
@@ -63,7 +63,7 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 |---|---|---|---|
 | `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
 | `infinity_running` | 1 (ro) | — | Active flag |
-| `infinity_version` | v4.7-gpu (ro) | — | Branch version string |
+| `infinity_version` | v4.8-gpu (ro) | — | Branch version string |
 | `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and drain counters |
 
 ## CPU scheduling
