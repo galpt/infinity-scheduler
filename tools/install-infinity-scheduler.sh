@@ -541,6 +541,15 @@ install_infinity_kernel() {
         # Refresh the module dependency database so mkinitcpio/dracut can
         # resolve the freshly built modules.
         depmod -a "$ver" 2>&1 || true
+
+        # Confirm the module really landed: a silent DKMS build failure
+        # would otherwise surface later as a confusing mkinitcpio
+        # "module not found" error.
+        if ! compgen -G "/lib/modules/$ver/updates/dkms/nvidia*.ko*" >/dev/null && \
+           ! compgen -G "/lib/modules/$ver/extramodules/nvidia*.ko*" >/dev/null; then
+            warn "nvidia modules missing for $ver — the DKMS build failed."
+            warn "  Check: sudo dkms status and /var/lib/dkms/nvidia/*/build/make.log"
+        fi
     fi
     local img="/boot/vmlinuz-infinity-$ver"
     local initrd="/boot/initramfs-infinity-$ver.img"
