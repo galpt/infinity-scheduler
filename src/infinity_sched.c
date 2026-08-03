@@ -574,6 +574,15 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
 			 alpha,
 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+	/*
+	 * With alpha up to 4096 (FP_ONE = 256) the step can exceed the
+	 * remaining gap to the ceiling, which would push ema past
+	 * INFINITY_BUDGET_MAX_NS (the weight math clamps it downstream,
+	 * but the raw value must stay within [0, BUDGET] so the
+	 * /proc/<pid>/infinity reading and the EMA invariants hold).
+	 */
+	if (step > INFINITY_BUDGET_MAX_NS - ctx->ema)
+		step = INFINITY_BUDGET_MAX_NS - ctx->ema;
 	ctx->ema += step;
 	atomic64_inc(this_cpu_ptr(&infinity_ema_climb_count));
 }
