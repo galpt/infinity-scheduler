@@ -1,0 +1,78 @@
+From 3e1a29638afbdb13942cc4786f1e56b5e124483a Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 00:31:00 +0700
+Subject: [PATCH 25/34] v4.8-gpu: guard cgroup EMA monotonicity and cross-rq
+ clock skew
+
+The cgroup group_ema decay path lacked the monotonicity guard the task
+and RT EMA paths already have, and its sleep stamp can cross rq-clock
+domains after migration.  A backward clock (broken TSC sync or cross-rq
+skew) now retains the EMA, the safe direction, while WARN_ON_ONCE
+guards surface any wraparound or corruption in both the climb and the
+decay paths.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+(cherry picked from commit 511afc5ba9796453c75f884a3d79ce9ab56398eb)
+---
+ kernel/sched/fair.c | 34 +++++++++++++++++++++++++++-------
+ 1 file changed, 27 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 53da44c0c..d79a7841e 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1371,10 +1371,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
+ 
+ 			if (delta > INFINITY_CGROUP_EMA_CLIMB_NS)
+ 				delta = INFINITY_CGROUP_EMA_CLIMB_NS;
++			u64 old = gcfs_rq->group_ema;
+ 			gcfs_rq->group_ema += div64_u64(
+ 				(INFINITY_CGROUP_EMA_CLIMB_NS - gcfs_rq->group_ema) *
+ 				delta * INFINITY_CGROUP_EMA_ALPHA,
+ 				INFINITY_CGROUP_EMA_CLIMB_NS * INFINITY_FP_ONE);
++			/* Infinity: the climb is saturating at INFINITY_CGROUP_EMA_CLIMB_NS;
++			 * a regression here indicates wraparound/corruption.
++			 */
++			WARN_ON_ONCE(gcfs_rq->group_ema < old);
+ 		}
+ 	}
+ 
+@@ -7085,13 +7090,28 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 
+ 		if (pcfs_rq->group_ema_sleep_start) {
+ 			u64 now = rq_clock(rq_of(pcfs_rq));
+-			u64 sleep_ns = now - pcfs_rq->group_ema_sleep_start;
+-			u64 periods = div64_u64(sleep_ns,
+-				INFINITY_CGROUP_EMA_HALFLIFE_NS);
+-			if (periods > 63)
+-				pcfs_rq->group_ema = 0;
+-			else
+-				pcfs_rq->group_ema >>= periods;
++
++			/*
++			 * Infinity: group_ema stamps are rq_clock() taken under the
++			 * owning rq's lock (fresh at stamp time).  The arrival may be
++			 * on another rq after migration, so the delta is guarded: a
++			 * backward clock (broken TSC sync / cross-rq skew) retains
++			 * the EMA -- the safe direction, same pattern as the task
++			 * (fair.c) and RT paths.
++			 */
++			if (now > pcfs_rq->group_ema_sleep_start) {
++				u64 old = pcfs_rq->group_ema;
++				u64 sleep_ns = now - pcfs_rq->group_ema_sleep_start;
++				u64 periods = div64_u64(sleep_ns,
++							 INFINITY_CGROUP_EMA_HALFLIFE_NS);
++
++				if (periods > 63)
++					pcfs_rq->group_ema = 0;
++				else
++					pcfs_rq->group_ema >>= periods;
++				/* Infinity: decay must never raise the EMA. */
++				WARN_ON_ONCE(pcfs_rq->group_ema > old);
++			}
+ 			pcfs_rq->group_ema_sleep_start = 0;
+ 		}
+ 	}
+-- 
+2.55.0
+

@@ -1,0 +1,99 @@
+From 6a956cb5c9caed608f12f2e0b33b2dca44675754 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 01:16:22 +0700
+Subject: [PATCH 34/34] v4.8-gpu: repair pre-existing kernel-ark port defects
+
+The v4.7 fedora port carried two defects from its regeneration: an
+orphaned 'if (unlikely(!se))' fallback block left at file scope in
+pick_next_entity (a syntax error that blocked compilation), and a
+misplaced stats-counters banner plus '=' alignment drift in
+infinity_sched.c.  Restore the pick_next_entity structure to match the
+7.1 reference while keeping the kernel-ark adaptation (no protect
+parameter), and normalize the reference implementation formatting so
+infinity_sched.c is byte-identical across arches.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           | 12 ++++++------
+ kernel/sched/infinity_sched.c | 17 ++++++++---------
+ 2 files changed, 14 insertions(+), 15 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index b0ce120dc..e0a54b6cb 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5731,18 +5731,18 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags);
+  * 3) pick the "last" process, for cache locality
+  * 4) do not run the "skip" process, if something else is available
+  */
+-	if (unlikely(!se)) {
+-		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
+-		se = __pick_first_entity(cfs_rq);
+-		if (!se)
+-			return NULL;
+-	}
+ static struct sched_entity *
+ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+ {
+ 	struct sched_entity *se;
+ 
+ 	se = pick_eevdf(cfs_rq);
++	if (unlikely(!se)) {
++		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
++		se = __pick_first_entity(cfs_rq);
++		if (!se)
++			return NULL;
++	}
+ 	if (se->sched_delayed) {
+ 		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
+ 		/*
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index b230595f6..9592bda0b 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -28,6 +28,7 @@
+ 
+ 
+ /* ------------------------------------------------------------------ */
++/* Stats counters                                                      */
+ /* ------------------------------------------------------------------ */
+ /*
+  * Per-CPU stat counters: increment sites run on arbitrary CPUs (tick,
+@@ -35,8 +36,6 @@
+  * one cache line across sockets on multi-node machines.  Per-CPU storage
+  * keeps the hot increments local; infinity_stats_total() sums all CPUs.
+  */
+-/* Stats counters                                                      */
+-/* ------------------------------------------------------------------ */
+ DEFINE_PER_CPU(atomic64_t, infinity_futex_boost_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_futex_boost_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
+@@ -271,18 +270,18 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	if (!buf)
+ 		return -ENOMEM;
+ 
+-	fbc = infinity_stats_total(&infinity_futex_boost_count);
+-	emc = infinity_stats_total(&infinity_ema_climb_count);
+-	wkc = infinity_stats_total(&infinity_wakeup_count);
+-	rtc = infinity_stats_total(&infinity_rt_throttle_count);
+-	gcb = infinity_stats_total(&infinity_gpu_completion_callbacks);
++	fbc  = infinity_stats_total(&infinity_futex_boost_count);
++	emc  = infinity_stats_total(&infinity_ema_climb_count);
++	wkc  = infinity_stats_total(&infinity_wakeup_count);
++	rtc  = infinity_stats_total(&infinity_rt_throttle_count);
++	gcb  = infinity_stats_total(&infinity_gpu_completion_callbacks);
+ 	gapp = infinity_stats_total(&infinity_gpu_accounting_applied);
+ 	gskp = infinity_stats_total(&infinity_gpu_accounting_skipped);
+-	gic = infinity_stats_total(&infinity_gpu_idle_compensations);
++	gic  = infinity_stats_total(&infinity_gpu_idle_compensations);
+ 	gcca = infinity_stats_total(&infinity_gpu_cpu_coupling_activations);
+ 	gpbo = infinity_stats_total(&infinity_gpu_passover_boosts);
+ 	gldr = infinity_stats_total(&infinity_gpu_lock_drain_rounds);
+-	icf = infinity_stats_total(&infinity_cpufreq_interactive_count);
++	icf  = infinity_stats_total(&infinity_cpufreq_interactive_count);
+ 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+ 	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
+ 	sec  = infinity_stats_total(&infinity_shield_engage_count);
+-- 
+2.55.0
+

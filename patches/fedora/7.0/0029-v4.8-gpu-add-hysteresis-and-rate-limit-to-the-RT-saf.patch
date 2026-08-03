@@ -1,0 +1,125 @@
+From 5ec4ab480fc35df74d552f86880ff8ffa697a648 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 00:37:49 +0700
+Subject: [PATCH 29/34] v4.8-gpu: add hysteresis and rate limit to the RT
+ safety valve
+
+Dual threshold (engage 95%, re-arm 85%) removes boundary oscillation;
+the requeue-time decay of rt_ema is required, because rt_ema climbs
+only on consume and decays only on wakeup, so without it the release
+threshold is unreachable for a continuously running rogue.  The decay
+quantum (100 ms) leaves ~57% of the EMA, dropping a 95% burner below
+the re-arm point in one requeue.  The jiffies-based window is
+global-safe under NO_HZ_FULL tick offload and gates both requeue and
+resched.  Documented interaction: the decayed rt_ema also widens the
+RR timeslice (infinity_rr_timeslice reads rt_ema) during the
+valve-release phase -- bounded by the same EMA math and accepted.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+(cherry picked from commit 2887593149c46a4f28bca4d07141b4793c3ac34a)
+---
+ include/linux/sched.h         |  2 ++
+ kernel/sched/infinity_sched.c |  2 ++
+ kernel/sched/infinity_sched.h |  9 +++++++++
+ kernel/sched/rt.c             | 38 ++++++++++++++++++++++++++++-------
+ 4 files changed, 44 insertions(+), 7 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 375f9befe..2b4685e0e 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -824,6 +824,8 @@ struct infinity_ctx {
+ 	u64		rt_last_sleep_ns; /* Sleep timestamp for RT EMA decay */
+ 	bool		futex_waiting;
+ 	bool		ipc_waiting;
++	bool		rt_valve_armed;
++	unsigned long	rt_valve_last_jiffies;
+ 
+ 	/**
+ 	 * @gpu_passovers: GPU scheduling pass-over count.
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 777790013..d6a715ac6 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -633,6 +633,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	atomic_set(&ctx->gpu_passovers, 0);
+ 	ctx->futex_waiting = false;
+ 	ctx->ipc_waiting = false;
++	ctx->rt_valve_armed = false;
++	ctx->rt_valve_last_jiffies = 0;
+ }
+ /* ------------------------------------------------------------------ */
+ /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index df9078acc..73f074608 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -176,6 +176,15 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+  * of the budget to prevent unit mismatch errors.
+  */
+ #define INFINITY_RT_DEMOTE_THRESHOLD    (INFINITY_RT_BUDGET_NS * 95ULL / 100ULL)
++/** RT valve: release (re-arm) threshold -- 10pp hysteresis band. */
++#define INFINITY_RT_REARM_THRESHOLD	(INFINITY_RT_BUDGET_NS * 85ULL / 100ULL)
++/** RT valve: min interval between forced requeues while engaged (ms). */
++#define INFINITY_RT_REQUEUE_MS		5
++/** RT valve: synthetic sleep applied to rt_ema on each forced requeue
++ *  (100ms => 57% of the current EMA remains: one requeue drops a
++ *  100%-burner from 95-100% to ~54-57%, below the 85% re-arm point).
++ */
++#define INFINITY_RT_REQUEUE_DECAY_NS	100000000ULL
+ 
+ /* ------------------------------------------------------------------ */
+ /* External sysctl tunables                                            */
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index d5b7ade11..3a82e015a 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2549,14 +2549,38 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 	/* Infinity: force a rogue SCHED_FIFO (>95% rt_ema) to yield natively
+ 	 * within the RT class -- no cross-class demotion needed.  Kernel
+ 	 * threads (migration, watchdog, IRQ handlers) are exempt.
++	 * Hysteresis: engage >= 95%, re-arm only after rt_ema drops below
++	 * 85% (INFINITY_RT_REARM_THRESHOLD).  Rate limit: at most one
++	 * requeue per INFINITY_RT_REQUEUE_MS while engaged; the window is
++	 * jiffies-based because task_tick_rt() may run on a remote CPU
++	 * under NO_HZ_FULL tick offload (jiffies is global).  The rate
++	 * limit gates both requeue_task_rt() and resched_curr().  On the
++	 * forced requeue, rt_ema is decayed by a fixed synthetic sleep so
++	 * the release threshold is actually reachable for a continuously
++	 * running rogue FIFO (rt_ema otherwise climbs only on consume and
++	 * decays only on wakeup).
+ 	 */
+-	if (p->policy != SCHED_RR &&
+-	    !(p->flags & PF_KTHREAD) &&
+-	    p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
+-		requeue_task_rt(rq, p, 0);
+-		resched_curr(rq);
+-		atomic64_inc(this_cpu_ptr(&infinity_rt_throttle_count));
+-		return;
++	if (p->policy != SCHED_RR && !(p->flags & PF_KTHREAD)) {
++		if (p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
++			if (!p->infinity.rt_valve_armed ||
++			    time_after_eq(jiffies,
++					  p->infinity.rt_valve_last_jiffies +
++					  msecs_to_jiffies(INFINITY_RT_REQUEUE_MS))) {
++				p->infinity.rt_valve_armed = true;
++				p->infinity.rt_valve_last_jiffies = jiffies;
++				requeue_task_rt(rq, p, 0);
++				resched_curr(rq);
++				atomic64_inc(this_cpu_ptr(&infinity_rt_throttle_count));
++				infinity_rt_wakeup(&p->infinity,
++						   INFINITY_RT_REQUEUE_DECAY_NS);
++			}
++			return;
++		}
++		if (p->infinity.rt_valve_armed &&
++		    p->infinity.rt_ema < INFINITY_RT_REARM_THRESHOLD) {
++			p->infinity.rt_valve_armed = false;
++			p->infinity.rt_valve_last_jiffies = 0;
++		}
+ 	}
+ 
+ 	/*
+-- 
+2.55.0
+
