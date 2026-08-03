@@ -99,7 +99,7 @@ flowchart TB
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
-            WQ --> DECAY["infinity_wakeup()\n───\nema = f(sleep_ns)\nperiod-shift bounds tracking\n& 128-bit math safety"]
+            WQ --> DECAY["infinity_wakeup()\n───\nema = f(sleep_ns)\nperiod-shift decay (u64)\nperiods > 63 → ema = 0"]
             DECAY --> WAKE["Waking task\nhas higher weight →\nnaturally earlier deadline"]
             WAKE --> RUN
         end
