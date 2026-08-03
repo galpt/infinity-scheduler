@@ -1,0 +1,30 @@
+From c6faee9ae0c641cee806bc5cd15a02188018845c Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 01:30:16 +0700
+Subject: [PATCH 23/23] v4.8-gpu: count EMA climbs in the 7.2 port
+
+The 7.2 v4.7 port never incremented infinity_ema_climb_count, so the
+'EMA climbs' row in infinity_stats read zero on the 7.2 arch.  Add the
+increment at the climb site, matching the 7.1 reference, so the
+monitoring surface reports the same signal on every arch.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 697a4006c..a505fe83c 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -487,6 +487,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+ 	if (step > INFINITY_BUDGET_MAX_NS - ctx->ema)
+ 		step = INFINITY_BUDGET_MAX_NS - ctx->ema;
+ 	ctx->ema += step;
++	atomic64_inc(this_cpu_ptr(&infinity_ema_climb_count));
+ }
+ /* ------------------------------------------------------------------ */
+ /* infinity_wakeup -- EMA decay on wakeup                               */
+-- 
+2.55.0
+

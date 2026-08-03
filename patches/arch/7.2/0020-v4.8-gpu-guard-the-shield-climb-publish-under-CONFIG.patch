@@ -1,7 +1,7 @@
 From 135b5d88e8b696b5933b226d0ebce3d9b8ceee02 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 20/22] v4.8-gpu: guard the shield climb publish under
+Subject: [PATCH 20/23] v4.8-gpu: guard the shield climb publish under
  CONFIG_FAIR_GROUP_SCHED
 
 The upward-only publish of the shield high-water mark reads gcfs_rq->tg,
