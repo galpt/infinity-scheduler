@@ -54,7 +54,8 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 ```
 
 > [!NOTE]
-> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and drain counters.
+> 1. Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and drain counters.
+> 2. The GPU rows only track DRM-scheduler-based GPUs (e.g., AMD, Intel Xe/Arc, and the open-source nouveau/NVK stack). NVIDIA's drivers never submit jobs through the DRM GPU scheduler, so on NVIDIA-only machines the GPU section reads zero ("No GPU jobs recorded yet") even while the CPU features work normally. This is by design. Switching to nouveau/NVK would restore the counters, but it could cost roughly half the frame rate and would lose ray tracing, CUDA, and NVENC. It's not a trade worth making just for a stats table.
 
 ## Tunables
 
