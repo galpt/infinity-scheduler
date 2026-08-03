@@ -410,6 +410,26 @@ detect_nvidia() {
     return 1
 }
 
+# True when a DKMS nvidia source is installed or registered.  Checks the
+# dkms database and the distro package database in addition to 'dkms
+# status', whose output can come up empty when run under sudo on some
+# setups.
+nvidia_dkms_source_available() {
+    [ -d /var/lib/dkms/nvidia ] && return 0
+    if command -v pacman &>/dev/null && pacman -Q nvidia-open-dkms >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v dpkg &>/dev/null && { dpkg -s nvidia-open-kernel-dkms >/dev/null 2>&1 || \
+                                        dpkg -s nvidia-kernel-dkms >/dev/null 2>&1; }; then
+        return 0
+    fi
+    if command -v rpm &>/dev/null && { rpm -q akmod-nvidia >/dev/null 2>&1 || \
+                                       rpm -q nvidia-open-dkms >/dev/null 2>&1; }; then
+        return 0
+    fi
+    dkms status 2>/dev/null | grep -q '^nvidia/'
+}
+
 check_nvidia() {
     # If an NVIDIA GPU is present, ensure the DKMS infrastructure and a
     # DKMS nvidia source are available before the build.  The actual
@@ -441,12 +461,12 @@ check_nvidia() {
         return 0
     fi
 
-    # A DKMS nvidia source must be registered so the module can be built
+    # A DKMS nvidia source must be available so the module can be built
     # for the Infinity kernel.  The CachyOS-specific prebuilt package
     # (linux-cachyos-nvidia-open) provides modules only for the CachyOS
     # kernel and conflicts with the DKMS variant, so it is replaced with
     # nvidia-open-dkms when present.
-    if dkms status 2>/dev/null | grep -q '^nvidia/'; then
+    if nvidia_dkms_source_available; then
         info "DKMS NVIDIA source found — modules will be rebuilt for the new kernel."
         return 0
     fi
@@ -476,8 +496,9 @@ check_nvidia() {
         warn "Unsupported package manager — install an NVIDIA DKMS driver manually, then re-run."
     fi
 
-    if ! dkms status 2>/dev/null | grep -q '^nvidia/'; then
+    if ! nvidia_dkms_source_available; then
         warn "NVIDIA DKMS source not registered after install — check the driver package."
+        warn "  dkms status output: $(dkms status 2>&1 | head -3 | tr '\n' ';')"
     fi
 }
 
@@ -529,7 +550,11 @@ install_infinity_kernel() {
     # always match the kernel just built.
     if [ "${NVIDIA_PRESENT:-0}" = "1" ] && command -v dkms &>/dev/null; then
         local nv_ver
-        nv_ver=$(dkms status 2>/dev/null | grep '^nvidia/' | head -1 | cut -d, -f1 | cut -d/ -f2)
+        # Prefer the dkms database directory; 'dkms status' output can be
+        # empty under sudo on some setups.  Skip the kernel-* symlinks.
+        nv_ver=$(ls /var/lib/dkms/nvidia/ 2>/dev/null | grep -v '^kernel-' | head -1)
+        [ -n "$nv_ver" ] || \
+            nv_ver=$(dkms status 2>/dev/null | grep '^nvidia/' | head -1 | cut -d, -f1 | cut -d/ -f2)
         info "Rebuilding NVIDIA modules for kernel $ver via DKMS..."
         if [ -n "$nv_ver" ]; then
             dkms remove "nvidia/$nv_ver" -k "$ver" 2>/dev/null || true
