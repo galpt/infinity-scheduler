@@ -20,6 +20,10 @@ warn()  { echo -e "  ${YELLOW}⚠${NC} $*"; }
 err()   { echo -e "  ${RED}✗${NC} $*"; }
 die()   { err "$*"; exit 1; }
 
+# Set to 1 by check_nvidia() when an NVIDIA GPU is present; gates the
+# DKMS rebuild and the nvidia_drm.modeset=1 setup in the install step.
+NVIDIA_PRESENT=0
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFINITY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KERNEL_VER="${KERNEL_VER:-$(uname -r | grep -oP '^\d+\.\d+(\.\d+)?')}"
@@ -394,38 +398,83 @@ check_deps() {
     ok "All build dependencies satisfied"
 }
 
-check_nvidia() {
-    # If NVIDIA is in use, ensure DKMS infrastructure is available before
-    # the build.  The actual module rebuild (dkms autoinstall) still happens
-    # after kernel install, but installing the DKMS package is done here
-    # so any package download/install failure is caught immediately rather
-    # than after 30 minutes of kernel compilation.
-    if ! lsmod 2>/dev/null | grep -q "^nvidia "; then
-        return 0  # NVIDIA not in use, nothing to do
-    fi
-    if command -v dkms &>/dev/null && dkms status 2>/dev/null | grep -q "^nvidia"; then
-        info "DKMS + NVIDIA source found — will rebuild after kernel install."
+detect_nvidia() {
+    # Prefer hardware detection: works even when the driver is not loaded
+    # (e.g. after booting a kernel without NVIDIA modules, or on Optimus
+    # laptops where the dGPU is not the display device).
+    if command -v lspci &>/dev/null && lspci 2>/dev/null | grep -qiE 'nvidia|\[10de:'; then
         return 0
     fi
-    # NVIDIA active but no DKMS source — install it now.
-    # The CachyOS-specific nvidia package (linux-cachyos-nvidia-open) provides
-    # pre-built modules only for the CachyOS kernel and conflicts with the DKMS
-    # version.  We need to replace it with nvidia-open-dkms so modules can be
-    # built for any kernel, including our Infinity kernel.
-    info "NVIDIA driver active — replacing CachyOS nvidia package with nvidia-open-dkms..."
+    # Fallback: the driver is loaded in the current kernel.
+    lsmod 2>/dev/null | grep -q '^nvidia ' && return 0
+    return 1
+}
+
+check_nvidia() {
+    # If an NVIDIA GPU is present, ensure the DKMS infrastructure and a
+    # DKMS nvidia source are available before the build.  The actual
+    # module rebuild happens after kernel install, but installing the
+    # driver package here catches any download/install failure early,
+    # before 30 minutes of kernel compilation.
+    if ! detect_nvidia; then
+        info "No NVIDIA GPU detected — skipping NVIDIA driver setup."
+        return 0
+    fi
+    NVIDIA_PRESENT=1
+
+    # DKMS itself must be available to build nvidia for the new kernel.
+    if ! command -v dkms &>/dev/null; then
+        info "dkms not found — installing it..."
+        if command -v pacman &>/dev/null; then
+            pacman -S --needed --noconfirm dkms 2>&1 | tail -3
+        elif command -v apt-get &>/dev/null; then
+            apt-get update -qq 2>/dev/null || true
+            apt-get install -y dkms 2>&1 | tail -3
+        elif command -v dnf &>/dev/null; then
+            dnf install -y dkms 2>&1 | tail -3
+        else
+            warn "Unsupported package manager — install dkms manually."
+        fi
+    fi
+    if ! command -v dkms &>/dev/null; then
+        warn "dkms unavailable — NVIDIA modules won't be built for the Infinity kernel."
+        return 0
+    fi
+
+    # A DKMS nvidia source must be registered so the module can be built
+    # for the Infinity kernel.  The CachyOS-specific prebuilt package
+    # (linux-cachyos-nvidia-open) provides modules only for the CachyOS
+    # kernel and conflicts with the DKMS variant, so it is replaced with
+    # nvidia-open-dkms when present.
+    if dkms status 2>/dev/null | grep -q '^nvidia/'; then
+        info "DKMS NVIDIA source found — modules will be rebuilt for the new kernel."
+        return 0
+    fi
+
+    info "NVIDIA GPU detected but no DKMS driver source installed — installing..."
     if command -v pacman &>/dev/null; then
         pacman -Rdd --noconfirm linux-cachyos-nvidia-open 2>/dev/null || true
-        pacman -S --needed --noconfirm nvidia-open-dkms || \
+        pacman -S --needed --noconfirm nvidia-open-dkms 2>&1 | tail -3 || \
             warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
     elif command -v apt-get &>/dev/null; then
-        apt-get install -y nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
+        apt-get update -qq 2>/dev/null || true
+        if ! apt-get install -y nvidia-open-kernel-dkms 2>&1; then
+            if ! apt-get install -y nvidia-kernel-dkms 2>&1; then
+                apt-get install -y nvidia-driver 2>&1 || \
+                    warn "NVIDIA DKMS driver install failed (NVIDIA won't be available on Infinity kernel)"
+            fi
+        fi
     elif command -v dnf &>/dev/null; then
-        dnf install -y nvidia-open-dkms || \
-            warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
+        if ! dnf install -y akmod-nvidia 2>&1; then
+            dnf install -y nvidia-open-dkms 2>&1 || \
+                warn "NVIDIA DKMS driver install failed (NVIDIA won't be available on Infinity kernel)"
+        fi
     else
-        warn "Unsupported package manager — NVIDIA won't be available on the Infinity kernel."
-        warn "  To enable: install nvidia-open-dkms for your distro, then re-run."
+        warn "Unsupported package manager — install an NVIDIA DKMS driver manually, then re-run."
+    fi
+
+    if ! dkms status 2>/dev/null | grep -q '^nvidia/'; then
+        warn "NVIDIA DKMS source not registered after install — check the driver package."
     fi
 }
 
@@ -470,17 +519,28 @@ install_infinity_kernel() {
     ver=$(make kernelrelease 2>/dev/null || echo "unknown")
 
     # Rebuild NVIDIA modules for the new kernel via DKMS.
-    # dkms autoinstall does build + install for the new kernel.
-    # The nvidia-open-dkms package was already installed by check_nvidia().
-    if lsmod 2>/dev/null | grep -q "^nvidia " && command -v dkms &>/dev/null; then
+    # autoinstall skips kernel versions that are already registered,
+    # which leaves modules from a previous build of the same kernel
+    # string behind (mkinitcpio then reports "module not found" and the
+    # module may fail to load).  Force a clean rebuild so the modules
+    # always match the kernel just built.
+    if [ "${NVIDIA_PRESENT:-0}" = "1" ] && command -v dkms &>/dev/null; then
+        local nv_ver
+        nv_ver=$(dkms status 2>/dev/null | grep '^nvidia/' | head -1 | cut -d, -f1 | cut -d/ -f2)
         info "Rebuilding NVIDIA modules for kernel $ver via DKMS..."
-        # Remove stale modules from any previous runs to give DKMS a clean slate
-        rm -rf "/lib/modules/${ver}/extramodules/nvidia"* 2>/dev/null || true
-        if ! dkms autoinstall -k "$ver" 2>&1; then
-            # autoinstall can fail if install step gets confused (e.g. stale
-            # depmod data).  The build may have succeeded — try install alone.
-            dkms install -m "nvidia" -v "$(dkms status 2>/dev/null | grep "^nvidia/" | head -1 | cut -d, -f1 | cut -d/ -f2)" -k "$ver" 2>&1 || true
+        if [ -n "$nv_ver" ]; then
+            dkms remove "nvidia/$nv_ver" -k "$ver" 2>/dev/null || true
+            if ! dkms autoinstall -k "$ver" 2>&1; then
+                # autoinstall can fail if the install step gets confused
+                # (e.g. stale depmod data) — force the install.
+                dkms install -f -m nvidia -v "$nv_ver" -k "$ver" 2>&1 || true
+            fi
+        else
+            dkms autoinstall -k "$ver" 2>&1 || true
         fi
+        # Refresh the module dependency database so mkinitcpio/dracut can
+        # resolve the freshly built modules.
+        depmod -a "$ver" 2>&1 || true
     fi
     local img="/boot/vmlinuz-infinity-$ver"
     local initrd="/boot/initramfs-infinity-$ver.img"
@@ -513,13 +573,15 @@ install_infinity_kernel() {
     # The CachyOS kernel patches this into the driver itself, but our
     # vanilla kernel doesn't have that patch — without it, the NVIDIA
     # driver defaults to modeset=false and the display stays black.
-    if lsmod 2>/dev/null | grep -q "^nvidia_drm " && ! echo "$cmdline" | grep -q "nvidia_drm.modeset=1"; then
+    # Keyed on hardware presence rather than lsmod so a fresh install
+    # (where the driver cannot be loaded yet) still gets the setting.
+    if [ "${NVIDIA_PRESENT:-0}" = "1" ] && ! echo "$cmdline" | grep -q "nvidia_drm.modeset=1"; then
         cmdline="$cmdline nvidia_drm.modeset=1"
     fi
 
     # Also create a modprobe.d config as a fallback so modeset is
     # enabled even if the cmdline parameter is lost.
-    if lsmod 2>/dev/null | grep -q "^nvidia_drm "; then
+    if [ "${NVIDIA_PRESENT:-0}" = "1" ]; then
         mkdir -p /etc/modprobe.d
         echo "options nvidia_drm modeset=1" > /etc/modprobe.d/nvidia-infinity.conf
     fi
