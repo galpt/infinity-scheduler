@@ -11,11 +11,11 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/            24 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/             24 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/             24 patches — Vanilla kernel.org 7.1
-│   ├── arch/7.2/             13 patches — Vanilla kernel.org 7.2 (RC base)
-│   └── fedora/7.0/           24 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/            36 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/             33 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/             33 patches — Vanilla kernel.org 7.1
+│   ├── arch/7.2/             23 patches — Vanilla kernel.org 7.2 (RC base)
+│   └── fedora/7.0/           34 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -44,7 +44,7 @@ reboot
 
 ```bash
 # Verify it's running
-uname -r                              # → 7.1-infinity
+uname -r                              # → 7.1.5-infinity
 sysctl kernel.infinity_running        # → kernel.infinity_running = 1
 sysctl kernel.infinity_version        # → kernel.infinity_version = v4.8-gpu
 sudo dmesg | grep Infinity            # → Infinity scheduler active: smt_divisor=...
@@ -85,10 +85,10 @@ flowchart TB
 
         WEIGHT --> EEVDF["EEVDF\n───\ndeadline = vruntime + slice/weight\nweight↑ → earlier deadline"]
 
-        TASK --> FUTEX["futex_do_wait()\n───\nsets futex_waiting = true\n→ schedule() → cleared on wakeup"]
+        TASK --> FUTEX["futex_do_wait() / wait_woken()\n───\nset futex_waiting / ipc_waiting\n→ schedule() → cleared on wakeup"]
         class FUTEX algo
 
-        FUTEX --> PLACE["place_entity()\n───\nif futex_waiting:\nvslice >>= 1\n→ earlier deadline on wakeup"]
+        FUTEX --> PLACE["place_entity()\n───\nfutex: vslice >>= 1\nipc (ema==0): gradient 2x→1x\n→ earlier deadline on wakeup"]
         class PLACE algo
 
         PLACE --> GAUGE
@@ -119,7 +119,7 @@ flowchart TB
         RT_D --> RT_S["infinity_rr_timeslice()\n───\nrt_ema↑ → timeslice↓\n100ms → 10ms"]
         class RT_S rtN
 
-        RT_S --> RT_Q["Task stays in\noriginal priority queue\n(safety valve demotes\nrogue FIFO at >95% rt_ema)"]
+        RT_S --> RT_Q["Task stays in\noriginal priority queue\n(safety valve requeues\nrogue FIFO at ≥95% rt_ema\nhysteresis + rate limit)"]
     end
 
     subgraph INFRA["Scheduler infrastructure"]
@@ -255,9 +255,9 @@ passover → gpu_passovers (GPU→CPU feedback)"]
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
 | Adaptive RR timeslice | No | Yes (rt_ema-based, 10–100ms) |
 | Hardware-adaptive alpha | No | Yes (2048–4096 via cpu_capacity) |
-| Futex IPC wakeup boost | No | Yes (vslice halved on futex wakeup) |
+| Futex IPC wakeup boost | No | Yes (vslice halved on futex wakeup; v4.8: also wait_woken IPC wakes, ema==0-gated gradient) |
 | Migration hysteresis | No | Yes (EMA-driven cache pinning) |
-| Cgroup defense shield | No | Yes (aggregate group EMA) |
+| Cgroup defense shield | No | Yes (group EMA, quantized cross-CPU ramp) |
 | RT cross-class safety | No | Yes (native requeue throttling) |
 | Asymmetric core placement | No | Yes (EMA-guided P/E core bias) |
 | GPU time tracking | No | Yes (EMA per DRM entity) |
