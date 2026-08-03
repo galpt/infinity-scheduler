@@ -38,6 +38,8 @@
  */
 DEFINE_PER_CPU(atomic64_t, infinity_futex_boost_count);
 EXPORT_PER_CPU_SYMBOL(infinity_futex_boost_count);
+DEFINE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
+EXPORT_PER_CPU_SYMBOL(infinity_ipc_boost_count);
 DEFINE_PER_CPU(atomic64_t, infinity_ema_climb_count);
 EXPORT_PER_CPU_SYMBOL(infinity_ema_climb_count);
 DEFINE_PER_CPU(atomic64_t, infinity_wakeup_count);
@@ -62,11 +64,15 @@ DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
 EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
 DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
 EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+DEFINE_PER_CPU(atomic64_t, infinity_shield_engage_count);
+EXPORT_PER_CPU_SYMBOL(infinity_shield_engage_count);
+DEFINE_PER_CPU(atomic64_t, infinity_divergence_count);
+EXPORT_PER_CPU_SYMBOL(infinity_divergence_count);
 /* Sysctl tunables                                                     */
 /* ------------------------------------------------------------------ */
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 static int infinity_running_flag = 1;
-static const char infinity_version[] = "v4.7-gpu";
+static const char infinity_version[] = "v4.8-gpu";
 static int clamp_smt_divisor(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
 {
@@ -218,13 +224,33 @@ static u64 infinity_stats_total(const atomic64_t __percpu *counter)
 	return total;
 }
 
+#ifdef CONFIG_FAIR_GROUP_SCHED
+/*
+ * tg_shield_visitor -- count task groups whose shield is engaged (cached
+ * cross-CPU EMA max at/above the engage threshold).  Read-only, no control
+ * path; called under rcu_read_lock() from the stats handler, which is what
+ * walk_tg_tree_from() requires.
+ */
+static int tg_shield_visitor(struct task_group *tg, void *data)
+{
+	int *n = data;
+
+	if (tg != &root_task_group &&
+	    READ_ONCE(tg->infinity_shield.shield_ema_max) >=
+	    INFINITY_SHIELD_ENGAGE_THRESHOLD_NS)
+		(*n)++;
+	return 0;
+}
+#endif
+
 static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 				       void *buffer, size_t *lenp,
 				       loff_t *ppos)
 {
 	char *buf;
 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
-	u64 gic, gcca, gpbo, gldr, icf, ismt;
+	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb, sec;
+	u64 dvg;
 	char v1[16];
 	const size_t bufsz = 4096;
 
@@ -257,6 +283,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	gldr = infinity_stats_total(&infinity_gpu_lock_drain_rounds);
 	icf  = infinity_stats_total(&infinity_cpufreq_interactive_count);
 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
+	sec  = infinity_stats_total(&infinity_shield_engage_count);
+	dvg  = infinity_stats_total(&infinity_divergence_count);
 
 	buf[0] = '\0';
 	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
@@ -308,7 +337,45 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 		  fill_pretty_llu(v1, sizeof(v1), ismt),
 		  "interactive moves to idle core");
 
+	if (emc) {
+		char pct[16];
 
+		scnprintf(pct, sizeof(pct), "%llu%% of tasks",
+			  mul_u64_u32_div(ipb, 100, emc));
+		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+			  "IPC boosts",
+			  fill_pretty_llu(v1, sizeof(v1), ipb),
+			  pct);
+	} else {
+		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+			  "IPC boosts",
+			  fill_pretty_llu(v1, sizeof(v1), ipb),
+			  "interactive IPC wakeups boosted");
+	}
+
+	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+		  "Shield engages",
+		  fill_pretty_llu(v1, sizeof(v1), sec),
+		  "group share reductions applied");
+
+	{
+		int n = 0;
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+		rcu_read_lock();
+		walk_tg_tree_from(&root_task_group, tg_shield_visitor, tg_nop, &n);
+		rcu_read_unlock();
+#endif
+		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+			  "Group shields",
+			  fill_pretty_llu(v1, sizeof(v1), n),
+			  "groups defending interactive tasks");
+	}
+
+	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
+		  "EMA vs PELT divergence",
+		  fill_pretty_llu(v1, sizeof(v1), dvg),
+		  "tasks flagged");
 
 	strlcat(buf, SEP, bufsz);
 	strlcat(buf, "\n\n", bufsz);
@@ -573,6 +640,9 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->rt_last_sleep_ns = 0;
 	atomic_set(&ctx->gpu_passovers, 0);
 	ctx->futex_waiting = false;
+	ctx->ipc_waiting = false;
+	ctx->rt_valve_armed = false;
+	ctx->rt_valve_last_jiffies = 0;
 }
 /* ------------------------------------------------------------------ */
 /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
@@ -647,3 +717,13 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
 	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
 				      / 100ULL));
 }
+/* ------------------------------------------------------------------ */
+/* infinity_is_interactive_candidate -- sched-class gate for the DRM   */
+/* scheduler's CPU<->GPU coupling (see include/drm/gpu_scheduler.h)    */
+/* ------------------------------------------------------------------ */
+bool infinity_is_interactive_candidate(struct task_struct *p)
+{
+	return p->sched_class == &fair_sched_class &&
+	       !task_has_idle_policy(p);
+}
+EXPORT_SYMBOL_GPL(infinity_is_interactive_candidate);

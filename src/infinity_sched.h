@@ -39,6 +39,7 @@
 #ifndef __INFINITY_SCHED_H
 #define __INFINITY_SCHED_H
 #include <linux/sched.h>
+#include <linux/math64.h>
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
 /* ------------------------------------------------------------------ */
@@ -59,6 +60,9 @@
  */
 #define INFINITY_WEIGHT_SLOPE_NUM	98
 #define INFINITY_WEIGHT_SLOPE_DEN	100
+/** IPC boost gradient: full 2x below 1ms sleep, linear falloff to 1x at 8ms. */
+#define INFINITY_IPC_GRADIENT_FULL_NS	1000000ULL
+#define INFINITY_IPC_GRADIENT_MAX_NS	8000000ULL
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
 /* ------------------------------------------------------------------ */
@@ -115,6 +119,28 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 	}
 	return base;
 }
+
+/**
+ * infinity_ipc_gradient -- IPC-wakeup vslice reduction, by sleep duration.
+ * @sleep_ns:  Time the task slept (ns), 0 if unknown.
+ *
+ * Full 2x boost (red = FP_ONE/2) at sleep <= 1ms, linear falloff to no
+ * boost (red = 0) at >= 8ms.  div64_u64 truncates down, so the result
+ * is monotone non-increasing in sleep_ns -- no boost oscillation.
+ *
+ * Return: Reduction [0, FP_ONE/2] in fixed-point units.
+ */
+static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+{
+	u64 span = INFINITY_IPC_GRADIENT_MAX_NS - INFINITY_IPC_GRADIENT_FULL_NS;
+
+	if (sleep_ns <= INFINITY_IPC_GRADIENT_FULL_NS)
+		return INFINITY_FP_ONE / 2;
+	if (sleep_ns >= INFINITY_IPC_GRADIENT_MAX_NS)
+		return 0;
+	return div64_u64((span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS)) *
+			 INFINITY_FP_ONE / 2, span);
+}
 /* ------------------------------------------------------------------ */
 /* Cgroup EMA constants                                                */
 /* ------------------------------------------------------------------ */
@@ -124,8 +150,15 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 #define INFINITY_CGROUP_EMA_ALPHA	1
 /** Cgroup EMA half-life for idle decay (16ms). */
 #define INFINITY_CGROUP_EMA_HALFLIFE_NS	16000000ULL
-/** Maximum group weight reduction (50% -- never fully starves). */
-#define INFINITY_CGROUP_WEIGHT_REDUCE_PCT 50
+/** Shield v2: engage at 40% aggregate EMA, linear to 50% reduction at 100%,
+ *  quantized to 5pp steps (at most one reweight per bucket crossing). */
+#define INFINITY_SHIELD_ENGAGE_PCT		40
+#define INFINITY_SHIELD_MAX_REDUCE_PCT		50
+#define INFINITY_SHIELD_STEP_PCT		5
+/** Cross-CPU max recompute window (ms) -- half the 16ms empty-rq half-life. */
+#define INFINITY_SHIELD_RESCAN_MS		8
+#define INFINITY_SHIELD_ENGAGE_THRESHOLD_NS \
+	(INFINITY_CGROUP_EMA_CLIMB_NS * INFINITY_SHIELD_ENGAGE_PCT / 100ULL)
 /* ------------------------------------------------------------------ */
 /* RT EMA constants                                                    */
 /* ------------------------------------------------------------------ */
@@ -142,6 +175,22 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
  * of the budget to prevent unit mismatch errors.
  */
 #define INFINITY_RT_DEMOTE_THRESHOLD    (INFINITY_RT_BUDGET_NS * 95ULL / 100ULL)
+/** RT valve: release (re-arm) threshold -- 10pp hysteresis band. */
+#define INFINITY_RT_REARM_THRESHOLD	(INFINITY_RT_BUDGET_NS * 85ULL / 100ULL)
+/** RT valve: min interval between forced requeues while engaged (ms). */
+#define INFINITY_RT_REQUEUE_MS		5
+/** RT valve: synthetic sleep applied to rt_ema on each forced requeue
+ *  (100ms => 57% of the current EMA remains: one requeue drops a
+ *  100%-burner from 95-100% to ~54-57%, below the 85% re-arm point). */
+#define INFINITY_RT_REQUEUE_DECAY_NS	100000000ULL
+
+/* ------------------------------------------------------------------ */
+/* PELT divergence diagnostic                                          */
+/* ------------------------------------------------------------------ */
+/** PELT divergence diagnostic: |ema_pct - util_pct| threshold (pp). */
+#define INFINITY_DIVERGENCE_THRESHOLD		50
+#define INFINITY_DIVERGENCE_THRESHOLD_UNITS \
+	(INFINITY_DIVERGENCE_THRESHOLD * SCHED_CAPACITY_SCALE / 100)
 
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
@@ -151,6 +200,7 @@ extern unsigned long infinity_tune_smt_divisor;
 /* Stats counters                                                      */
 /* ------------------------------------------------------------------ */
 DECLARE_PER_CPU(atomic64_t, infinity_futex_boost_count);
+DECLARE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
 DECLARE_PER_CPU(atomic64_t, infinity_ema_climb_count);
 DECLARE_PER_CPU(atomic64_t, infinity_wakeup_count);
 DECLARE_PER_CPU(atomic64_t, infinity_rt_throttle_count);
@@ -160,6 +210,8 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
 DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
 DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
 DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+DECLARE_PER_CPU(atomic64_t, infinity_shield_engage_count);
+DECLARE_PER_CPU(atomic64_t, infinity_divergence_count);
 /* ------------------------------------------------------------------ */
 /* API -- called from fair.c and rt.c                                   */
 /* ------------------------------------------------------------------ */
