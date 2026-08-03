@@ -19,11 +19,11 @@ for s in $SCENARIOS; do
 	[ -x "scenarios/$s.sh" ] || { echo "RESULT $s FAIL script-missing 0 missing"; continue; }
 	out=$(timeout $TIMEOUT "scenarios/$s.sh" 2>&1)
 	rc=$?
-	line=$(printf '%s\n' "$out" | grep '^RESULT ' | tail -1)
-	if [ -z "$line" ]; then
-		line="RESULT $s $( [ "$rc" -eq 0 ] && echo WARN || echo FAIL ) no-result rc=$rc no-metric-line"
+	lines=$(printf '%s\n' "$out" | grep '^RESULT ')
+	if [ -z "$lines" ]; then
+		lines="RESULT $s $( [ "$rc" -eq 0 ] && echo WARN || echo FAIL ) no-result rc=$rc no-metric-line"
 	fi
-	printf '%s\n' "$line" | tee -a "$RESULT_FILE"
+	printf '%s\n' "$lines" | tee -a "$RESULT_FILE"
 done
 
 echo
