@@ -1,0 +1,138 @@
+From 21e15f48b0c190ab600ee56f01185f586062e64b Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 00:37:49 +0700
+Subject: [PATCH 30/36] v4.8-gpu: expose PELT divergence diagnostics in the
+ stats surfaces
+
+Observability only, no control path.  Three per-task PELT fields are
+appended to /proc/<pid>/infinity (util_avg, runnable_avg, util_est with
+the UTIL_AVG_UNCHANGED bit masked).  A per-CPU counter flags sleep
+transitions where |ema_pct - util_pct| exceeds 50 percentage points;
+EMA reacts in ms and PELT in hundreds of ms, so transient divergence is
+expected, and the harness's ema-pelt-trace scenario validates the
+diagnostic end to end.  Proc handler reads use READ_ONCE with no
+rq->lock (deadlock rule), tolerating 32-bit tearing per the existing
+precedent.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+(cherry picked from commit dfd7ac3d96d2b9c03248564d9d69d4ecada6f9f2)
+---
+ fs/proc/base.c                |  4 ++++
+ kernel/sched/fair.c           | 16 ++++++++++++++++
+ kernel/sched/infinity_sched.c |  9 +++++++++
+ kernel/sched/infinity_sched.h |  9 +++++++++
+ 4 files changed, 38 insertions(+)
+
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index 7a486760f..746c1cd07 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -3298,6 +3298,10 @@ static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
+ 	seq_printf(m, "futex_waiting:\t%d\n", ctx->futex_waiting);
+ 	seq_printf(m, "gpu_passovers:\t%d\n",
+ 		   atomic_read(&ctx->gpu_passovers));
++	seq_printf(m, "util_avg:\t%lu\n", READ_ONCE(task->se.avg.util_avg));
++	seq_printf(m, "runnable_avg:\t%lu\n", READ_ONCE(task->se.avg.runnable_avg));
++	seq_printf(m, "util_est:\t%u\n",
++		   READ_ONCE(task->se.avg.util_est) & ~UTIL_AVG_UNCHANGED);
+ 	return 0;
+ }
+ 
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ee2fb2c18..4dc6b4d24 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7512,6 +7512,22 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		util_est_dequeue(&rq->cfs, p);
+ 
+ 	util_est_update(&rq->cfs, p, flags & DEQUEUE_SLEEP);
++
++	/* Infinity: EMA vs PELT divergence diagnostic (observability only).
++	 * One compare per sleep; flags tasks whose EMA classification
++	 * (hog vs interactive) differs from PELT by > 50pp.
++	 */
++	if (flags & DEQUEUE_SLEEP) {
++		u64 ema = READ_ONCE(p->infinity.ema);
++		unsigned long util = task_util_est(p);
++		u64 ema_units = mul_u64_u32_div(ema, SCHED_CAPACITY_SCALE,
++						INFINITY_BUDGET_MAX_NS);
++		u64 diff = ema_units > util ? ema_units - util : util - ema_units;
++
++		if (diff > INFINITY_DIVERGENCE_THRESHOLD_UNITS)
++			atomic64_inc(this_cpu_ptr(&infinity_divergence_count));
++	}
++
+ 	if (dequeue_entities(rq, &p->se, flags) < 0)
+ 		return false;
+ 
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index d6a715ac6..096811b71 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -67,6 +67,8 @@ DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_shield_engage_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_shield_engage_count);
++DEFINE_PER_CPU(atomic64_t, infinity_divergence_count);
++EXPORT_PER_CPU_SYMBOL(infinity_divergence_count);
+ /* Sysctl tunables                                                     */
+ /* ------------------------------------------------------------------ */
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+@@ -249,6 +251,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	char *buf;
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
+ 	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb, sec;
++	u64 dvg;
+ 	char v1[16];
+ 	const size_t bufsz = 4096;
+ 
+@@ -283,6 +286,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+ 	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
+ 	sec  = infinity_stats_total(&infinity_shield_engage_count);
++	dvg  = infinity_stats_total(&infinity_divergence_count);
+ 
+ 	buf[0] = '\0';
+ 	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
+@@ -369,6 +373,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 			  "groups defending interactive tasks");
+ 	}
+ 
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "EMA vs PELT divergence",
++		  fill_pretty_llu(v1, sizeof(v1), dvg),
++		  "tasks flagged");
++
+ 	strlcat(buf, SEP, bufsz);
+ 	strlcat(buf, "\n\n", bufsz);
+ 
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 73f074608..52d7ce7d5 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -186,6 +186,14 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+  */
+ #define INFINITY_RT_REQUEUE_DECAY_NS	100000000ULL
+ 
++/* ------------------------------------------------------------------ */
++/* PELT divergence diagnostic                                          */
++/* ------------------------------------------------------------------ */
++/** PELT divergence diagnostic: |ema_pct - util_pct| threshold (pp). */
++#define INFINITY_DIVERGENCE_THRESHOLD		50
++#define INFINITY_DIVERGENCE_THRESHOLD_UNITS \
++	(INFINITY_DIVERGENCE_THRESHOLD * SCHED_CAPACITY_SCALE / 100)
++
+ /* ------------------------------------------------------------------ */
+ /* External sysctl tunables                                            */
+ /* ------------------------------------------------------------------ */
+@@ -205,6 +213,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
+ DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_shield_engage_count);
++DECLARE_PER_CPU(atomic64_t, infinity_divergence_count);
+ /* ------------------------------------------------------------------ */
+ /* API -- called from fair.c and rt.c                                   */
+ /* ------------------------------------------------------------------ */
+-- 
+2.55.0
+

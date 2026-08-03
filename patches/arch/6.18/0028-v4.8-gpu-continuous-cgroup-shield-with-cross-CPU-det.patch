@@ -1,0 +1,306 @@
+From a1fa549052f22a134613b10bea20340290bc56ec Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 00:37:49 +0700
+Subject: [PATCH 28/36] v4.8-gpu: continuous cgroup shield with cross-CPU
+ detection
+
+Replace the per-cfs_rq 50% cliff in update_cfs_group() with a quantized
+share ramp driven by a task-group-wide EMA high-water mark, and add
+observability counters.  Detection and enforcement are decoupled: the
+engage decision reads the tg-wide max (any CPU hammering engages the
+shield), while the ramp amount comes from the local cfs_rq EMA, so a
+quiet CPU never reweights and the v4.7 no-oscillation property holds.
+The max is published upward only on climbs, so a shared cacheline is
+written only on new high-water marks.  Any decay marks the cache stale;
+the next update_cfs_group() invocation (the only allowed scan site,
+always under rq->lock) recomputes over tg->cfs_rq[] for all possible
+CPUs at most once per INFINITY_SHIELD_RESCAN_MS (8ms = half the 16ms
+empty-rq half-life).  No cpus_read_lock() is taken under rq->lock --
+hotplug holds cpus_write_lock and then takes rq locks, so a reader
+blocked behind the writer while holding rq->lock would AB-BA deadlock.
+Instead, tg->cfs_rq[] is allocated for all possible CPUs and the scan
+is safe because no RCU grace period can elapse while preemption is
+disabled; offline CPUs are skipped via cpu_online() (a racy-but-benign
+bit test -- a stale read self-corrects within one rescan window), since
+group_ema on a dead CPU is frozen (no ticks, no decay), and a
+permanently high frozen max would otherwise lock the shield ON.  The
+ramp quantizes the reduction into 5pp steps, so reweight_entity() fires
+at most once per bucket crossing, never per tick.  The tg cache lives
+in its own aligned sub-struct (infinity_shield), strictly separated
+from the hot load_avg cacheline.  A stale max is invalidated by the
+decay-path stale mark and recomputed at the next scan; a stuck max from
+an offline holder is bounded by the 8ms window and the worst over-
+engagement is one 5% bucket on 40-50% local-EMA CPUs.  Stats expose
+"Shield engages" (per-CPU counter) and "Group shields" (live count of
+groups whose cached max is at/above the engage threshold) via
+rcu_read_lock() + walk_tg_tree_from() at read time.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+(cherry picked from commit 1e7c5629cfceb25e814300c5304ac3455dc20781)
+---
+ kernel/sched/fair.c           | 94 +++++++++++++++++++++++++++++++----
+ kernel/sched/infinity_sched.c | 43 +++++++++++++++-
+ kernel/sched/infinity_sched.h | 13 ++++-
+ kernel/sched/sched.h          | 11 ++++
+ 4 files changed, 149 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index d8cd37f45..ee2fb2c18 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1375,6 +1375,18 @@ static void update_curr(struct cfs_rq *cfs_rq)
+ 			 * a regression here indicates wraparound/corruption.
+ 			 */
+ 			WARN_ON_ONCE(gcfs_rq->group_ema < old);
++			/* Shield v2: publish the new high-water mark upward only
++			 * (no contention: most ticks find local <= max and take one
++			 * READ_ONCE + compare).
++			 */
++			{
++				struct task_group *tg = gcfs_rq->tg;
++				u64 max = READ_ONCE(tg->infinity_shield.shield_ema_max);
++
++				if (gcfs_rq->group_ema > max)
++					WRITE_ONCE(tg->infinity_shield.shield_ema_max,
++						   gcfs_rq->group_ema);
++			}
+ 		}
+ 	}
+ 
+@@ -4115,19 +4127,71 @@ static void update_cfs_group(struct sched_entity *se)
+ 
+ 	shares = calc_group_shares(gcfs_rq);
+ 
+-	/* Infinity: reduce group shares when aggregate EMA is elevated.
+-	 * This feeds directly into the PELT-aware reweight_entity(), so the
+-	 * load balancer sees the reduced weight consistently -- unlike the old
+-	 * update_deadline() approach which created a tug-of-war with
+-	 * update_cfs_group() on every tick.
++	/* Infinity: shield v2 -- bounded cross-CPU max recompute.
++	 * At most once per INFINITY_SHIELD_RESCAN_MS per task_group.
++	 * Safe without hotplug locks: always runs under rq->lock with
++	 * preemption disabled, so no RCU grace period can elapse and
++	 * tg->cfs_rq[] (allocated for all possible CPUs, freed only with
++	 * the tg) stays valid.  cpus_read_lock() is forbidden here: hotplug
++	 * holds cpus_write_lock and then takes rq locks, so a reader blocked
++	 * behind the writer while holding rq->lock would AB-BA deadlock.
++	 * Offline CPUs are skipped via cpu_online() -- their group_ema is
++	 * frozen (no ticks/decay on a dead CPU) and a permanently high
++	 * offline value would otherwise lock the shield ON; skipping them
++	 * bounds a stuck max to one rescan window.  cpu_online() is a
++	 * racy-but-benign bit test: a stale read self-corrects on the next
++	 * scan (<= 8ms).
++	 */
++	{
++		struct task_group *tg = gcfs_rq->tg;
++
++		if (READ_ONCE(tg->infinity_shield.shield_ema_max_stale) &&
++		    time_after(jiffies, tg->infinity_shield.shield_last_scan_jiffies +
++					msecs_to_jiffies(INFINITY_SHIELD_RESCAN_MS))) {
++			u64 max = 0;
++			int i;
++
++			for_each_possible_cpu(i) {
++				struct cfs_rq *crq = tg->cfs_rq[i];
++
++				if (!cpu_online(i))
++					continue;
++				if (READ_ONCE(crq->group_ema) > max)
++					max = READ_ONCE(crq->group_ema);
++			}
++			WRITE_ONCE(tg->infinity_shield.shield_ema_max, max);
++			WRITE_ONCE(tg->infinity_shield.shield_ema_max_stale, false);
++			WRITE_ONCE(tg->infinity_shield.shield_last_scan_jiffies, jiffies);
++		}
++	}
++
++	/* Infinity: shield v2 -- quantized ramp.  Engage decision from
++	 * the tg-wide max (any CPU hammering => engage), ramp amount from
++	 * the LOCAL cfs_rq EMA only (a quiet CPU computes red == 0 and
++	 * never reweights -- no oscillation).
+ 	 */
+-	if (gcfs_rq->group_ema > 0) {
++	if (READ_ONCE(gcfs_rq->tg->infinity_shield.shield_ema_max) >=
++	    INFINITY_SHIELD_ENGAGE_THRESHOLD_NS) {
+ 		u64 ema_pct = div64_u64(gcfs_rq->group_ema * 100ULL,
+ 					INFINITY_CGROUP_EMA_CLIMB_NS);
+-		if (ema_pct > 50) {
+-			long reduced = shares * (100 - INFINITY_CGROUP_WEIGHT_REDUCE_PCT) / 100;
+ 
+-			shares = max_t(long, reduced, MIN_SHARES);
++		if (ema_pct >= INFINITY_SHIELD_ENGAGE_PCT) {
++			u64 red = div64_u64((ema_pct - INFINITY_SHIELD_ENGAGE_PCT) *
++					    INFINITY_SHIELD_MAX_REDUCE_PCT,
++					    100ULL - INFINITY_SHIELD_ENGAGE_PCT);
++			/* quantize DOWN to steps of INFINITY_SHIELD_STEP_PCT:
++			 * reweight_entity() fires at most once per bucket
++			 * crossing, never per tick
++			 */
++			red = (red / INFINITY_SHIELD_STEP_PCT) *
++			      INFINITY_SHIELD_STEP_PCT;
++
++			if (red) {
++				long reduced = shares * (100ULL - red) / 100ULL;
++
++				shares = max_t(long, reduced, MIN_SHARES);
++				atomic64_inc(this_cpu_ptr(&infinity_shield_engage_count));
++			}
+ 		}
+ 	}
+ 
+@@ -7168,6 +7232,18 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 				/* Infinity: decay must never raise the EMA. */
+ 				WARN_ON_ONCE(pcfs_rq->group_ema > old);
+ 			}
++			/* Shield v2: any decay may invalidate the tg-wide max; the
++			 * local rq cannot know it is the max-holder cheaply, so mark
++			 * stale and let the next update_cfs_group() scan (bounded,
++			 * see update_cfs_group) recompute.
++			 */
++			{
++				struct task_group *tg = pcfs_rq->tg;
++
++				if (READ_ONCE(tg->infinity_shield.shield_ema_max) > 0)
++					WRITE_ONCE(tg->infinity_shield.shield_ema_max_stale,
++						   true);
++			}
+ 			pcfs_rq->group_ema_sleep_start = 0;
+ 		}
+ 	}
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 27f89a7a5..777790013 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -65,6 +65,8 @@ DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
++DEFINE_PER_CPU(atomic64_t, infinity_shield_engage_count);
++EXPORT_PER_CPU_SYMBOL(infinity_shield_engage_count);
+ /* Sysctl tunables                                                     */
+ /* ------------------------------------------------------------------ */
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+@@ -221,13 +223,32 @@ static u64 infinity_stats_total(const atomic64_t __percpu *counter)
+ 	return total;
+ }
+ 
++#ifdef CONFIG_FAIR_GROUP_SCHED
++/*
++ * tg_shield_visitor -- count task groups whose shield is engaged (cached
++ * cross-CPU EMA max at/above the engage threshold).  Read-only, no control
++ * path; called under rcu_read_lock() from the stats handler, which is what
++ * walk_tg_tree_from() requires.
++ */
++static int tg_shield_visitor(struct task_group *tg, void *data)
++{
++	int *n = data;
++
++	if (tg != &root_task_group &&
++	    READ_ONCE(tg->infinity_shield.shield_ema_max) >=
++	    INFINITY_SHIELD_ENGAGE_THRESHOLD_NS)
++		(*n)++;
++	return 0;
++}
++#endif
++
+ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 				       void *buffer, size_t *lenp,
+ 				       loff_t *ppos)
+ {
+ 	char *buf;
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
+-	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb;
++	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb, sec;
+ 	char v1[16];
+ 	const size_t bufsz = 4096;
+ 
+@@ -261,6 +282,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	icf = infinity_stats_total(&infinity_cpufreq_interactive_count);
+ 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+ 	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
++	sec  = infinity_stats_total(&infinity_shield_engage_count);
+ 
+ 	buf[0] = '\0';
+ 	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
+@@ -328,6 +350,25 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 			  "interactive IPC wakeups boosted");
+ 	}
+ 
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "Shield engages",
++		  fill_pretty_llu(v1, sizeof(v1), sec),
++		  "group share reductions applied");
++
++	{
++		int n = 0;
++
++#ifdef CONFIG_FAIR_GROUP_SCHED
++		rcu_read_lock();
++		walk_tg_tree_from(&root_task_group, tg_shield_visitor, tg_nop, &n);
++		rcu_read_unlock();
++#endif
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "Group shields",
++			  fill_pretty_llu(v1, sizeof(v1), n),
++			  "groups defending interactive tasks");
++	}
++
+ 	strlcat(buf, SEP, bufsz);
+ 	strlcat(buf, "\n\n", bufsz);
+ 
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index aa3663a27..df9078acc 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -150,8 +150,16 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+ #define INFINITY_CGROUP_EMA_ALPHA	1
+ /** Cgroup EMA half-life for idle decay (16ms). */
+ #define INFINITY_CGROUP_EMA_HALFLIFE_NS	16000000ULL
+-/** Maximum group weight reduction (50% -- never fully starves). */
+-#define INFINITY_CGROUP_WEIGHT_REDUCE_PCT 50
++/** Shield v2: engage at 40% aggregate EMA, linear to 50% reduction at 100%,
++ *  quantized to 5pp steps (at most one reweight per bucket crossing).
++ */
++#define INFINITY_SHIELD_ENGAGE_PCT		40
++#define INFINITY_SHIELD_MAX_REDUCE_PCT		50
++#define INFINITY_SHIELD_STEP_PCT		5
++/** Cross-CPU max recompute window (ms) -- half the 16ms empty-rq half-life. */
++#define INFINITY_SHIELD_RESCAN_MS		8
++#define INFINITY_SHIELD_ENGAGE_THRESHOLD_NS \
++	(INFINITY_CGROUP_EMA_CLIMB_NS * INFINITY_SHIELD_ENGAGE_PCT / 100ULL)
+ /* ------------------------------------------------------------------ */
+ /* RT EMA constants                                                    */
+ /* ------------------------------------------------------------------ */
+@@ -187,6 +195,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
+ DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
+ DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
++DECLARE_PER_CPU(atomic64_t, infinity_shield_engage_count);
+ /* ------------------------------------------------------------------ */
+ /* API -- called from fair.c and rt.c                                   */
+ /* ------------------------------------------------------------------ */
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 24f63cacb..b8ef4a1f2 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -489,6 +489,17 @@ struct task_group {
+ 	 * will also be accessed at each tick.
+ 	 */
+ 	atomic_long_t		load_avg ____cacheline_aligned;
++	/*
++	 * Infinity: shield v2 cross-CPU detection cache.  Kept in its own
++	 * cacheline, strictly separated from the hot load_avg line above.
++	 * Written only on upward EMA moves (rare) and stale-marking;
++	 * read once per update_cfs_group() invocation.
++	 */
++	struct {
++		u64		shield_ema_max;
++		unsigned long	shield_last_scan_jiffies;
++		bool		shield_ema_max_stale;
++	} ____cacheline_aligned infinity_shield;
+ #endif /* CONFIG_FAIR_GROUP_SCHED */
+ 
+ #ifdef CONFIG_RT_GROUP_SCHED
+-- 
+2.55.0
+
