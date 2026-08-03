@@ -1,6 +1,6 @@
-From ce99f0a9c29f1184c8279c81739fd552fb522fc9 Mon Sep 17 00:00:00 2001
+From 1f5a955e6e9ae85eaf1d83fd2a19ece75071636a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Mon, 3 Aug 2026 23:09:32 +0700
+Date: Tue, 4 Aug 2026 00:37:49 +0700
 Subject: [PATCH 27/32] v4.8-gpu: gate GPU coupling on the fair scheduler class
 
 The DRM scheduler's CPU<->GPU coupling reads the owning task's CPU-side
@@ -29,8 +29,8 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  drivers/gpu/drm/scheduler/sched_main.c | 35 ++++++++++++++++++--------
  include/drm/gpu_scheduler.h            |  5 ++++
- kernel/sched/infinity_sched.c          | 10 ++++++++
- 3 files changed, 40 insertions(+), 10 deletions(-)
+ kernel/sched/infinity_sched.c          | 11 ++++++++
+ 3 files changed, 41 insertions(+), 10 deletions(-)
 
 diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
 index 65e1dd568..5f33ed8bb 100644
@@ -90,7 +90,7 @@ index 65e1dd568..5f33ed8bb 100644
  			rcu_read_unlock();
  		}
 diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
-index ea36bb336..4135dd8f9 100644
+index ea36bb336..49ac6914f 100644
 --- a/include/drm/gpu_scheduler.h
 +++ b/include/drm/gpu_scheduler.h
 @@ -858,4 +858,9 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
@@ -100,17 +100,18 @@ index ea36bb336..4135dd8f9 100644
 +/* ------------------------------------------------------------------ */
 +/* Infinity sched-class gate (implemented in kernel/sched)             */
 +/* ------------------------------------------------------------------ */
-+extern bool infinity_is_interactive_candidate(struct task_struct *p);
++bool infinity_is_interactive_candidate(struct task_struct *p);
 +
  #endif
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 2a47ec3de..f7bb9b0fe 100644
+index 2a47ec3de..2ddba6454 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -665,3 +665,13 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
+@@ -665,3 +665,14 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
  	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
  				      / 100ULL));
  }
++
 +/* ------------------------------------------------------------------ */
 +/* infinity_is_interactive_candidate -- sched-class gate for the DRM   */
 +/* scheduler's CPU<->GPU coupling (see include/drm/gpu_scheduler.h)    */

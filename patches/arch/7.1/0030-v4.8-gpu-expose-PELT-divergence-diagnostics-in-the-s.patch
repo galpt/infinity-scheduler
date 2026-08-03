@@ -1,18 +1,26 @@
-From 7494b3b897e55e69377bbdf89c6ee77d90befd56 Mon Sep 17 00:00:00 2001
+From dfd7ac3d96d2b9c03248564d9d69d4ecada6f9f2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Mon, 3 Aug 2026 23:21:42 +0700
+Date: Tue, 4 Aug 2026 00:37:49 +0700
 Subject: [PATCH 30/32] v4.8-gpu: expose PELT divergence diagnostics in the
  stats surfaces
 
-observability only, no control path; three per-task PELT fields appended to /proc/<pid>/infinity (util_avg, runnable_avg, util_est with the UTIL_AVG_UNCHANGED bit masked); a per-CPU counter flags sleep transitions where |ema_pct - util_pct| exceeds 50 percentage points (EMA reacts in ms, PELT in hundreds of ms, so transient divergence is expected -- the threshold and envelope are documented; the harness's ema-pelt-trace scenario validates end to end); proc handler reads are READ_ONCE with no rq->lock (deadlock rule), 32-bit tearing tolerated per the existing precedent.
+Observability only, no control path.  Three per-task PELT fields are
+appended to /proc/<pid>/infinity (util_avg, runnable_avg, util_est with
+the UTIL_AVG_UNCHANGED bit masked).  A per-CPU counter flags sleep
+transitions where |ema_pct - util_pct| exceeds 50 percentage points;
+EMA reacts in ms and PELT in hundreds of ms, so transient divergence is
+expected, and the harness's ema-pelt-trace scenario validates the
+diagnostic end to end.  Proc handler reads use READ_ONCE with no
+rq->lock (deadlock rule), tolerating 32-bit tearing per the existing
+precedent.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  fs/proc/base.c                |  4 ++++
- kernel/sched/fair.c           | 14 ++++++++++++++
+ kernel/sched/fair.c           | 15 +++++++++++++++
  kernel/sched/infinity_sched.c |  9 +++++++++
  kernel/sched/infinity_sched.h |  9 +++++++++
- 4 files changed, 36 insertions(+)
+ 4 files changed, 37 insertions(+)
 
 diff --git a/fs/proc/base.c b/fs/proc/base.c
 index 98818ff40..139ce7a2c 100644
@@ -30,16 +38,17 @@ index 98818ff40..139ce7a2c 100644
  }
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index c1c0c6f3b..350a12e7b 100644
+index 01880e5f2..80459f6dc 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7713,6 +7713,20 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7719,6 +7719,21 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (!p->se.sched_delayed)
  		util_est_dequeue(&rq->cfs, p);
  
 +	/* Infinity: EMA vs PELT divergence diagnostic (observability only).
 +	 * One compare per sleep; flags tasks whose EMA classification
-+	 * (hog vs interactive) differs from PELT by > 50pp. */
++	 * (hog vs interactive) differs from PELT by > 50pp.
++	 */
 +	if (flags & DEQUEUE_SLEEP) {
 +		u64 ema = READ_ONCE(p->infinity.ema);
 +		unsigned long util = task_util_est(p);
@@ -55,7 +64,7 @@ index c1c0c6f3b..350a12e7b 100644
  		return false;
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index e736ab5c3..c29b5eab6 100644
+index 8ce5bb100..45298669b 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -66,6 +66,8 @@ DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
@@ -96,11 +105,11 @@ index e736ab5c3..c29b5eab6 100644
  	strlcat(buf, "\n\n", bufsz);
  
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index 68245eecf..3826621e8 100644
+index 73f074608..52d7ce7d5 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
-@@ -184,6 +184,14 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
-  *  100%-burner from 95-100% to ~54-57%, below the 85% re-arm point). */
+@@ -186,6 +186,14 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+  */
  #define INFINITY_RT_REQUEUE_DECAY_NS	100000000ULL
  
 +/* ------------------------------------------------------------------ */
@@ -114,7 +123,7 @@ index 68245eecf..3826621e8 100644
  /* ------------------------------------------------------------------ */
  /* External sysctl tunables                                            */
  /* ------------------------------------------------------------------ */
-@@ -203,6 +211,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
+@@ -205,6 +213,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
  DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
  DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
  DECLARE_PER_CPU(atomic64_t, infinity_shield_engage_count);

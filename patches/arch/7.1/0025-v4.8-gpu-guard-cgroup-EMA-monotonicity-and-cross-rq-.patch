@@ -1,21 +1,26 @@
-From d5902196991f2e42b7d14593881b09b646586ca5 Mon Sep 17 00:00:00 2001
+From 511afc5ba9796453c75f884a3d79ce9ab56398eb Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Mon, 3 Aug 2026 23:00:29 +0700
+Date: Tue, 4 Aug 2026 00:31:00 +0700
 Subject: [PATCH 25/32] v4.8-gpu: guard cgroup EMA monotonicity and cross-rq
  clock skew
 
-The cgroup group_ema decay path lacked the monotonicity guard the task (fair.c) and RT (rt.c) EMA paths already have, and its sleep stamp can cross rq-clock domains after migration. A backward clock (broken TSC sync or cross-rq skew) now retains the EMA, the safe direction, while WARN_ON_ONCE guards surface any wraparound or corruption in both the climb and decay paths.
+The cgroup group_ema decay path lacked the monotonicity guard the task
+and RT EMA paths already have, and its sleep stamp can cross rq-clock
+domains after migration.  A backward clock (broken TSC sync or cross-rq
+skew) now retains the EMA, the safe direction, while WARN_ON_ONCE
+guards surface any wraparound or corruption in both the climb and the
+decay paths.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/fair.c | 33 ++++++++++++++++++++++++++-------
- 1 file changed, 26 insertions(+), 7 deletions(-)
+ kernel/sched/fair.c | 34 +++++++++++++++++++++++++++-------
+ 1 file changed, 27 insertions(+), 7 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 70333ae29..b0aa3ecc9 100644
+index 70333ae29..c82bb19ce 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -1492,10 +1492,14 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1492,10 +1492,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
  
  			if (delta > INFINITY_CGROUP_EMA_CLIMB_NS)
  				delta = INFINITY_CGROUP_EMA_CLIMB_NS;
@@ -25,12 +30,13 @@ index 70333ae29..b0aa3ecc9 100644
  				delta * INFINITY_CGROUP_EMA_ALPHA,
  				INFINITY_CGROUP_EMA_CLIMB_NS * INFINITY_FP_ONE);
 +			/* Infinity: the climb is saturating at INFINITY_CGROUP_EMA_CLIMB_NS;
-+			 * a regression here indicates wraparound/corruption. */
++			 * a regression here indicates wraparound/corruption.
++			 */
 +			WARN_ON_ONCE(gcfs_rq->group_ema < old);
  		}
  	}
  
-@@ -7338,13 +7342,28 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7338,13 +7343,28 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  
  		if (pcfs_rq->group_ema_sleep_start) {
  			u64 now = rq_clock(rq_of(pcfs_rq));

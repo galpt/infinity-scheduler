@@ -1,6 +1,6 @@
-From 8c41ba5ddbd700d6a55a7ff72ac4e828042fbf6e Mon Sep 17 00:00:00 2001
+From 86985bb02cafbe0e217a64b603000d9f9e99478f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Mon, 3 Aug 2026 23:03:32 +0700
+Date: Tue, 4 Aug 2026 00:31:12 +0700
 Subject: [PATCH 26/32] v4.8-gpu: boost interactive IPC wakeups from
  wait_woken()
 
@@ -25,11 +25,11 @@ falloff to 1x at >= 8ms.
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  include/linux/sched.h         |  1 +
- kernel/sched/fair.c           | 18 ++++++++++++++++++
+ kernel/sched/fair.c           | 19 +++++++++++++++++++
  kernel/sched/infinity_sched.c | 20 +++++++++++++++++++-
  kernel/sched/infinity_sched.h | 27 +++++++++++++++++++++++++++
  kernel/sched/wait.c           |  6 +++++-
- 5 files changed, 70 insertions(+), 2 deletions(-)
+ 5 files changed, 71 insertions(+), 2 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index 5c7d97f9a..c8de2ebd5 100644
@@ -44,10 +44,10 @@ index 5c7d97f9a..c8de2ebd5 100644
  	/**
  	 * @gpu_passovers: GPU scheduling pass-over count.
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index b0aa3ecc9..1ad884de5 100644
+index c82bb19ce..fe4895d9b 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5603,6 +5603,23 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5604,6 +5604,24 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  		atomic64_inc(this_cpu_ptr(&infinity_futex_boost_count));
  	}
  
@@ -56,7 +56,8 @@ index b0aa3ecc9..1ad884de5 100644
 +	    READ_ONCE(task_of(se)->infinity.ema) == 0 &&
 +	    !(task_of(se)->flags & PF_KTHREAD)) {
 +		/* Infinity: IPC gradient -- full 2x at sleep <= 1ms,
-+		 * linear falloff to 1x at >= 8ms. */
++		 * linear falloff to 1x at >= 8ms.
++		 */
 +		u64 now = rq_clock(rq_of(cfs_rq));
 +		u64 last = READ_ONCE(task_of(se)->infinity.last_sleep_ns);
 +		u64 sleep_ns = (last && now > last) ? now - last : 0;
@@ -71,7 +72,7 @@ index b0aa3ecc9..1ad884de5 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -7458,6 +7475,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7459,6 +7477,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
  
  		p->infinity.futex_waiting = false;
