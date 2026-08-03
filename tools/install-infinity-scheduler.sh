@@ -625,6 +625,7 @@ install_infinity_kernel() {
 
     if setup_limine_entry "$ver" "$cmdline"; then
         ok "Infinity kernel installed — Limine entry added."
+        refresh_limine
         echo ""
         echo "  Reboot and select 'infinity scheduler kernel ($ver)' at the Limine menu."
     elif setup_grub_entry "$ver" "$cmdline"; then
@@ -708,6 +709,16 @@ setup_limine_entry() {
     return 0
 }
 
+refresh_limine() {
+    if command -v limine-update &>/dev/null; then
+        info "Refreshing the Limine bootloader (limine-update)..."
+        limine-update 2>&1 | tail -5
+        ok "Limine bootloader refreshed."
+    else
+        warn "limine-update not found; the Limine bootloader was not refreshed."
+    fi
+}
+
 setup_grub_entry() {
     local ver="$1" cmdline="$2"
     if ! command -v grub-mkconfig &>/dev/null && ! command -v update-grub &>/dev/null; then
@@ -779,9 +790,11 @@ cmd_remove() {
 
     info "Removing Infinity scheduler kernel..."
 
+    limine_used=0
     # Remove Limine entries
     for limine_conf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf; do
         [ -f "$limine_conf" ] || continue
+        limine_used=1
         if grep -qE "[Ii]nfinity scheduler kernel" "$limine_conf" 2>/dev/null; then
             info "Removing Infinity entries from $limine_conf ..."
             awk '/^\/[Ii]nfinity scheduler kernel/ { skip = 1; next }
@@ -805,6 +818,15 @@ cmd_remove() {
     for f in /boot/vmlinuz-infinity-* /boot/initramfs-infinity-* /boot/System.map-infinity-*; do
         [ -f "$f" ] && rm -f "$f" && ok "Removed: $(basename "$f")"
     done
+
+    # Refresh the Limine bootloader if it was in use
+    if [ "$limine_used" = "1" ] && command -v limine-update &>/dev/null; then
+        info "Refreshing the Limine bootloader (limine-update)..."
+        limine-update 2>&1 | tail -5
+        ok "Limine bootloader refreshed."
+    elif [ "$limine_used" = "1" ]; then
+        warn "limine-update not found; the Limine bootloader was not refreshed."
+    fi
 
     # Regenerate GRUB config (if GRUB was used)
     if command -v grub-mkconfig &>/dev/null; then
