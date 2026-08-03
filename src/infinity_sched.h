@@ -151,7 +151,8 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
 /** Cgroup EMA half-life for idle decay (16ms). */
 #define INFINITY_CGROUP_EMA_HALFLIFE_NS	16000000ULL
 /** Shield v2: engage at 40% aggregate EMA, linear to 50% reduction at 100%,
- *  quantized to 5pp steps (at most one reweight per bucket crossing). */
+ *  quantized to 5pp steps (at most one reweight per bucket crossing).
+ */
 #define INFINITY_SHIELD_ENGAGE_PCT		40
 #define INFINITY_SHIELD_MAX_REDUCE_PCT		50
 #define INFINITY_SHIELD_STEP_PCT		5
@@ -181,7 +182,8 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
 #define INFINITY_RT_REQUEUE_MS		5
 /** RT valve: synthetic sleep applied to rt_ema on each forced requeue
  *  (100ms => 57% of the current EMA remains: one requeue drops a
- *  100%-burner from 95-100% to ~54-57%, below the 85% re-arm point). */
+ *  100%-burner from 95-100% to ~54-57%, below the 85% re-arm point).
+ */
 #define INFINITY_RT_REQUEUE_DECAY_NS	100000000ULL
 
 /* ------------------------------------------------------------------ */

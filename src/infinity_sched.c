@@ -717,6 +717,7 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
 	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
 				      / 100ULL));
 }
+
 /* ------------------------------------------------------------------ */
 /* infinity_is_interactive_candidate -- sched-class gate for the DRM   */
 /* scheduler's CPU<->GPU coupling (see include/drm/gpu_scheduler.h)    */
