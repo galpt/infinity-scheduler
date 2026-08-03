@@ -2,35 +2,35 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.h — Infinity scheduler API (v4.6-gpu).
+ * infinity_sched.h -- Infinity scheduler API (v4.7-gpu).
  *
  * Architecture:
  *
  *   fair.c (Linux scheduler)         infinity_sched.c (Infinity algorithm)
- *   ──────────────────────────       ─────────────────────────────────────
- *   update_deadline()        ──call──► infinity_update_weight() — EMA weight
- *   update_curr()            ──call──► infinity_consume()       — EMA budget
- *   enqueue_task_fair()      ──call──► infinity_wakeup()        — EMA decay
- *   place_entity()           ──check──► futex_waiting            — halve vslice on futex wakeup
- *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  — sleep tracking
- *   update_curr_rt()         ──call──► infinity_rt_consume()    — RT EMA climb
- *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     — RT EMA decay
+ *   ────────────────   ──────────────
+ *   update_deadline()        ──call──► infinity_update_weight() -- EMA weight
+ *   update_curr()            ──call──► infinity_consume()       -- EMA budget
+ *   enqueue_task_fair()      ──call──► infinity_wakeup()        -- EMA decay
+ *   place_entity()   ──check──► futex_waiting   -- halve vslice on wakeup
+ *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  -- sleep tracking
+ *   update_curr_rt()         ──call──► infinity_rt_consume()    -- RT EMA climb
+ *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     -- RT EMA decay
  *   dequeue_task_rt()        ──call──► (records rt_last_sleep_ns)
- *   task_tick_rt()           ──call──► infinity_rr_timeslice()  — adaptive RR slice
- *   sched_fork()             ──call──► infinity_fork_init()     — fork init
- *   init/init_task.c         ──init──► infinity.{}              — static init
+ *   task_tick_rt()           ──call──► infinity_rr_timeslice()  -- adaptive RR slice
+ *   sched_fork()             ──call──► infinity_fork_init()     -- fork init
+ *   init/init_task.c         ──init──► infinity.{}              -- static init
  *
  * Weight-based modulation: the task's EEVDF weight is modulated by EMA.
  * EEVDF natively computes a shorter slice and later deadline from a lower
- * weight — no second level of fairness logic needed.
+ * weight -- no second level of fairness logic needed.
  *
  * The base weight is always derived from the task's static priority (nice),
  * never from the live weight, so the modulation is idempotent and the nice
  * value is always honoured.
  *
  * Tunables:
- *   kernel.infinity_smt_divisor   — SMT secondary slice divisor (default 2)
- *   kernel.infinity_running       — read-only flag, 1 if active
+ *   kernel.infinity_smt_divisor   -- SMT secondary slice divisor (default 2)
+ *   kernel.infinity_running       -- read-only flag, 1 if active
  *
  * Self-stabilizing by construction: the EMA naturally converges between
  * 0 and BUDGET_MAX without any clamps or external feedback loop.
@@ -69,7 +69,7 @@
 /* Weight calculation from EMA                                          */
 /* ------------------------------------------------------------------ */
 /**
- * infinity_calc_weight — Compute EMA-modulated EEVDF weight.
+ * infinity_calc_weight -- Compute EMA-modulated EEVDF weight.
  * @p:    Task whose weight to compute.
  * @ema:  Raw EMA (clamped to BUDGET_MAX).
  *
@@ -88,7 +88,7 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 {
 	/*
 	 * SCHED_IDLE tasks have their own weight (WEIGHT_IDLEPRIO = 3)
-	 * that we must not override — they are designed to yield to
+	 * that we must not override -- they are designed to yield to
 	 * everything else by construction.
 	 */
 	if (task_has_idle_policy(p))
@@ -118,13 +118,13 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /* ------------------------------------------------------------------ */
 /* Cgroup EMA constants                                                */
 /* ------------------------------------------------------------------ */
-/** Cgroup aggregate EMA ceiling (2ms — groups converge faster). */
+/** Cgroup aggregate EMA ceiling (2ms -- groups converge faster). */
 #define INFINITY_CGROUP_EMA_CLIMB_NS	2000000ULL
-/** Cgroup EMA alpha — gentle slope to avoid oscillation. */
+/** Cgroup EMA alpha -- gentle slope to avoid oscillation. */
 #define INFINITY_CGROUP_EMA_ALPHA	1
 /** Cgroup EMA half-life for idle decay (16ms). */
 #define INFINITY_CGROUP_EMA_HALFLIFE_NS	16000000ULL
-/** Maximum group weight reduction (50% — never fully starves). */
+/** Maximum group weight reduction (50% -- never fully starves). */
 #define INFINITY_CGROUP_WEIGHT_REDUCE_PCT 50
 /* ------------------------------------------------------------------ */
 /* RT EMA constants                                                    */
@@ -134,7 +134,7 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /** RT alpha. */
 #define INFINITY_RT_ALPHA		4
 /* ------------------------------------------------------------------ */
-/* RT safety valve — requeue throttle threshold                        */
+/* RT safety valve -- requeue throttle threshold                        */
 /* ------------------------------------------------------------------ */
 /**
  * rt_ema threshold: force rogue SCHED_FIFO to yield when rt_ema exceeds
@@ -148,7 +148,20 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 /* ------------------------------------------------------------------ */
 extern unsigned long infinity_tune_smt_divisor;
 /* ------------------------------------------------------------------ */
-/* API — called from fair.c and rt.c                                   */
+/* Stats counters                                                      */
+/* ------------------------------------------------------------------ */
+DECLARE_PER_CPU(atomic64_t, infinity_futex_boost_count);
+DECLARE_PER_CPU(atomic64_t, infinity_ema_climb_count);
+DECLARE_PER_CPU(atomic64_t, infinity_wakeup_count);
+DECLARE_PER_CPU(atomic64_t, infinity_rt_throttle_count);
+DECLARE_PER_CPU(atomic64_t, infinity_gpu_passover_boosts);
+DECLARE_PER_CPU(atomic64_t, infinity_gpu_idle_compensations);
+DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
+DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
+DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+/* ------------------------------------------------------------------ */
+/* API -- called from fair.c and rt.c                                   */
 /* ------------------------------------------------------------------ */
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
