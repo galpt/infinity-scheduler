@@ -99,7 +99,7 @@ flowchart TB
 
         subgraph WAKEUP["Wakeup path"]
             WQ["enqueue_task_fair()"]
-            WQ --> DECAY["infinity_wakeup()\n───\nema = f(sleep_ns)\nperiod-shift bounds tracking\n& 128-bit math safety"]
+            WQ --> DECAY["infinity_wakeup()\n───\nema = f(sleep_ns)\nperiod-shift decay (u64)\nperiods > 63 → ema = 0"]
             DECAY --> WAKE["Waking task\nhas higher weight →\nnaturally earlier deadline"]
             WAKE --> RUN
         end
@@ -152,7 +152,8 @@ gpu_last_submit_interval (job-type awareness)"]
         ENTITY --> DRAIN["rq_update_vtime_locked()
 drain pending_gpu_ns under rq->lock"]
         DRAIN --> VTIME["calc_vtime()
-idle blend + CPU coupling + priority"]
+idle blend + CPU coupling (fair-class gated)
++ priority"]
 
         VTIME --> QUEUE["unified rbtree
 sorted by cached_gpu_vtime"]
@@ -164,7 +165,7 @@ sorted by cached_gpu_vtime"]
         USER --> QUEUE
         QUEUE --> SELECT["select_entity()
 first ready wins
-passover→gpu_passovers"]
+passover→gpu_passovers (fair-class gated)"]
 
         SELECT --> HW["GPU hardware ring"]
     end
@@ -213,7 +214,7 @@ EMA climb on the accounted delta
 EMA idle decay by half-lives
 burst penalty: delta += (delta×ema_pct/100)/2
   (quarter penalty for <8ms submissions)
-CPU coupling: futex / CPU EMA==0 → growth ×50% each
+CPU coupling: futex / CPU EMA==0 → growth ×50% each (fair-class gated)
 vruntime += delta << vruntime_shift[prio]"]
         class FOLD algo
 
@@ -236,7 +237,7 @@ min_vruntime normalization
 
         QUEUE --> SELECT["drm_sched_select_entity()
 first ready entity wins (credits-gated)
-passover → gpu_passovers (GPU→CPU feedback)"]
+passover → gpu_passovers (fair-class gated; GPU→CPU feedback)"]
         class SELECT algo
 
         SELECT --> HW["GPU hardware ring"]
