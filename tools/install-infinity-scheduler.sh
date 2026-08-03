@@ -453,7 +453,10 @@ check_nvidia() {
 
     info "NVIDIA GPU detected but no DKMS driver source installed — installing..."
     if command -v pacman &>/dev/null; then
-        pacman -Rdd --noconfirm linux-cachyos-nvidia-open 2>/dev/null || true
+        # Remove every prebuilt CachyOS nvidia package (linux kernel, LTS
+        # and any other variant) — they provide modules only for their own
+        # kernels and conflict with the DKMS variant.
+        pacman -Rdd --noconfirm 'linux-cachyos-*-nvidia-open' 2>/dev/null || true
         pacman -S --needed --noconfirm nvidia-open-dkms 2>&1 | tail -3 || \
             warn "nvidia-open-dkms install failed (NVIDIA won't be available on Infinity kernel)"
     elif command -v apt-get &>/dev/null; then
