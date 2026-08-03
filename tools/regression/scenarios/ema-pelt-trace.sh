@@ -34,8 +34,8 @@ samples=0
 while kill -0 "$child" 2>/dev/null; do
 	# sample /proc/<child>/infinity (self file of the child path is not
 	# usable cross-process; use the child pid's file)
-	ema=$(awk -F'\t' '/^ema:/{print $2}' /proc/$child/infinity 2>/dev/null)
-	util=$(awk -F'\t' '/^util_avg:/{print $2}' /proc/$child/infinity 2>/dev/null)
+	ema=$(awk -F'\t' '/^ema:/{print $NF}' /proc/$child/infinity 2>/dev/null)
+	util=$(awk -F'\t' '/^util_avg:/{print $NF}' /proc/$child/infinity 2>/dev/null)
 	if [ -n "$ema" ] && [ -n "$util" ]; then
 		ema_pct=$(( ema * 100 / 6000000 ))
 		util_pct=$(( util * 100 / 1024 ))
