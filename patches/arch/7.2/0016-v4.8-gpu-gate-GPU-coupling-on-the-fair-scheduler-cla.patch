@@ -1,0 +1,109 @@
+From f0831b9666f86d8d6a7f5b645558046b82da1aed Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 00:37:49 +0700
+Subject: [PATCH 16/22] v4.8-gpu: gate GPU coupling on the fair scheduler class
+
+The DRM scheduler's CPU<->GPU coupling reads the owning task's CPU-side
+interactivity signals (futex_waiting, ema == 0) and the passover loop
+accumulates gpu_passovers for every entity further right in the vtime
+rbtree.  Because infinity_pid is the process group leader (captured via
+get_task_pid(current->group_leader) at drm_sched_entity_init), both
+paths now gate on the leader's sched_class via the new exported helper
+infinity_is_interactive_candidate(): fair-class, non-idle-policy only.
+
+Non-CFS leaders (sched_ext, RT, DL) no longer have their untouched
+ema == 0 misread as interactive, and no longer accumulate gpu_passovers.
+SCHED_IDLE-policy leaders are excluded as well -- the mirror of the
+calc_weight bypass.  The coupling counters are reused unchanged (they
+only fire when the boost is applied); no new counters.
+
+Conservative default for scx GPU workloads: they lose the interactive
+GPU boost until validated (documented policy).  The helper is exported
+with EXPORT_SYMBOL_GPL as a scheduler-internal interface.
+
+7.2-series placement: the upstreamed FAIR DRM scheduler layout moves
+this coupling out of sched_main.c into sched_rq.c.  The CPU->GPU reads
+are gated in drm_sched_entity_update_vruntime() and the gpu_passovers
+accumulation loop in drm_sched_select_entity() (both in sched_rq.c);
+the 7.1 sched_main.c hunks do not apply (drm_sched_entity_calc_vtime
+and drm_sched_rq_select_entity_infinity are absent in the 7.2 tree).
+The 7.2 passover loop also pairs an infinity_gpu_passover_boosts
+counter with each gpu_passovers increment; both sit inside the gate.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+(cherry picked from commit 1f5a955e6e9ae85eaf1d83fd2a19ece75071636a)
+---
+ drivers/gpu/drm/scheduler/sched_rq.c | 15 +++++++++++++--
+ include/drm/gpu_scheduler.h          |  5 +++++
+ kernel/sched/infinity_sched.c        | 11 +++++++++++
+ 3 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_rq.c b/drivers/gpu/drm/scheduler/sched_rq.c
+index 0669aab48..c684ffaf4 100644
+--- a/drivers/gpu/drm/scheduler/sched_rq.c
++++ b/drivers/gpu/drm/scheduler/sched_rq.c
+@@ -314,7 +314,13 @@ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ 
+ 		rcu_read_lock();
+ 		p = pid_task(entity->infinity_pid, PIDTYPE_PID);
+-		if (p) {
++		/* Infinity: the infinity_pid resolves to the process group
++		 * leader; only fair-class, non-idle-policy leaders
++		 * participate in CPU-to-GPU coupling (see
++		 * infinity_is_interactive_candidate()).  Non-CFS leaders
++		 * keep coupling == 0.
++		 */
++		if (p && infinity_is_interactive_candidate(p)) {
+ 			if (READ_ONCE(p->infinity.futex_waiting))
+ 				coupling++;
+ 			if (READ_ONCE(p->infinity.ema) == 0)
+@@ -500,7 +506,12 @@ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ 
+ 					p = pid_task(e2->infinity_pid,
+ 						     PIDTYPE_PID);
+-					if (p) {
++					/* Infinity: only fair-class leaders
++					 * accumulate GPU passovers (see
++					 * infinity_is_interactive_candidate()).
++					 */
++					if (p &&
++					    infinity_is_interactive_candidate(p)) {
+ 						atomic_inc(&p->infinity.gpu_passovers);
+ 						atomic64_inc(this_cpu_ptr(
+ 							&infinity_gpu_passover_boosts));
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index 323dba6e1..3b0468a76 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -779,4 +779,9 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_idle_compensations);
+ DECLARE_PER_CPU(atomic64_t, infinity_gpu_cpu_coupling_activations);
+ DECLARE_PER_CPU(atomic64_t, infinity_gpu_passover_boosts);
+ 
++/* ------------------------------------------------------------------ */
++/* Infinity sched-class gate (implemented in kernel/sched)             */
++/* ------------------------------------------------------------------ */
++bool infinity_is_interactive_candidate(struct task_struct *p);
++
+ #endif
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 03bd80bf1..4a3ba7edb 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -566,3 +566,14 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
+ 	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
+ 				      / 100ULL));
+ }
++
++/* ------------------------------------------------------------------ */
++/* infinity_is_interactive_candidate -- sched-class gate for the DRM   */
++/* scheduler's CPU<->GPU coupling (see include/drm/gpu_scheduler.h)    */
++/* ------------------------------------------------------------------ */
++bool infinity_is_interactive_candidate(struct task_struct *p)
++{
++	return p->sched_class == &fair_sched_class &&
++	       !task_has_idle_policy(p);
++}
++EXPORT_SYMBOL_GPL(infinity_is_interactive_candidate);
+-- 
+2.55.0
+
