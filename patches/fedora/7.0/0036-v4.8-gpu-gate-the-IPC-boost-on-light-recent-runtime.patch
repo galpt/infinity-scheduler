@@ -1,0 +1,187 @@
+From a923bd78655391342b076bb9b1bd3e1cf07ce3da Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 11:33:54 +0700
+Subject: [PATCH] v4.8-gpu: gate the IPC boost on light recent runtime
+
+The exact ema == 0 gate made the IPC boost unreachable in practice:
+EMA returns to exactly zero only after a sleep of at least 64 half-lives
+(about 1.5s), while the sleep-duration gradient only boosts wakes under
+8ms, so no real workload could satisfy both.  Relax the gate to
+ema <= INFINITY_IPC_EMA_GATE_NS (BUDGET/32, about 12us of recent
+runtime), which keeps the anti-flooding property (busy wakeups are
+still rejected; the gate behaves as a duty-cycle filter because the EMA
+decays while the task sleeps) while making short lock-handoff-style IPC
+wakes reachable.  Add an 'IPC gate blocks' probe counter so the
+rejection rate is visible in infinity_stats and the threshold can be
+tuned from data instead of guesswork.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           | 40 +++++++++++++++++++++--------------
+ kernel/sched/infinity_sched.c | 33 ++++++++++++++++++-----------
+ kernel/sched/infinity_sched.h |  7 ++++++
+ 3 files changed, 52 insertions(+), 28 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e0a54b6cb..69dc48da1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5437,23 +5437,31 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 		atomic64_inc(this_cpu_ptr(&infinity_futex_boost_count));
+ 	}
+ 
+-	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
+-	    task_of(se)->infinity.ipc_waiting &&
+-	    READ_ONCE(task_of(se)->infinity.ema) == 0 &&
+-	    !(task_of(se)->flags & PF_KTHREAD)) {
+-		/* Infinity: IPC gradient -- full 2x at sleep <= 1ms,
+-		 * linear falloff to 1x at >= 8ms.
+-		 */
+-		u64 now = rq_clock(rq_of(cfs_rq));
+-		u64 last = READ_ONCE(task_of(se)->infinity.last_sleep_ns);
+-		u64 sleep_ns = (last && now > last) ? now - last : 0;
+-		u64 red = infinity_ipc_gradient(sleep_ns);
+-
+-		if (red) {
+-			vslice -= (vslice * red) >> INFINITY_FP_SHIFT;
+-			atomic64_inc(this_cpu_ptr(&infinity_ipc_boost_count));
++		if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
++		    task_of(se)->infinity.ipc_waiting &&
++		    !(task_of(se)->flags & PF_KTHREAD)) {
++			u64 ema = READ_ONCE(task_of(se)->infinity.ema);
++
++			if (ema <= INFINITY_IPC_EMA_GATE_NS) {
++				/* Infinity: IPC gradient -- full 2x at sleep <= 1ms,
++				 * linear falloff to 1x at >= 8ms.
++				 */
++				u64 now = rq_clock(rq_of(cfs_rq));
++				u64 last = READ_ONCE(task_of(se)->infinity.last_sleep_ns);
++				u64 sleep_ns = (last && now > last) ? now - last : 0;
++				u64 red = infinity_ipc_gradient(sleep_ns);
++
++				if (red) {
++					vslice -= (vslice * red) >> INFINITY_FP_SHIFT;
++					atomic64_inc(this_cpu_ptr(&infinity_ipc_boost_count));
++				}
++			} else {
++				/* Infinity: IPC candidate with recent runtime,
++				 * rejected by the EMA gate (anti-flooding).
++				 */
++				atomic64_inc(this_cpu_ptr(&infinity_ipc_gate_block_count));
++			}
+ 		}
+-	}
+ 
+ 	/*
+ 	 * EEVDF: vd_i = ve_i + r_i/w_i
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 198727539..ec6b8cdfa 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -40,6 +40,8 @@ DEFINE_PER_CPU(atomic64_t, infinity_futex_boost_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_futex_boost_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_ipc_boost_count);
++DEFINE_PER_CPU(atomic64_t, infinity_ipc_gate_block_count);
++EXPORT_PER_CPU_SYMBOL(infinity_ipc_gate_block_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_ema_climb_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_ema_climb_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_wakeup_count);
+@@ -290,15 +292,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	 * buffer is sized from the same measurements, so the output can
+ 	 * never be truncated either.
+ 	 */
+-	struct infinity_stats_row cpu_rows[9], rt_rows[1], gpu_rows[8];
++	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[8];
+ 	struct infinity_stats_section sections[3] = {
+-		{ "CPU", cpu_rows, 9 },
++		{ "CPU", cpu_rows, 10 },
+ 		{ "RT",  rt_rows,  1 },
+ 		{ "GPU", gpu_rows, 8 },
+ 	};
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
+ 	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb, sec;
+ 	u64 dvg;
++	u64 ipg;
+ 	char *buf;
+ 	size_t bufsz, off = 0;
+ 	int lw = 0, vw = 0, nw = 0, s, r;
+@@ -320,6 +323,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	icf  = infinity_stats_total(&infinity_cpufreq_interactive_count);
+ 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+ 	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
++	ipg  = infinity_stats_total(&infinity_ipc_gate_block_count);
+ 	sec  = infinity_stats_total(&infinity_shield_engage_count);
+ 	dvg  = infinity_stats_total(&infinity_divergence_count);
+ 
+@@ -365,11 +369,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		strscpy(cpu_rows[5].note, "interactive IPC wakeups boosted",
+ 			sizeof(cpu_rows[5].note));
+ 
+-	cpu_rows[6].label = "Shield engages";
+-	fill_pretty_llu(cpu_rows[6].value, sizeof(cpu_rows[6].value), sec);
+-	strscpy(cpu_rows[6].note, "group share reductions applied",
++	cpu_rows[6].label = "IPC gate blocks";
++	fill_pretty_llu(cpu_rows[6].value, sizeof(cpu_rows[6].value), ipg);
++	strscpy(cpu_rows[6].note, "IPC wakes skipped (recent runtime)",
+ 		sizeof(cpu_rows[6].note));
+ 
++	cpu_rows[7].label = "Shield engages";
++	fill_pretty_llu(cpu_rows[7].value, sizeof(cpu_rows[7].value), sec);
++	strscpy(cpu_rows[7].note, "group share reductions applied",
++		sizeof(cpu_rows[7].note));
++
+ 	{
+ 		int n = 0;
+ 
+@@ -378,15 +387,15 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		walk_tg_tree_from(&root_task_group, tg_shield_visitor, tg_nop, &n);
+ 		rcu_read_unlock();
+ #endif
+-		cpu_rows[7].label = "Group shields";
+-		fill_pretty_llu(cpu_rows[7].value, sizeof(cpu_rows[7].value), n);
+-		strscpy(cpu_rows[7].note, "groups defending interactive tasks",
+-			sizeof(cpu_rows[7].note));
++		cpu_rows[8].label = "Group shields";
++		fill_pretty_llu(cpu_rows[8].value, sizeof(cpu_rows[8].value), n);
++		strscpy(cpu_rows[8].note, "groups defending interactive tasks",
++			sizeof(cpu_rows[8].note));
+ 	}
+ 
+-	cpu_rows[8].label = "EMA vs PELT divergence";
+-	fill_pretty_llu(cpu_rows[8].value, sizeof(cpu_rows[8].value), dvg);
+-	strscpy(cpu_rows[8].note, "tasks flagged", sizeof(cpu_rows[8].note));
++	cpu_rows[9].label = "EMA vs PELT divergence";
++	fill_pretty_llu(cpu_rows[9].value, sizeof(cpu_rows[9].value), dvg);
++	strscpy(cpu_rows[9].note, "tasks flagged", sizeof(cpu_rows[9].note));
+ 
+ 	/* ---- RT rows ---- */
+ 	rt_rows[0].label = "RT throttles";
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 52d7ce7d5..0e8b45118 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -63,6 +63,12 @@
+ /** IPC boost gradient: full 2x below 1ms sleep, linear falloff to 1x at 8ms. */
+ #define INFINITY_IPC_GRADIENT_FULL_NS	1000000ULL
+ #define INFINITY_IPC_GRADIENT_MAX_NS	8000000ULL
++/** IPC boost EMA gate: only wakees with at most this much recent runtime
++ *  (about 12us at BUDGET/32) get the IPC boost, so busy wakeups are
++ *  rejected and per-packet boost flooding stays bounded.  The rejected
++ *  count is visible as the 'IPC gate blocks' row in infinity_stats.
++ */
++#define INFINITY_IPC_EMA_GATE_NS	(INFINITY_BUDGET_MAX_NS / 32)
+ /* ------------------------------------------------------------------ */
+ /* SMT divisor bounds                                                  */
+ /* ------------------------------------------------------------------ */
+@@ -203,6 +209,7 @@ extern unsigned long infinity_tune_smt_divisor;
+ /* ------------------------------------------------------------------ */
+ DECLARE_PER_CPU(atomic64_t, infinity_futex_boost_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
++DECLARE_PER_CPU(atomic64_t, infinity_ipc_gate_block_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_ema_climb_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_wakeup_count);
+ DECLARE_PER_CPU(atomic64_t, infinity_rt_throttle_count);
+-- 
+2.55.0
+
