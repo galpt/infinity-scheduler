@@ -1,0 +1,589 @@
+From f3046e0ade3527d5f36639c0d2e7bb7dc333f445 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sat, 1 Aug 2026 11:39:36 +0700
+Subject: [PATCH 05/25] v4.6-gpu: GPU virtual time scheduling with EMA
+ modulation and cross-scheduler coupling
+
+Port Infinity's GPU scheduling onto the 7.2 CFS-like DRM scheduler.
+The upstream 7.2 scheduler already orders entities by virtual runtime
+in a unified rbtree, so Infinity's interactivity signals modulate the
+vruntime accumulation instead of replacing the selection machinery:
+
+- EMA climb on the accounted GPU time in the vruntime fold, clamped to
+  the budget; the fold and the completion accounting share the stats
+  object lock, so the two-lock-domain race of the 7.1 layout cannot
+  occur (no pending_ns drain needed).
+- EMA idle decay by half-lives and submission-interval tracking in the
+  fold; the 7.2 vruntime save/restore normalization provides the
+  returning-entity catch-up that 7.1 implemented as an explicit idle
+  compensation blend.
+- EMA burst penalty: busy entities accrue vruntime faster and drift
+  back; compositor-like entities with sub-8ms submission intervals get
+  a quarter of the penalty (job-type awareness).
+- CPU-to-GPU coupling: futex_waiting or a zero CPU EMA on the owning
+  task halves the fold's vruntime growth, so interactive tasks keep
+  GPU priority.
+- GPU-to-CPU passover feedback: ready entities passed over in
+  drm_sched_select_entity() increment their tasks' gpu_passovers,
+  accelerating the CPU-side EMA decay in infinity_wakeup().
+
+Per-CPU observability counters and the infinity_stats GPU section
+track completions, accounting, idle decays, coupling activations and
+passover boosts.  Completion accounting always finds the entity stats
+object (jobs hold a kref), so the 7.1 entity-not-found and lock-drain
+bookkeeping is not needed on this layout.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c |  19 ++
+ drivers/gpu/drm/scheduler/sched_rq.c     | 140 ++++++++++-
+ kernel/sched/infinity_sched.c            | 288 ++++++++++++++++++++++-
+ 3 files changed, 442 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index 4ebb51325..03c48b77e 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -87,6 +87,13 @@ ktime_t drm_sched_entity_stats_job_add_gpu_time(struct drm_sched_job *job)
+ 	ewma_drm_sched_avgtime_add(&stats->avg_job_us, ktime_to_us(duration));
+ 	spin_unlock(&stats->lock);
+ 
++	/* Infinity: the job always carries a reference on its entity stats
++	 * object, so accounting can never miss the entity -- no separate
++	 * entity-not-found path exists on this scheduler layout.
++	 */
++	atomic_inc(this_cpu_ptr(&infinity_gpu_completion_callbacks));
++	atomic_inc(this_cpu_ptr(&infinity_gpu_accounting_applied));
++
+ 	return duration;
+ }
+ 
+@@ -149,6 +156,13 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 	atomic_set(&entity->fence_seq, 0);
+ 	entity->fence_context = dma_fence_context_alloc(2);
+ 
++	/* Infinity: capture the owning process PID for cross-scheduler
++	 * coupling.  get_task_pid() takes a reference on the pid struct --
++	 * safe even if the process exits before entity_fini releases it.
++	 */
++	entity->infinity_pid = get_task_pid(current->group_leader,
++					    PIDTYPE_PID);
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(drm_sched_entity_init);
+@@ -391,6 +405,11 @@ void drm_sched_entity_fini(struct drm_sched_entity *entity)
+ 	dma_fence_put(rcu_dereference_check(entity->last_scheduled, true));
+ 	RCU_INIT_POINTER(entity->last_scheduled, NULL);
+ 	drm_sched_entity_stats_put(entity->stats);
++
++	if (entity->infinity_pid) {
++		put_pid(entity->infinity_pid);
++		entity->infinity_pid = NULL;
++	}
+ }
+ EXPORT_SYMBOL(drm_sched_entity_fini);
+ 
+diff --git a/drivers/gpu/drm/scheduler/sched_rq.c b/drivers/gpu/drm/scheduler/sched_rq.c
+index 044546bcb..b72e75dfb 100644
+--- a/drivers/gpu/drm/scheduler/sched_rq.c
++++ b/drivers/gpu/drm/scheduler/sched_rq.c
+@@ -222,15 +222,116 @@ drm_sched_entity_restore_vruntime(struct drm_sched_entity *entity,
+ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ {
+ 	struct drm_sched_entity_stats *stats = entity->stats;
+-	ktime_t runtime, prev;
++	ktime_t runtime, prev, now;
++	s64 delta_ns;
+ 
+ 	spin_lock(&stats->lock);
+ 	prev = stats->prev_runtime;
+ 	runtime = stats->runtime;
+ 	stats->prev_runtime = runtime;
++	delta_ns = ktime_to_ns(ktime_sub(runtime, prev));
++
++	/* Infinity: EMA climb on the accounted GPU time.  The delta is the
++	 * duration of the job(s) completed since the last fold; climbing the
++	 * EMA here keeps all gpu_time_* updates in a single lock domain
++	 * (stats->lock) -- the completion path and the vruntime fold can no
++	 * longer race on the accounting state.
++	 */
++	if (delta_ns > 0) {
++		u64 climb_ns = delta_ns;
++
++		if (climb_ns > INFINITY_GPU_EMA_CLIMB_NS)
++			climb_ns = INFINITY_GPU_EMA_CLIMB_NS;
++
++		stats->gpu_time_ema += div64_u64(
++			(INFINITY_GPU_EMA_CLIMB_NS - stats->gpu_time_ema) *
++			climb_ns * INFINITY_GPU_EMA_ALPHA,
++			INFINITY_GPU_EMA_CLIMB_NS * (1ULL << 8));
++	}
++
++	/* Infinity: EMA decay and submission-interval tracking.  The gap
++	 * since the last fold is the wall-clock idle time of the entity;
++	 * decay the EMA by half-lives so a long-idle entity returns to the
++	 * fully-interactive state, and record the submission cadence for
++	 * job-type awareness.
++	 */
++	now = ktime_get();
++	if (stats->gpu_time_last_active) {
++		u64 idle_ns = ktime_to_ns(ktime_sub(now,
++					stats->gpu_time_last_active));
++		u64 periods = div64_u64(idle_ns,
++				INFINITY_GPU_EMA_HALFLIFE_NS);
++
++		if (periods > 63)
++			stats->gpu_time_ema = 0;
++		else if (periods)
++			stats->gpu_time_ema >>= periods;
++
++		stats->gpu_last_submit_interval = idle_ns;
++		if (periods)
++			atomic_inc(this_cpu_ptr(&infinity_gpu_idle_compensations));
++	} else {
++		stats->gpu_last_submit_interval = 0;
++	}
++	stats->gpu_time_last_active = now;
++
++	/* Infinity: EMA burst penalty.  Busy entities (high EMA) accrue
++	 * virtual time faster, so they drift back in the queue and the GPU
++	 * stays available to interactive entities.  Compositor-like
++	 * entities with fast submission intervals (every 1-8 ms) get only a
++	 * quarter of the penalty.
++	 */
++	if (stats->gpu_time_ema > 0 && delta_ns > 0) {
++		u64 ema_pct = div64_u64(stats->gpu_time_ema * 100ULL,
++					INFINITY_GPU_EMA_CLIMB_NS);
++		s64 boost_ns;
++
++		if (ema_pct > 100)
++			ema_pct = 100;
++
++		boost_ns = delta_ns * ema_pct / 100;
++		if (stats->gpu_last_submit_interval > 0 &&
++		    stats->gpu_last_submit_interval < INFINITY_GPU_FAST_SUBMIT_NS)
++			boost_ns -= boost_ns >> 2;
++
++		delta_ns += boost_ns >> 1;
++	}
++
++	/* Infinity: CPU-to-GPU cross-scheduler coupling.  Read the owning
++	 * task's CPU-side interactivity signals via the entity's
++	 * infinity_pid: futex_waiting and a zero CPU EMA mark an
++	 * interactive task whose GPU submissions should not be treated as
++	 * bulk load.  Each signal halves this fold's vruntime growth, so
++	 * the entity drifts toward the front of the queue while its task
++	 * stays interactive.
++	 *
++	 * RCU-safe: pid_task() under rcu_read_lock() returns NULL if the
++	 * task has exited, leaving the growth unchanged.
++	 */
++	if (entity->infinity_pid) {
++		struct task_struct *p;
++		u32 coupling = 0;
++
++		rcu_read_lock();
++		p = pid_task(entity->infinity_pid, PIDTYPE_PID);
++		if (p) {
++			if (READ_ONCE(p->infinity.futex_waiting))
++				coupling++;
++			if (READ_ONCE(p->infinity.ema) == 0)
++				coupling++;
++		}
++		rcu_read_unlock();
++
++		if (coupling) {
++			delta_ns = delta_ns * (100 - 50 * coupling) / 100;
++			if (delta_ns < 0)
++				delta_ns = 0;
++			atomic_inc(this_cpu_ptr(&infinity_gpu_cpu_coupling_activations));
++		}
++	}
++
+ 	runtime = ktime_add_ns(stats->vruntime,
+-			       ktime_to_ns(ktime_sub(runtime, prev)) <<
+-			       vruntime_shift[entity->priority]);
++			       delta_ns << vruntime_shift[entity->priority]);
+ 	stats->vruntime = runtime;
+ 	spin_unlock(&stats->lock);
+ 
+@@ -374,6 +475,39 @@ drm_sched_select_entity(struct drm_gpu_scheduler *sched)
+ 			}
+ 
+ 			reinit_completion(&entity->entity_idle);
++
++			/* Infinity: GPU-to-CPU feedback.  Increment
++			 * gpu_passovers on all other ready entities further
++			 * right in the rbtree (higher vruntime), so their
++			 * owning tasks' CPU-side infinity_wakeup() can detect
++			 * GPU-side starvation and accelerate EMA decay.
++			 */
++			if (entity->infinity_pid) {
++				struct rb_node *rb2;
++
++				rcu_read_lock();
++				for (rb2 = rb_next(rb); rb2;
++				     rb2 = rb_next(rb2)) {
++					struct drm_sched_entity *e2;
++					struct task_struct *p;
++
++					e2 = rb_entry(rb2, struct drm_sched_entity,
++						      rb_tree_node);
++					if (!drm_sched_entity_is_ready(e2))
++						continue;
++					if (!e2->infinity_pid)
++						continue;
++
++					p = pid_task(e2->infinity_pid,
++						     PIDTYPE_PID);
++					if (p) {
++						atomic_inc(&p->infinity.gpu_passovers);
++						atomic_inc(this_cpu_ptr(
++							&infinity_gpu_passover_boosts));
++					}
++				}
++				rcu_read_unlock();
++			}
+ 			break;
+ 		}
+ 	}
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 88ecf8b74..957b598a8 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -19,16 +19,45 @@
+ #include <linux/math64.h>
+ #include <linux/sysctl.h>
+ #include <uapi/linux/sched/types.h>
++#include <drm/gpu_scheduler.h>
+ #include "sched.h"
+ #include "infinity_sched.h"
+ 
+ 
++/* ------------------------------------------------------------------ */
++/* Stats counters                                                      */
++/* ------------------------------------------------------------------ */
++/*
++ * Per-CPU stat counters: increment sites run on arbitrary CPUs (tick,
++ * wakeup, GPU fence callbacks), and a single global atomic would bounce
++ * one cache line across sockets on multi-node machines.  Per-CPU storage
++ * keeps the hot increments local; infinity_stats_total() sums all CPUs.
++ */
++DEFINE_PER_CPU(atomic_t, infinity_futex_boost_count);
++EXPORT_PER_CPU_SYMBOL(infinity_futex_boost_count);
++DEFINE_PER_CPU(atomic_t, infinity_ema_climb_count);
++EXPORT_PER_CPU_SYMBOL(infinity_ema_climb_count);
++DEFINE_PER_CPU(atomic_t, infinity_wakeup_count);
++EXPORT_PER_CPU_SYMBOL(infinity_wakeup_count);
++DEFINE_PER_CPU(atomic_t, infinity_rt_throttle_count);
++EXPORT_PER_CPU_SYMBOL(infinity_rt_throttle_count);
++DEFINE_PER_CPU(atomic_t, infinity_gpu_completion_callbacks);
++EXPORT_PER_CPU_SYMBOL(infinity_gpu_completion_callbacks);
++DEFINE_PER_CPU(atomic_t, infinity_gpu_accounting_applied);
++EXPORT_PER_CPU_SYMBOL(infinity_gpu_accounting_applied);
++DEFINE_PER_CPU(atomic_t, infinity_gpu_idle_compensations);
++EXPORT_PER_CPU_SYMBOL(infinity_gpu_idle_compensations);
++DEFINE_PER_CPU(atomic_t, infinity_gpu_cpu_coupling_activations);
++EXPORT_PER_CPU_SYMBOL(infinity_gpu_cpu_coupling_activations);
++DEFINE_PER_CPU(atomic_t, infinity_gpu_passover_boosts);
++EXPORT_PER_CPU_SYMBOL(infinity_gpu_passover_boosts);
++
+ /* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
+ /* ------------------------------------------------------------------ */
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+ static int infinity_running_flag = 1;
+-static const char infinity_version[] = "v4.6-gpu";
++static const char infinity_version[] = "v4.7-gpu";
+ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ 			     void *buf, size_t *lenp, loff_t *ppos)
+ {
+@@ -48,6 +77,236 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ 	}
+ 	return ret;
+ }
++/* ------------------------------------------------------------------ */
++/* Stats output                                                        */
++/* ------------------------------------------------------------------ */
++static char *fill_pretty_llu(char *buf, size_t sz, u64 val)
++{
++	char raw[24];
++	char tmp[32];
++	int raw_len, i, pos = 0, keep;
++
++	if (val == 0) {
++		scnprintf(tmp, sizeof(tmp), "0");
++	} else {
++		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
++		raw_len = strlen(raw);
++		for (i = 0; i < raw_len; i++) {
++			if (i > 0 && (raw_len - i) % 3 == 0)
++				tmp[pos++] = ',';
++			tmp[pos++] = raw[i];
++		}
++		tmp[pos] = '\0';
++	}
++
++	/* Truncate leftmost digits if too long for the 14-char column */
++	pos = strlen(tmp);
++	if (pos > 14) {
++		keep = pos - 14;
++		/* Advance past the truncation point */
++		scnprintf(buf, sz, "%13s", tmp + keep);
++	} else {
++		scnprintf(buf, sz, "%13s", tmp);
++	}
++	return buf;
++}
++
++/*
++ * infinity_stats_total - sum a per-CPU stat counter across all CPUs.
++ *
++ * Each increment lands on exactly one CPU's counter, so the sum is the
++ * true total.  Cast through unsigned int to preserve the 32-bit wrap
++ * semantics of atomic_read() (no sign extension for counters past 2^31).
++ */
++static u64 infinity_stats_total(const atomic_t __percpu *counter)
++{
++	u64 total = 0;
++	int cpu;
++
++	for_each_possible_cpu(cpu)
++		total += (u64)(unsigned int)atomic_read(per_cpu_ptr(counter, cpu));
++
++	return total;
++}
++
++static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
++				       void *buffer, size_t *lenp,
++				       loff_t *ppos)
++{
++	char *buf;
++	u64 fbc, emc, wkc, rtc, gcb, gapp;
++	u64 gic, gcca, gpbo;
++	char v1[16];
++	const size_t bufsz = 4096;
++
++	/*
++	 * Table layout (printf-style, auto-aligned):
++	 *
++	 *   | %-22s | %13s | %-30s |
++	 *   +------------------------+---------------+---------------------------+
++	 */
++	const char *SEP = "+------------------------+---------------+---------------------------+";
++	const char *ROW = "| %-22s | %13s | %-30s |\n";
++
++	if (write)
++		return -EROFS;
++
++	buf = kmalloc(bufsz, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	fbc  = infinity_stats_total(&infinity_futex_boost_count);
++	emc  = infinity_stats_total(&infinity_ema_climb_count);
++	wkc  = infinity_stats_total(&infinity_wakeup_count);
++	rtc  = infinity_stats_total(&infinity_rt_throttle_count);
++	gcb  = infinity_stats_total(&infinity_gpu_completion_callbacks);
++	gapp = infinity_stats_total(&infinity_gpu_accounting_applied);
++	gic  = infinity_stats_total(&infinity_gpu_idle_compensations);
++	gcca = infinity_stats_total(&infinity_gpu_cpu_coupling_activations);
++	gpbo = infinity_stats_total(&infinity_gpu_passover_boosts);
++
++	buf[0] = '\0';
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
++		  "Infinity Scheduler %s\n\n", infinity_version);
++
++	/* ---- CPU ---- */
++	strlcat(buf, "CPU\n", bufsz);
++	strlcat(buf, SEP, bufsz);
++	strlcat(buf, "\n", bufsz);
++
++	if (emc) {
++		char pct[16];
++
++		scnprintf(pct, sizeof(pct), "%llu%% of tasks",
++			  div64_u64(fbc * 100ULL, emc));
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "Futex boosts",
++			  fill_pretty_llu(v1, sizeof(v1), fbc),
++			  pct);
++	} else {
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "Futex boosts",
++			  fill_pretty_llu(v1, sizeof(v1), fbc),
++			  "N/A");
++	}
++
++	{
++		char avg[24];
++		u64 avg_wakeup = div64_u64(emc * 100ULL, max(wkc, 1ULL));
++
++		scnprintf(avg, sizeof(avg), "~%llu.%02llu/wakeup",
++			  avg_wakeup / 100, avg_wakeup % 100);
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "EMA climbs",
++			  fill_pretty_llu(v1, sizeof(v1), emc), avg);
++	}
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "Wakeup decays",
++		  fill_pretty_llu(v1, sizeof(v1), wkc), "");
++
++	strlcat(buf, SEP, bufsz);
++	strlcat(buf, "\n\n", bufsz);
++
++	/* ---- RT ---- */
++	strlcat(buf, "RT\n", bufsz);
++	strlcat(buf, SEP, bufsz);
++	strlcat(buf, "\n", bufsz);
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "RT throttles",
++		  fill_pretty_llu(v1, sizeof(v1), rtc),
++		  "FIFO rogue demotions");
++
++	strlcat(buf, SEP, bufsz);
++	strlcat(buf, "\n\n", bufsz);
++
++	/* ---- GPU ---- */
++	strlcat(buf, "GPU\n", bufsz);
++	strlcat(buf, SEP, bufsz);
++	strlcat(buf, "\n", bufsz);
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "Completion entered",
++		  fill_pretty_llu(v1, sizeof(v1), gcb),
++		  "fence callbacks fired");
++
++	if (gcb) {
++		u64 whole = div64_u64(gapp * 100ULL, gcb);
++		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
++		char v2[16];
++
++		scnprintf(v2, sizeof(v2), "%llu.%02llu%%", whole, frac);
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "Accounting applied",
++			  fill_pretty_llu(v1, sizeof(v1), gapp),
++			  v2);
++	} else {
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++			  "Accounting applied",
++			  fill_pretty_llu(v1, sizeof(v1), gapp),
++			  "N/A");
++	}
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "Idle compensation",
++		  fill_pretty_llu(v1, sizeof(v1), gic),
++		  "EMA idle decays");
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "CPU->GPU coupling",
++		  fill_pretty_llu(v1, sizeof(v1), gcca),
++		  "interactive vtime reduction");
++
++	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
++		  "GPU->CPU coupling",
++		  fill_pretty_llu(v1, sizeof(v1), gpbo),
++		  "passover EMA boost");
++
++	strlcat(buf, SEP, bufsz);
++	strlcat(buf, "\n\n", bufsz);
++
++	/* Footer */
++	if (gcb) {
++		u64 whole = div64_u64(gapp * 100ULL, gcb);
++		u64 frac  = div64_u64(gapp * 10000ULL, gcb) % 100;
++		char w1[16], w2[16], *p1, *p2;
++
++		fill_pretty_llu(w1, sizeof(w1), gapp);
++		fill_pretty_llu(w2, sizeof(w2), gcb);
++		/* Strip leading spaces for the confidence line */
++		p1 = w1;
++		while (*p1 == ' ')
++			p1++;
++		p2 = w2;
++		while (*p2 == ' ')
++			p2++;
++		scnprintf(buf + strlen(buf), bufsz - strlen(buf),
++			  "Accounting confidence: %llu.%02llu%%  (%s / %s completions)\n",
++			  whole, frac, p1, p2);
++	} else {
++		strlcat(buf,
++			"Accounting confidence: N/A  (no GPU jobs tracked)\n",
++			bufsz);
++	}
++
++	if (!gcb)
++		strlcat(buf, "Verdict: No GPU jobs recorded yet\n",
++			bufsz);
++	else if (gapp >= gcb)
++		strlcat(buf,
++			"Verdict: All counters healthy -- system operating normally\n",
++			bufsz);
++	else
++		strlcat(buf,
++			"Verdict: Accounting mismatch detected -- see above for details\n",
++			bufsz);
++
++	*lenp = simple_read_from_buffer(buffer, *lenp, ppos, buf,
++					strnlen(buf, bufsz));
++	kfree(buf);
++	return 0;
++}
+ static const struct ctl_table infinity_sysctl_table[] = {
+ 	{
+ 		.procname	= "infinity_smt_divisor",
+@@ -70,6 +329,13 @@ static const struct ctl_table infinity_sysctl_table[] = {
+ 		.mode		= 0444,
+ 		.proc_handler	= proc_dostring,
+ 	},
++	{
++		.procname	= "infinity_stats",
++		.data		= NULL,
++		.maxlen		= 0,
++		.mode		= 0444,
++		.proc_handler	= infinity_stats_proc_handler,
++	},
+ 	{}
+ };
+ /* ------------------------------------------------------------------ */
+@@ -128,6 +394,23 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ {
+ 	if (sleep_ns == 0)
+ 		return;
++
++	/* GPU-to-CPU feedback: if this task's GPU entity has been
++	 * repeatedly passed over in scheduling, accelerate the EMA
++	 * decay so the task appears more interactive on the CPU side.
++	 * Each passover is worth one extra half-life of decay.
++	 */
++	{
++		int passovers = atomic_xchg(&ctx->gpu_passovers, 0);
++
++		if (passovers > 0) {
++			u64 extra_ns = sleep_ns * min(passovers, 8);
++
++			sleep_ns += extra_ns;
++			atomic_inc(this_cpu_ptr(&infinity_gpu_passover_boosts));
++		}
++	}
++
+ 	/*
+ 	 * Exponential shift decay with 24ms half-life, using a 2nd-order
+ 	 * Taylor expansion for the sub-period residual to maintain a
+@@ -164,7 +447,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->rt_ema = 0;
+ 	ctx->last_sleep_ns = now;
+ 	ctx->rt_last_sleep_ns = 0;
+-
++	atomic_set(&ctx->gpu_passovers, 0);
++	ctx->futex_waiting = false;
+ }
+ /* ------------------------------------------------------------------ */
+ /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
+-- 
+2.55.0
+

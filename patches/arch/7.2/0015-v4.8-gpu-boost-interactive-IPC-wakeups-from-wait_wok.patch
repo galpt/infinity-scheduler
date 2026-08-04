@@ -1,7 +1,7 @@
-From fe9db3ed5bbf273caa67e76c021d1b60b1c18fa8 Mon Sep 17 00:00:00 2001
+From 475b124da8d624038a3b77e84cf31322a2e11f4f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 00:31:12 +0700
-Subject: [PATCH 15/23] v4.8-gpu: boost interactive IPC wakeups from
+Subject: [PATCH 15/25] v4.8-gpu: boost interactive IPC wakeups from
  wait_woken()
 
 Extend the interactive-wakeup vslice boost to wait_woken(): the flag is

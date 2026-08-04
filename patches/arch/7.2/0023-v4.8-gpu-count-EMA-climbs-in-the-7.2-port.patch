@@ -1,7 +1,7 @@
-From c6faee9ae0c641cee806bc5cd15a02188018845c Mon Sep 17 00:00:00 2001
+From 3a371c30127047a6d92bbf39424703f083278ee1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 01:30:16 +0700
-Subject: [PATCH 23/23] v4.8-gpu: count EMA climbs in the 7.2 port
+Subject: [PATCH 23/25] v4.8-gpu: count EMA climbs in the 7.2 port
 
 The 7.2 v4.7 port never incremented infinity_ema_climb_count, so the
 'EMA climbs' row in infinity_stats read zero on the 7.2 arch.  Add the

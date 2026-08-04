@@ -1,7 +1,7 @@
-From f0831b9666f86d8d6a7f5b645558046b82da1aed Mon Sep 17 00:00:00 2001
+From dcd43f5aeff3cc3ee8c77a59c59caed9a039156d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 16/23] v4.8-gpu: gate GPU coupling on the fair scheduler class
+Subject: [PATCH 16/25] v4.8-gpu: gate GPU coupling on the fair scheduler class
 
 The DRM scheduler's CPU<->GPU coupling reads the owning task's CPU-side
 interactivity signals (futex_waiting, ema == 0) and the passover loop

@@ -1,7 +1,7 @@
-From 4ebe40e91cb4d12718693976884f77527c8a7339 Mon Sep 17 00:00:00 2001
+From f52707d3a321f8ebf61c8fa6adec22de2e2345c7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 02:50:58 +0700
-Subject: [PATCH] v4.8-gpu: make the infinity_stats table self-adjusting
+Subject: [PATCH 24/25] v4.8-gpu: make the infinity_stats table self-adjusting
 
 Port of the 7.1 fix to the 7.2 layout: the GPU section keeps its five
 rows (the reduced 7.2 series has no lock-contention, entity-not-found

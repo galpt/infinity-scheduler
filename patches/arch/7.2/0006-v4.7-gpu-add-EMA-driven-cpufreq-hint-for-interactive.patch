@@ -1,7 +1,7 @@
-From c8957154a7481e10d3893c4167185e2bb2a43808 Mon Sep 17 00:00:00 2001
+From ac5b683920b6fe1cf38344a7813d71cfd133556e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:36 +0700
-Subject: [PATCH 06/12] v4.7-gpu: add EMA-driven cpufreq hint for interactive
+Subject: [PATCH 06/25] v4.7-gpu: add EMA-driven cpufreq hint for interactive
  wakeups
 
 Add SCHED_CPUFREQ_INTERACTIVE flag alongside the existing IOWAIT flag.
@@ -31,7 +31,7 @@ index bdd31ab93..336dc2366 100644
  #ifdef CONFIG_CPU_FREQ
  struct cpufreq_policy;
 diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
-index a4e689eef..985a91ede 100644
+index dff4ee046..991d7f653 100644
 --- a/kernel/sched/cpufreq_schedutil.c
 +++ b/kernel/sched/cpufreq_schedutil.c
 @@ -265,27 +265,33 @@ static bool sugov_iowait_reset(struct sugov_cpu *sg_cpu, u64 time,

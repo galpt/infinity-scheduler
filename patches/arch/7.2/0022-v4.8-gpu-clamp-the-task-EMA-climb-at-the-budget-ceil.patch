@@ -1,7 +1,7 @@
-From adc4ef8e337d064b7eecdf1dfbb1c7b30824cc1d Mon Sep 17 00:00:00 2001
+From 2ab55b67b5217f0ee2e5194d683e50a609243306 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 00:55:03 +0700
-Subject: [PATCH 22/23] v4.8-gpu: clamp the task EMA climb at the budget
+Subject: [PATCH 22/25] v4.8-gpu: clamp the task EMA climb at the budget
  ceiling
 
 With the hardware-adaptive alpha at 4096 and FP_ONE at 256, a single

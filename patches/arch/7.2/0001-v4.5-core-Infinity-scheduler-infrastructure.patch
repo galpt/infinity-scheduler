@@ -1,7 +1,7 @@
-From 3925ea9b9bfeb7d4299831668ad1ea9b07556f1a Mon Sep 17 00:00:00 2001
+From 6ede5318e7400b53e21f44ad502498d60f7fe27b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:13:30 +0700
-Subject: [PATCH 01/12] v4.5: core Infinity scheduler infrastructure
+Subject: [PATCH 01/25] v4.5: core Infinity scheduler infrastructure
 
 Add struct infinity_ctx to task_struct, futex_waiting flag for IPC
 wakeup boost, infinity_sched.c/h algorithm implementation, fork init
@@ -24,10 +24,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/MAINTAINERS b/MAINTAINERS
-index 716acfc3d..8b40f0c7d 100644
+index 5114e6db7..cdd362a8f 100644
 --- a/MAINTAINERS
 +++ b/MAINTAINERS
-@@ -29843,3 +29843,10 @@ S:	Buried alive in reporters
+@@ -29842,3 +29842,10 @@ S:	Buried alive in reporters
  T:	git git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
  F:	*
  F:	*/

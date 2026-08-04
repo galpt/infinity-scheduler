@@ -1,7 +1,7 @@
-From ed298b6916c468d8de20d7ad7ae84c430ebe42de Mon Sep 17 00:00:00 2001
+From 1fd21a21840782329b89250eb20d064006aa56ce Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 11:36:15 +0700
-Subject: [PATCH] v4.8-gpu: gate the IPC boost on light recent runtime
+Subject: [PATCH 25/25] v4.8-gpu: gate the IPC boost on light recent runtime
 
 Port of the 7.1 fix to the 7.2 layout: the exact ema == 0 gate made
 the IPC boost unreachable (EMA returns to zero only after a sleep of
