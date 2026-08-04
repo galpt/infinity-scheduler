@@ -1,32 +1,20 @@
-From 3d86fd09eca433b972bbff68b9c0981cb8eb0801 Mon Sep 17 00:00:00 2001
+From 4dee9204835f4b1a369121389b7a0616b478687e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 27/34] v4.8-gpu: gate GPU coupling on the fair scheduler class
+Date: Tue, 4 Aug 2026 14:36:31 +0700
+Subject: [PATCH 31/33] v4.8-gpu: gate GPU coupling on the fair scheduler class
 
-The DRM scheduler's CPU<->GPU coupling reads the owning task's CPU-side
-interactivity signals (futex_waiting, ema == 0) and the passover loop
-accumulates gpu_passovers for every entity further right in the vtime
-rbtree.  Because infinity_pid is the process group leader (captured via
-get_task_pid(current->group_leader) at drm_sched_entity_init), both
-paths now gate on the leader's sched_class via the new exported helper
-infinity_is_interactive_candidate(): fair-class, non-idle-policy only.
-
-Non-CFS leaders (sched_ext, RT, DL) no longer have their untouched
-ema == 0 misread as interactive, and no longer accumulate gpu_passovers.
-SCHED_IDLE-policy leaders are excluded as well -- the mirror of the
-calc_weight bypass.  The coupling counters are reused unchanged (they
-only fire when the boost is applied); no new counters.
-
-Conservative default for scx GPU workloads: they lose the interactive
-GPU boost until validated (documented policy).  The helper is exported
-with EXPORT_SYMBOL_GPL as a scheduler-internal interface.
-
-The 7.2-series counterpart of this coupling lives in sched_rq.c
-(drm_sched_entity_update_vruntime) and is a follow-up, not implemented
-here (7.1 series only).
+The GPU scheduler's CPU<->GPU coupling reads the EMA and futex state
+of the task behind each DRM entity.  infinity_pid resolves to the
+process group leader (captured via get_task_pid(current->group_leader)
+at drm_sched_entity_init), so the new gate evaluates the leader's
+sched_class: only fair-class, non-idle-policy leaders get the 50%
+vtime cut and accumulate gpu_passovers.  Non-CFS leaders (sched_ext,
+RT, DL) no longer have their ema == 0 misread as interactive, and
+SCHED_IDLE leaders are excluded by mirroring the calc_weight bypass.
+The helper is exported with EXPORT_SYMBOL_GPL as a scheduler-internal
+interface.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
-(cherry picked from commit 1f5a955e6e9ae85eaf1d83fd2a19ece75071636a)
 ---
  drivers/gpu/drm/scheduler/sched_main.c | 35 ++++++++++++++++++--------
  include/drm/gpu_scheduler.h            |  5 ++++
@@ -105,10 +93,10 @@ index 5e90db5c9..ef3138f4e 100644
 +
  #endif
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index bac9c07e2..27f89a7a5 100644
+index 644d55f66..16c91de42 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -666,3 +666,14 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
+@@ -762,3 +762,14 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
  	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
  				      / 100ULL));
  }
