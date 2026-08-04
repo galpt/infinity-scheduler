@@ -70,6 +70,7 @@ DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
 EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
 DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
 EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+/* ------------------------------------------------------------------ */
 /* Sysctl tunables                                                     */
 /* ------------------------------------------------------------------ */
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;

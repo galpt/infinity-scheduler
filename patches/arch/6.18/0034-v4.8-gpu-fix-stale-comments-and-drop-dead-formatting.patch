@@ -1,4 +1,4 @@
-From 7ead2ad653d4d677b097b6126a2ded76f934028c Mon Sep 17 00:00:00 2001
+From 35355fc1d2063670d6482be190bedeadb0dc8c1e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 15:34:25 +0700
 Subject: [PATCH] v4.8-gpu: fix stale comments and drop dead formatting helpers
@@ -14,12 +14,12 @@ self-adjusting stats table left orphaned (dead code).
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
- kernel/sched/infinity_sched.c | 80 +++--------------------------------
+ kernel/sched/infinity_sched.c | 81 +++--------------------------------
  kernel/sched/infinity_sched.h | 15 ++++---
- 2 files changed, 15 insertions(+), 80 deletions(-)
+ 2 files changed, 16 insertions(+), 80 deletions(-)
 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 7a9b6222b..098e8c11b 100644
+index 7a9b6222b..53b874e98 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
 @@ -2,7 +2,7 @@
@@ -40,7 +40,15 @@ index 7a9b6222b..098e8c11b 100644
   */
  #include <linux/fs.h>
  #include <linux/math64.h>
-@@ -95,77 +95,6 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+@@ -70,6 +70,7 @@ DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
++/* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
+ /* ------------------------------------------------------------------ */
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+@@ -95,77 +96,6 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
  	return ret;
  }
  /* ------------------------------------------------------------------ */
@@ -118,7 +126,7 @@ index 7a9b6222b..098e8c11b 100644
  /*
   * fill_pretty_llu - format u64 with K/M/B/T/Qa/Qi suffixes, two
   * decimal digits, floor-truncated (1230 -> "1.23K").  The output is
-@@ -599,7 +528,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+@@ -599,7 +529,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
  	 * (power saving, thermal throttle) it backs down to 2048.
  	 *
  	 *   cap=1024 (max perf) → α = 4096  (τ_climb ≈ 0.38ms)
@@ -127,7 +135,7 @@ index 7a9b6222b..098e8c11b 100644
  	 *   cap= 256 (low)      → α = 2560  (τ_climb ≈ 0.6ms)
  	 */
  	if (cpu_capacity >= SCHED_CAPACITY_SCALE)
-@@ -640,7 +569,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -640,7 +570,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  	/* GPU-to-CPU feedback: if this task's GPU entity has been
  	 * repeatedly passed over in scheduling, accelerate the EMA
  	 * decay so the task appears more interactive on the CPU side.
