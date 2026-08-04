@@ -1,0 +1,40 @@
+From ffca015bca2e21e4516a50d21573d9d9c36791dd Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 16:43:51 +0700
+Subject: [PATCH] v4.8-gpu: show the IPC boost ratio against IPC wakeups
+
+The IPC boosts row annotated boosts as a percentage of EMA climbs,
+which is structurally tiny (1.72K boosts vs 242.99K climbs reads as
+0%) and the 'of tasks' label was misleading.  The funnel counters
+already exist, so ratio against the IPC wakeup candidates instead:
+1.72K of 5.50K candidates is 31% of IPC wakeups, a meaningful signal
+for whether the boost is doing its job.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 53b874e98..5f7921cf3 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -294,11 +294,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 	cpu_rows[5].label = "IPC boosts";
+ 	fill_pretty_llu(cpu_rows[5].value, sizeof(cpu_rows[5].value), ipb);
+-	if (emc)
++	if (ipw)
+ 		scnprintf(cpu_rows[5].note, sizeof(cpu_rows[5].note),
+-			  "%llu%% of tasks", mul_u64_u32_div(ipb, 100, emc));
++			  "%llu%% of IPC wakeups",
++			  mul_u64_u32_div(ipb, 100, ipw));
+ 	else
+-		strscpy(cpu_rows[5].note, "interactive IPC wakeups boosted",
++		strscpy(cpu_rows[5].note, "no IPC wakeups yet",
+ 			sizeof(cpu_rows[5].note));
+ 
+ 	cpu_rows[6].label = "IPC wakeups";
+-- 
+2.55.0
+

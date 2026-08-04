@@ -1,0 +1,38 @@
+From bb5767cb529cdf5326260deb095fd146b2b04990 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 16:44:58 +0700
+Subject: [PATCH] v4.8-gpu: show the IPC boost ratio against IPC wakeups
+
+Port of the 7.1 fix to the 7.2 layout: the IPC boosts row annotated
+boosts as a percentage of EMA climbs, which is structurally tiny and
+reads as 0% on real workloads; ratio against the IPC wakeup
+candidates instead.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 1236a0ec4..3f44ade8c 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -285,11 +285,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 	cpu_rows[5].label = "IPC boosts";
+ 	fill_pretty_llu(cpu_rows[5].value, sizeof(cpu_rows[5].value), ipb);
+-	if (emc)
++	if (ipw)
+ 		scnprintf(cpu_rows[5].note, sizeof(cpu_rows[5].note),
+-			  "%llu%% of tasks", mul_u64_u32_div(ipb, 100, emc));
++			  "%llu%% of IPC wakeups",
++			  mul_u64_u32_div(ipb, 100, ipw));
+ 	else
+-		strscpy(cpu_rows[5].note, "interactive IPC wakeups boosted",
++		strscpy(cpu_rows[5].note, "no IPC wakeups yet",
+ 			sizeof(cpu_rows[5].note));
+ 
+ 	cpu_rows[6].label = "IPC wakeups";
+-- 
+2.55.0
+

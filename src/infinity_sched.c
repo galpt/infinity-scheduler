@@ -294,11 +294,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 
 	cpu_rows[5].label = "IPC boosts";
 	fill_pretty_llu(cpu_rows[5].value, sizeof(cpu_rows[5].value), ipb);
-	if (emc)
+	if (ipw)
 		scnprintf(cpu_rows[5].note, sizeof(cpu_rows[5].note),
-			  "%llu%% of tasks", mul_u64_u32_div(ipb, 100, emc));
+			  "%llu%% of IPC wakeups",
+			  mul_u64_u32_div(ipb, 100, ipw));
 	else
-		strscpy(cpu_rows[5].note, "interactive IPC wakeups boosted",
+		strscpy(cpu_rows[5].note, "no IPC wakeups yet",
 			sizeof(cpu_rows[5].note));
 
 	cpu_rows[6].label = "IPC wakeups";
