@@ -24,7 +24,7 @@ reported by users (notably the v4.6-era Alt+Tab lag, issue #16).
 | socket-latency | netperf TCP_RR | transactions/s (P0-1 path) | > 1000/s |
 | rt | cyclictest + rogue SCHED_FIFO | max latency with rogue | < 50 ms |
 | fork | stress-ng --fork | forks/s | > 2000/s |
-| ema-pelt-trace | /proc/<pid>/infinity + perf | divergence pp + wakeup P99 | <= 50 pp / < 500 us |
+| ema-pelt-trace | `/proc/<pid>/infinity` + perf | divergence pp + wakeup P99 | <= 50 pp / < 500 us |
 
 Missing tools produce a WARN and a skip, never a false FAIL (netperf,
 rt-app, bpftrace are not installed on the reference machine).

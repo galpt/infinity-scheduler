@@ -86,7 +86,7 @@ sudo bash tools/regression/run-v48-regression.sh
 | `socket-latency` | netperf TCP_RR | transactions > 1000/s |
 | `rt` | cyclictest + rogue SCHED_FIFO | max latency < 50 ms (valve requeue) |
 | `fork` | stress-ng --fork | forks > 2000/s |
-| `ema-pelt-trace` | /proc/<pid>/infinity + perf | EMA vs PELT divergence ≤ 50pp on a sustained burn |
+| `ema-pelt-trace` | `/proc/<pid>/infinity` + perf | EMA vs PELT divergence ≤ 50pp on a sustained burn |
 
 Missing tools produce a WARN and a skip, never a false FAIL. See
 `tools/regression/README.md` for the full method and baselining procedure.
