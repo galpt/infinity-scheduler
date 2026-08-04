@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.h -- Infinity scheduler API (v4.7-gpu).
+ * infinity_sched.h -- Infinity scheduler API (v4.8-gpu).
  *
  * Architecture:
  *
@@ -11,7 +11,7 @@
  *   update_deadline()        ──call──► infinity_update_weight() -- EMA weight
  *   update_curr()            ──call──► infinity_consume()       -- EMA budget
  *   enqueue_task_fair()      ──call──► infinity_wakeup()        -- EMA decay
- *   place_entity()   ──check──► futex_waiting   -- halve vslice on wakeup
+ *   place_entity()   ──check──► futex/ipc_waiting -- halve vslice on wakeup
  *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  -- sleep tracking
  *   update_curr_rt()         ──call──► infinity_rt_consume()    -- RT EMA climb
  *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     -- RT EMA decay
@@ -31,9 +31,12 @@
  * Tunables:
  *   kernel.infinity_smt_divisor   -- SMT secondary slice divisor (default 2)
  *   kernel.infinity_running       -- read-only flag, 1 if active
+ *   kernel.infinity_version       -- read-only branch version string
+ *   kernel.infinity_stats         -- read-only CPU/GPU accounting table
  *
- * Self-stabilizing by construction: the EMA naturally converges between
- * 0 and BUDGET_MAX without any clamps or external feedback loop.
+ * Self-stabilizing by construction: the EMA converges toward BUDGET_MAX
+ * while running and is shifted down by sleep decay; the climb step is
+ * clamped at the ceiling, so the EMA always stays within [0, BUDGET_MAX].
  * Higher EMA → lower effective weight → later deadline.
  */
 #ifndef __INFINITY_SCHED_H
@@ -46,7 +49,9 @@
 /** Maximum budget ceiling (6ms). */
 #define INFINITY_BUDGET_MAX_NS		6000000ULL
 /**
- * EMA time constant: step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
+ * Documentational EMA time constant (the live alpha is hardware-adaptive,
+ * computed from cpu_capacity in infinity_consume, 2048-4096):
+ * step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
  * α = 3072 gives ~500µs continuous runtime to reach full EMA penalty.
  */
 #define INFINITY_EMA_ALPHA		3072

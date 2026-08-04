@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
  *
- * infinity_sched.c -- Infinity scheduler algorithm (v4.7-gpu).
+ * infinity_sched.c -- Infinity scheduler algorithm (v4.8-gpu).
  *
  * Fully continuous limit-based scheduling:
  *
@@ -14,7 +14,7 @@
  *                      at EMA=100%: base × 2%
  *
  * All task classification data is observed within the scheduler
- * (uclamp declarations, EMA tracking, futex_waiting flag).
+ * (uclamp declarations, EMA tracking, futex_waiting and ipc_waiting flags).
  */
 #include <linux/fs.h>
 #include <linux/math64.h>
@@ -93,77 +93,6 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
 		WRITE_ONCE(infinity_tune_smt_divisor, val);
 	}
 	return ret;
-}
-/* ------------------------------------------------------------------ */
-/* Human-readable number formatting                                    */
-/* ------------------------------------------------------------------ */
-static __maybe_unused void fmt_human(char *buf, size_t sz, u64 val)
-{
-	static const struct {
-		u64 divisor;
-		const char *unit;
-	} table[] = {
-		{ 1000000000000000000ULL, "E" },
-		{ 1000000000000000ULL,    "P" },
-		{ 1000000000000ULL,       "T" },
-		{ 1000000000ULL,          "B" },
-		{ 1000000ULL,             "M" },
-		{ 1000ULL,                "K" },
-	};
-	int i;
-	char tmp[32];
-
-	for (i = 0; i < ARRAY_SIZE(table); i++) {
-		if (val >= table[i].divisor) {
-			u64 whole = val / table[i].divisor;
-			u64 frac = (val % table[i].divisor) /
-				   (table[i].divisor / 100);
-			scnprintf(tmp, sizeof(tmp), "%llu.%02llu %s",
-				  whole, frac, table[i].unit);
-			strlcat(buf, tmp, sz);
-			return;
-		}
-	}
-
-	scnprintf(tmp, sizeof(tmp), "%llu", (unsigned long long)val);
-	strlcat(buf, tmp, sz);
-}
-/* ------------------------------------------------------------------ */
-/* fmt_val -- Write val to buf with comma separators, right-aligned    *
- * to @width.  If @width is 0, no padding is applied.
- */
-/* ------------------------------------------------------------------ */
-static __maybe_unused void fmt_val(char *buf, size_t sz, u64 val, unsigned int width)
-{
-	char tmp[32];
-	unsigned int len;
-
-	if (val == 0) {
-		scnprintf(tmp, sizeof(tmp), "0");
-	} else {
-		char raw[24];
-		int raw_len, i, pos = 0;
-
-		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
-		raw_len = strlen(raw);
-
-		for (i = 0; i < raw_len; i++) {
-			if (i > 0 && (raw_len - i) % 3 == 0)
-				tmp[pos++] = ',';
-			tmp[pos++] = raw[i];
-		}
-		tmp[pos] = '\0';
-	}
-
-	len = strlen(tmp);
-	if (width > 0 && len < width) {
-		char padded[32];
-
-		scnprintf(padded, sizeof(padded), "%*s", width, tmp);
-		strlcat(buf, padded, sz);
-	} else {
-		strlcat(buf, tmp, sz);
-	}
 }
 /* ------------------------------------------------------------------ */
 /*
@@ -599,7 +528,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 	 * (power saving, thermal throttle) it backs down to 2048.
 	 *
 	 *   cap=1024 (max perf) → α = 4096  (τ_climb ≈ 0.38ms)
-	 *   cap= 512 (mid)      → α = 3072  (τ_climb ≈ 0.5ms,  current default)
+	 *   cap= 512 (mid)      → α = 3072  (τ_climb ≈ 0.5ms)
 	 *   cap= 256 (low)      → α = 2560  (τ_climb ≈ 0.6ms)
 	 */
 	if (cpu_capacity >= SCHED_CAPACITY_SCALE)
@@ -640,7 +569,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 	/* GPU-to-CPU feedback: if this task's GPU entity has been
 	 * repeatedly passed over in scheduling, accelerate the EMA
 	 * decay so the task appears more interactive on the CPU side.
-	 * Each passover is worth one extra half-life of decay.
+	 * Each passover adds one extra sleep-duration of decay (a 24ms
+	 * sleep with one passover decays twice as far).
 	 */
 	{
 		int passovers = atomic_xchg(&ctx->gpu_passovers, 0);
