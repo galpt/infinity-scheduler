@@ -11,11 +11,11 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/            38 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/             35 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/             35 patches — Vanilla kernel.org 7.1
-│   ├── arch/7.2/             25 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
-│   └── fedora/7.0/           36 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/            40 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/             37 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/             37 patches — Vanilla kernel.org 7.1
+│   ├── arch/7.2/             28 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
+│   └── fedora/7.0/           38 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
