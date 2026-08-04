@@ -254,21 +254,21 @@ passover → gpu_passovers (fair-class gated; GPU→CPU feedback)"]
 | SMT halving | No | Yes |
 | EEVDF Invariant Assert | N/A (BPF) | Yes (WARN_ON_ONCE) |
 | Wakeup deadline boost | N/A | Asymptotic vslice |
-| Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
+| Work stealing | Yes (BPF) | No (EEVDF load balancer) |
 | Adaptive RR timeslice | No | Yes (rt_ema-based, 10–100ms) |
 | Hardware-adaptive alpha | No | Yes (2048–4096 via cpu_capacity) |
-| Futex IPC wakeup boost | No | Yes (vslice halved on futex wakeup; v4.8: also wait_woken IPC wakes, rate-limited gradient) |
+| Futex IPC wakeup boost | No | Yes (futex 2× + IPC rate-limited gradient) |
 | Migration hysteresis | No | Yes (EMA-driven cache pinning) |
-| Cgroup defense shield | No | Yes (group EMA, quantized cross-CPU ramp) |
+| Cgroup defense shield | No | Yes (group EMA, cross-CPU ramp) |
 | RT cross-class safety | No | Yes (native requeue throttling) |
 | Asymmetric core placement | No | Yes (EMA-guided P/E core bias) |
 | GPU time tracking | No | Yes (EMA per DRM entity) |
-| Virtual GPU time scheduling | No | Yes (sole Infinity policy, FIFO/RR removed) |
+| Virtual GPU time scheduling | No | Yes (sole policy; FIFO/RR removed) |
 | Soft priority (anti-starvation) | No | Yes (proportional vtime scaling) |
-| Cross-scheduler CPU-GPU coupling | No | Yes (futex/EMA → GPU vtime + GPU passover → CPU) |
+| Cross-scheduler CPU-GPU coupling | No | Yes (futex/EMA ↔ GPU vtime) |
 | EMA-driven cpufreq hint | No | Yes (v4.7: SCHED_CPUFREQ_INTERACTIVE flag) |
-| SMT interactive placement | No | Yes (v4.7: low-EMA tasks moved to idle core) |
-| GPU job-type awareness | No | Yes (v4.7: submission interval reduces compositor penalty) |
+| SMT interactive placement | No | Yes (v4.7: low-EMA → idle core) |
+| GPU job-type awareness | No | Yes (v4.7: submission-interval aware) |
 | Per-process EMA visibility | No | Yes (v4.7: `/proc/<pid>/infinity`) |
 
 ## License
