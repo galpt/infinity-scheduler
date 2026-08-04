@@ -38,8 +38,8 @@
  */
 #ifndef __INFINITY_SCHED_H
 #define __INFINITY_SCHED_H
-#include <linux/sched.h>
 #include <linux/math64.h>
+#include <linux/sched.h>
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
 /* ------------------------------------------------------------------ */
@@ -53,6 +53,35 @@
 /** Fixed-point shift for fractional precision (8 bits). */
 #define INFINITY_FP_SHIFT		8
 #define INFINITY_FP_ONE			(1 << INFINITY_FP_SHIFT)
+/** IPC boost gradient: full 2x below 1ms sleep, linear falloff to 1x at 8ms. */
+#define INFINITY_IPC_GRADIENT_FULL_NS	1000000ULL
+#define INFINITY_IPC_GRADIENT_MAX_NS	8000000ULL
+/** IPC boost rate limit: at most one boost per task per interval, so
+ *  per-packet wakeup storms cannot churn the runqueue.
+ */
+#define INFINITY_IPC_RATE_LIMIT_NS	2000000ULL
+
+/**
+ * infinity_ipc_gradient -- IPC-wakeup vslice reduction, by sleep duration.
+ * @sleep_ns:  Time the task slept (ns), 0 if unknown.
+ *
+ * Full 2x boost (red = FP_ONE/2) at sleep <= 1ms, linear falloff to no
+ * boost (red = 0) at >= 8ms.  div64_u64 truncates down, so the result
+ * is monotone non-increasing in sleep_ns -- no boost oscillation.
+ *
+ * Return: Reduction [0, FP_ONE/2] in fixed-point units.
+ */
+static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+{
+	u64 span = INFINITY_IPC_GRADIENT_MAX_NS - INFINITY_IPC_GRADIENT_FULL_NS;
+
+	if (sleep_ns <= INFINITY_IPC_GRADIENT_FULL_NS)
+		return INFINITY_FP_ONE / 2;
+	if (sleep_ns >= INFINITY_IPC_GRADIENT_MAX_NS)
+		return 0;
+	return div64_u64((span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS)) *
+			 INFINITY_FP_ONE / 2, span);
+}
 /**
  * Weight reduction slope: effective = base × (100 - pct × 98/100) / 100.
  * At EMA=100%, denom = 2, weight = base × 2/100 = base × 2% (50× reduction).
@@ -60,15 +89,6 @@
  */
 #define INFINITY_WEIGHT_SLOPE_NUM	98
 #define INFINITY_WEIGHT_SLOPE_DEN	100
-/** IPC boost gradient: full 2x below 1ms sleep, linear falloff to 1x at 8ms. */
-#define INFINITY_IPC_GRADIENT_FULL_NS	1000000ULL
-#define INFINITY_IPC_GRADIENT_MAX_NS	8000000ULL
-/** IPC boost EMA gate: only wakees with at most this much recent runtime
- *  (about 23us at BUDGET/16) get the IPC boost, so busy wakeups are
- *  rejected and per-packet boost flooding stays bounded.  The rejected
- *  count is visible as the 'IPC gate blocks' row in infinity_stats.
- */
-#define INFINITY_IPC_EMA_GATE_NS	(INFINITY_BUDGET_MAX_NS / 16)
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
 /* ------------------------------------------------------------------ */
@@ -124,28 +144,6 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 		return (u32)max(1ULL, base * denom / 100ULL);
 	}
 	return base;
-}
-
-/**
- * infinity_ipc_gradient -- IPC-wakeup vslice reduction, by sleep duration.
- * @sleep_ns:  Time the task slept (ns), 0 if unknown.
- *
- * Full 2x boost (red = FP_ONE/2) at sleep <= 1ms, linear falloff to no
- * boost (red = 0) at >= 8ms.  div64_u64 truncates down, so the result
- * is monotone non-increasing in sleep_ns -- no boost oscillation.
- *
- * Return: Reduction [0, FP_ONE/2] in fixed-point units.
- */
-static inline u64 infinity_ipc_gradient(u64 sleep_ns)
-{
-	u64 span = INFINITY_IPC_GRADIENT_MAX_NS - INFINITY_IPC_GRADIENT_FULL_NS;
-
-	if (sleep_ns <= INFINITY_IPC_GRADIENT_FULL_NS)
-		return INFINITY_FP_ONE / 2;
-	if (sleep_ns >= INFINITY_IPC_GRADIENT_MAX_NS)
-		return 0;
-	return div64_u64((span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS)) *
-			 INFINITY_FP_ONE / 2, span);
 }
 /* ------------------------------------------------------------------ */
 /* Cgroup EMA constants                                                */
@@ -209,7 +207,7 @@ extern unsigned long infinity_tune_smt_divisor;
 /* ------------------------------------------------------------------ */
 DECLARE_PER_CPU(atomic64_t, infinity_futex_boost_count);
 DECLARE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
-DECLARE_PER_CPU(atomic64_t, infinity_ipc_gate_block_count);
+DECLARE_PER_CPU(atomic64_t, infinity_ipc_wakeup_count);
 DECLARE_PER_CPU(atomic64_t, infinity_ema_climb_count);
 DECLARE_PER_CPU(atomic64_t, infinity_wakeup_count);
 DECLARE_PER_CPU(atomic64_t, infinity_rt_throttle_count);

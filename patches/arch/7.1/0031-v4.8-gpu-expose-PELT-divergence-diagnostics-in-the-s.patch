@@ -1,26 +1,26 @@
-From dfd7ac3d96d2b9c03248564d9d69d4ecada6f9f2 Mon Sep 17 00:00:00 2001
+From c17f96c679f2b00522a7198917b03e6d547c2e5f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 30/32] v4.8-gpu: expose PELT divergence diagnostics in the
+Date: Tue, 4 Aug 2026 14:37:26 +0700
+Subject: [PATCH 31/32] v4.8-gpu: expose PELT divergence diagnostics in the
  stats surfaces
 
 Observability only, no control path.  Three per-task PELT fields are
-appended to /proc/<pid>/infinity (util_avg, runnable_avg, util_est with
-the UTIL_AVG_UNCHANGED bit masked).  A per-CPU counter flags sleep
-transitions where |ema_pct - util_pct| exceeds 50 percentage points;
-EMA reacts in ms and PELT in hundreds of ms, so transient divergence is
-expected, and the harness's ema-pelt-trace scenario validates the
-diagnostic end to end.  Proc handler reads use READ_ONCE with no
-rq->lock (deadlock rule), tolerating 32-bit tearing per the existing
-precedent.
+appended to /proc/<pid>/infinity (util_avg, runnable_avg, util_est
+with the UTIL_AVG_UNCHANGED bit masked).  A per-CPU counter flags
+sleep transitions where |ema_pct - util_pct| exceeds 50 percentage
+points; EMA reacts in ms and PELT in hundreds of ms, so transient
+divergence is expected, and the divergence row in infinity_stats
+surfaces classification errors early.  Proc handler reads use
+READ_ONCE with no rq->lock (deadlock rule), tolerating 32-bit tearing
+per the existing precedent.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  fs/proc/base.c                |  4 ++++
  kernel/sched/fair.c           | 15 +++++++++++++++
- kernel/sched/infinity_sched.c |  9 +++++++++
+ kernel/sched/infinity_sched.c | 12 ++++++++++--
  kernel/sched/infinity_sched.h |  9 +++++++++
- 4 files changed, 37 insertions(+)
+ 4 files changed, 38 insertions(+), 2 deletions(-)
 
 diff --git a/fs/proc/base.c b/fs/proc/base.c
 index 98818ff40..139ce7a2c 100644
@@ -38,10 +38,10 @@ index 98818ff40..139ce7a2c 100644
  }
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 01880e5f2..80459f6dc 100644
+index 8136c0637..28ea0d5dc 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7719,6 +7719,21 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7730,6 +7730,21 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (!p->se.sched_delayed)
  		util_est_dequeue(&rq->cfs, p);
  
@@ -64,51 +64,61 @@ index 01880e5f2..80459f6dc 100644
  		return false;
  
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 8ce5bb100..45298669b 100644
+index 16c91de42..74889e95b 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -66,6 +66,8 @@ DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
- EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+@@ -44,6 +44,8 @@ DEFINE_PER_CPU(atomic64_t, infinity_ipc_wakeup_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_ipc_wakeup_count);
  DEFINE_PER_CPU(atomic64_t, infinity_shield_engage_count);
  EXPORT_PER_CPU_SYMBOL(infinity_shield_engage_count);
 +DEFINE_PER_CPU(atomic64_t, infinity_divergence_count);
 +EXPORT_PER_CPU_SYMBOL(infinity_divergence_count);
- /* Sysctl tunables                                                     */
- /* ------------------------------------------------------------------ */
- unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
-@@ -248,6 +250,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
- 	char *buf;
+ DEFINE_PER_CPU(atomic64_t, infinity_ema_climb_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_ema_climb_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_wakeup_count);
+@@ -290,15 +292,16 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	 * buffer is sized from the same measurements, so the output can
+ 	 * never be truncated either.
+ 	 */
+-	struct infinity_stats_row cpu_rows[9], rt_rows[1], gpu_rows[8];
++	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[8];
+ 	struct infinity_stats_section sections[3] = {
+-		{ "CPU", cpu_rows, 9 },
++		{ "CPU", cpu_rows, 10 },
+ 		{ "RT",  rt_rows,  1 },
+ 		{ "GPU", gpu_rows, 8 },
+ 	};
  	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
- 	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb, sec;
+ 	u64 gic, gcca, gpbo, gldr, icf, ismt;
+ 	u64 ipb, ipw, sec;
 +	u64 dvg;
- 	char v1[16];
- 	const size_t bufsz = 4096;
- 
-@@ -282,6 +285,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
- 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
+ 	char *buf;
+ 	size_t bufsz, off = 0;
+ 	int lw = 0, vw = 0, nw = 0, s, r;
+@@ -322,6 +325,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
  	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
+ 	ipw  = infinity_stats_total(&infinity_ipc_wakeup_count);
  	sec  = infinity_stats_total(&infinity_shield_engage_count);
 +	dvg  = infinity_stats_total(&infinity_divergence_count);
  
- 	buf[0] = '\0';
- 	scnprintf(buf + strlen(buf), bufsz - strlen(buf),
-@@ -368,6 +372,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
- 			  "groups defending interactive tasks");
+ 	/* ---- CPU rows ---- */
+ 	cpu_rows[0].label = "Futex boosts";
+@@ -391,6 +395,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 			sizeof(cpu_rows[8].note));
  	}
  
-+	scnprintf(buf + strlen(buf), bufsz - strlen(buf), ROW,
-+		  "EMA vs PELT divergence",
-+		  fill_pretty_llu(v1, sizeof(v1), dvg),
-+		  "tasks flagged");
++	cpu_rows[9].label = "EMA vs PELT divergence";
++	fill_pretty_llu(cpu_rows[9].value, sizeof(cpu_rows[9].value), dvg);
++	strscpy(cpu_rows[9].note, "tasks flagged", sizeof(cpu_rows[9].note));
 +
- 	strlcat(buf, SEP, bufsz);
- 	strlcat(buf, "\n\n", bufsz);
- 
+ 	/* ---- RT rows ---- */
+ 	rt_rows[0].label = "RT throttles";
+ 	fill_pretty_llu(rt_rows[0].value, sizeof(rt_rows[0].value), rtc);
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index 73f074608..52d7ce7d5 100644
+index 95aa8a340..880ea49d8 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
-@@ -186,6 +186,14 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+@@ -190,6 +190,14 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
   */
  #define INFINITY_RT_REQUEUE_DECAY_NS	100000000ULL
  
@@ -123,7 +133,7 @@ index 73f074608..52d7ce7d5 100644
  /* ------------------------------------------------------------------ */
  /* External sysctl tunables                                            */
  /* ------------------------------------------------------------------ */
-@@ -205,6 +213,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
+@@ -210,6 +218,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_gpu_lock_drain_rounds);
  DECLARE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
  DECLARE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
  DECLARE_PER_CPU(atomic64_t, infinity_shield_engage_count);

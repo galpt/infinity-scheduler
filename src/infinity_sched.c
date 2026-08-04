@@ -40,8 +40,12 @@ DEFINE_PER_CPU(atomic64_t, infinity_futex_boost_count);
 EXPORT_PER_CPU_SYMBOL(infinity_futex_boost_count);
 DEFINE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
 EXPORT_PER_CPU_SYMBOL(infinity_ipc_boost_count);
-DEFINE_PER_CPU(atomic64_t, infinity_ipc_gate_block_count);
-EXPORT_PER_CPU_SYMBOL(infinity_ipc_gate_block_count);
+DEFINE_PER_CPU(atomic64_t, infinity_ipc_wakeup_count);
+EXPORT_PER_CPU_SYMBOL(infinity_ipc_wakeup_count);
+DEFINE_PER_CPU(atomic64_t, infinity_shield_engage_count);
+EXPORT_PER_CPU_SYMBOL(infinity_shield_engage_count);
+DEFINE_PER_CPU(atomic64_t, infinity_divergence_count);
+EXPORT_PER_CPU_SYMBOL(infinity_divergence_count);
 DEFINE_PER_CPU(atomic64_t, infinity_ema_climb_count);
 EXPORT_PER_CPU_SYMBOL(infinity_ema_climb_count);
 DEFINE_PER_CPU(atomic64_t, infinity_wakeup_count);
@@ -66,10 +70,6 @@ DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
 EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
 DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
 EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
-DEFINE_PER_CPU(atomic64_t, infinity_shield_engage_count);
-EXPORT_PER_CPU_SYMBOL(infinity_shield_engage_count);
-DEFINE_PER_CPU(atomic64_t, infinity_divergence_count);
-EXPORT_PER_CPU_SYMBOL(infinity_divergence_count);
 /* Sysctl tunables                                                     */
 /* ------------------------------------------------------------------ */
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
@@ -226,25 +226,6 @@ static u64 infinity_stats_total(const atomic64_t __percpu *counter)
 	return total;
 }
 
-#ifdef CONFIG_FAIR_GROUP_SCHED
-/*
- * tg_shield_visitor -- count task groups whose shield is engaged (cached
- * cross-CPU EMA max at/above the engage threshold).  Read-only, no control
- * path; called under rcu_read_lock() from the stats handler, which is what
- * walk_tg_tree_from() requires.
- */
-static int tg_shield_visitor(struct task_group *tg, void *data)
-{
-	int *n = data;
-
-	if (tg != &root_task_group &&
-	    READ_ONCE(tg->infinity_shield.shield_ema_max) >=
-	    INFINITY_SHIELD_ENGAGE_THRESHOLD_NS)
-		(*n)++;
-	return 0;
-}
-#endif
-
 struct infinity_stats_row {
 	const char	*label;
 	char		value[16];
@@ -281,6 +262,25 @@ static size_t infinity_stats_emit_sep(char *buf, size_t sz, int lw, int vw, int 
 	return need - 2;
 }
 
+#ifdef CONFIG_FAIR_GROUP_SCHED
+/*
+ * tg_shield_visitor -- count task groups whose shield is engaged (cached
+ * cross-CPU EMA max at/above the engage threshold).  Read-only, no control
+ * path; called under rcu_read_lock() from the stats handler, which is what
+ * walk_tg_tree_from() requires.
+ */
+static int tg_shield_visitor(struct task_group *tg, void *data)
+{
+	int *n = data;
+
+	if (tg != &root_task_group &&
+	    READ_ONCE(tg->infinity_shield.shield_ema_max) >=
+	    INFINITY_SHIELD_ENGAGE_THRESHOLD_NS)
+		(*n)++;
+	return 0;
+}
+#endif
+
 static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 				       void *buffer, size_t *lenp,
 				       loff_t *ppos)
@@ -299,9 +299,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 		{ "GPU", gpu_rows, 8 },
 	};
 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
-	u64 gic, gcca, gpbo, gldr, icf, ismt, ipb, sec;
+	u64 gic, gcca, gpbo, gldr, icf, ismt;
+	u64 ipb, ipw, sec;
 	u64 dvg;
-	u64 ipg;
 	char *buf;
 	size_t bufsz, off = 0;
 	int lw = 0, vw = 0, nw = 0, s, r;
@@ -323,7 +323,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	icf  = infinity_stats_total(&infinity_cpufreq_interactive_count);
 	ismt = infinity_stats_total(&infinity_smt_interactive_count);
 	ipb  = infinity_stats_total(&infinity_ipc_boost_count);
-	ipg  = infinity_stats_total(&infinity_ipc_gate_block_count);
+	ipw  = infinity_stats_total(&infinity_ipc_wakeup_count);
 	sec  = infinity_stats_total(&infinity_shield_engage_count);
 	dvg  = infinity_stats_total(&infinity_divergence_count);
 
@@ -371,9 +371,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 		strscpy(cpu_rows[5].note, "interactive IPC wakeups boosted",
 			sizeof(cpu_rows[5].note));
 
-	cpu_rows[6].label = "IPC gate blocks";
-	fill_pretty_llu(cpu_rows[6].value, sizeof(cpu_rows[6].value), ipg);
-	strscpy(cpu_rows[6].note, "IPC wakes skipped (recent runtime)",
+	cpu_rows[6].label = "IPC wakeups";
+	fill_pretty_llu(cpu_rows[6].value, sizeof(cpu_rows[6].value), ipw);
+	strscpy(cpu_rows[6].note, "wait_woken candidates",
 		sizeof(cpu_rows[6].note));
 
 	cpu_rows[7].label = "Shield engages";
@@ -693,6 +693,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	atomic_set(&ctx->gpu_passovers, 0);
 	ctx->futex_waiting = false;
 	ctx->ipc_waiting = false;
+	ctx->ipc_last_boost = 0;
 	ctx->rt_valve_armed = false;
 	ctx->rt_valve_last_jiffies = 0;
 }
