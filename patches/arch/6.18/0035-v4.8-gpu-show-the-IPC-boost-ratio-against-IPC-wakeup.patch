@@ -1,4 +1,4 @@
-From f3f25a694c1baff3e80ba5a8405aeda0501986e5 Mon Sep 17 00:00:00 2001
+From 6c8bdba3a941a9523670f4e05376e914e934a3e6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 16:43:51 +0700
 Subject: [PATCH] v4.8-gpu: show the IPC boost ratio against IPC wakeups
@@ -12,9 +12,22 @@ for whether the boost is doing its job.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
+ kernel/sched/fair.c           | 1 +
  kernel/sched/infinity_sched.c | 7 ++++---
- 1 file changed, 4 insertions(+), 3 deletions(-)
+ 2 files changed, 5 insertions(+), 3 deletions(-)
 
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 0b6ed1074..157971162 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7350,6 +7350,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 
+ 		p->infinity.futex_waiting = false;
++		p->infinity.ipc_waiting = false;
+ 
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 index 53b874e98..5f7921cf3 100644
 --- a/kernel/sched/infinity_sched.c
