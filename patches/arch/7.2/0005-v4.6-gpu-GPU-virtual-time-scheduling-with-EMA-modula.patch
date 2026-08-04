@@ -1,7 +1,7 @@
-From b9f7f2aed4030f5382166bd314dadde5f56ae780 Mon Sep 17 00:00:00 2001
+From f3046e0ade3527d5f36639c0d2e7bb7dc333f445 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 11:39:36 +0700
-Subject: [PATCH 05/12] v4.6-gpu: GPU virtual time scheduling with EMA
+Subject: [PATCH 05/13] v4.6-gpu: GPU virtual time scheduling with EMA
  modulation and cross-scheduler coupling
 
 Port Infinity's GPU scheduling onto the 7.2 CFS-like DRM scheduler.

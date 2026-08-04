@@ -1,7 +1,7 @@
-From 837d8f9dd9b1827cc3e03859b6167af21a9f366b Mon Sep 17 00:00:00 2001
+From 4ac952058dfa672402695c64b4376222153954a9 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 11:47:58 +0700
-Subject: [PATCH 12/12] v4.7-gpu: fix SMT interactive placement to respect task
+Subject: [PATCH 12/13] v4.7-gpu: fix SMT interactive placement to respect task
  CPU affinity
 
 The SMT interactive placement hook could move a waking task to the

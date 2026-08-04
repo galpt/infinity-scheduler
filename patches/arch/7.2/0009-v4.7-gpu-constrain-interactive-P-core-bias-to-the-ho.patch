@@ -1,7 +1,7 @@
-From 362d2be79b5641a7c500cdb98b0e8e52b183da93 Mon Sep 17 00:00:00 2001
+From 696d825345c315ca58d9a306031cdc04ca3d3f78 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 06:25:32 +0700
-Subject: [PATCH 09/12] v4.7-gpu: constrain interactive P-core bias to the home
+Subject: [PATCH 09/13] v4.7-gpu: constrain interactive P-core bias to the home
  NUMA node
 
 The asymmetric-capacity wakeup bias returned the first allowed
