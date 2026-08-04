@@ -1,0 +1,99 @@
+From 8147ede16d6a1f65d02a3f72e1ec4e05b3e6fea3 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:31:48 +0700
+Subject: [PATCH 45/45] v4.8-gpu: drop the dead stats row and fix the RT label
+
+The GPU stats section carried a ">> lock contention" row hardcoded to
+zero with no backing counter -- dead data that also misaligned the GPU
+row indices.  Remove it and reindex the remaining rows.  The RT throttle
+row note said "FIFO rogue demotions"; the valve never demotes, it
+requeues within the RT class, so the note now reads "FIFO rogue
+requeues".
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 41 +++++++++++++++--------------------
+ 1 file changed, 18 insertions(+), 23 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 9787a5b47..a7d39843f 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -223,11 +223,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	 * buffer is sized from the same measurements, so the output can
+ 	 * never be truncated either.
+ 	 */
+-	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[8];
++	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[7];
+ 	struct infinity_stats_section sections[3] = {
+ 		{ "CPU", cpu_rows, 10 },
+ 		{ "RT",  rt_rows,  1 },
+-		{ "GPU", gpu_rows, 8 },
++		{ "GPU", gpu_rows, 7 },
+ 	};
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
+ 	u64 gic, gcca, gpbo, gldr, icf, ismt;
+@@ -334,7 +334,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	/* ---- RT rows ---- */
+ 	rt_rows[0].label = "RT throttles";
+ 	fill_pretty_llu(rt_rows[0].value, sizeof(rt_rows[0].value), rtc);
+-	strscpy(rt_rows[0].note, "FIFO rogue demotions",
++	strscpy(rt_rows[0].note, "FIFO rogue requeues",
+ 		sizeof(rt_rows[0].note));
+ 
+ 	/* ---- GPU rows ---- */
+@@ -353,36 +353,31 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	else
+ 		strscpy(gpu_rows[1].note, "N/A", sizeof(gpu_rows[1].note));
+ 
+-	gpu_rows[2].label = "  >> lock contention";
+-	fill_pretty_llu(gpu_rows[2].value, sizeof(gpu_rows[2].value), 0);
+-	strscpy(gpu_rows[2].note, "(lock contention)",
++	gpu_rows[2].label = "  >> entity not found";
++	fill_pretty_llu(gpu_rows[2].value, sizeof(gpu_rows[2].value), gskp);
++	strscpy(gpu_rows[2].note, "(entity_kill race)",
+ 		sizeof(gpu_rows[2].note));
+ 
+-	gpu_rows[3].label = "  >> entity not found";
+-	fill_pretty_llu(gpu_rows[3].value, sizeof(gpu_rows[3].value), gskp);
+-	strscpy(gpu_rows[3].note, "(entity_kill race)",
++	gpu_rows[3].label = "Idle compensation";
++	fill_pretty_llu(gpu_rows[3].value, sizeof(gpu_rows[3].value), gic);
++	strscpy(gpu_rows[3].note, "proportional idle boost",
+ 		sizeof(gpu_rows[3].note));
+ 
+-	gpu_rows[4].label = "Idle compensation";
+-	fill_pretty_llu(gpu_rows[4].value, sizeof(gpu_rows[4].value), gic);
+-	strscpy(gpu_rows[4].note, "proportional idle boost",
++	gpu_rows[4].label = "CPU->GPU coupling";
++	fill_pretty_llu(gpu_rows[4].value, sizeof(gpu_rows[4].value), gcca);
++	strscpy(gpu_rows[4].note, "interactive vtime reduction",
+ 		sizeof(gpu_rows[4].note));
+ 
+-	gpu_rows[5].label = "CPU->GPU coupling";
+-	fill_pretty_llu(gpu_rows[5].value, sizeof(gpu_rows[5].value), gcca);
+-	strscpy(gpu_rows[5].note, "interactive vtime reduction",
++	gpu_rows[5].label = "GPU->CPU coupling";
++	fill_pretty_llu(gpu_rows[5].value, sizeof(gpu_rows[5].value), gpbo);
++	strscpy(gpu_rows[5].note, "passover EMA boost",
+ 		sizeof(gpu_rows[5].note));
+ 
+-	gpu_rows[6].label = "GPU->CPU coupling";
+-	fill_pretty_llu(gpu_rows[6].value, sizeof(gpu_rows[6].value), gpbo);
+-	strscpy(gpu_rows[6].note, "passover EMA boost",
++	gpu_rows[6].label = "Drain count";
++	fill_pretty_llu(gpu_rows[6].value, sizeof(gpu_rows[6].value), gldr);
++	strscpy(gpu_rows[6].note, "batch drain operations",
+ 		sizeof(gpu_rows[6].note));
+ 
+-	gpu_rows[7].label = "Drain count";
+-	fill_pretty_llu(gpu_rows[7].value, sizeof(gpu_rows[7].value), gldr);
+-	strscpy(gpu_rows[7].note, "batch drain operations",
+-		sizeof(gpu_rows[7].note));
+-
+ 	/* measure the widest content per column across all sections */
+ 	for (s = 0; s < 3; s++)
+ 		for (r = 0; r < sections[s].nrows; r++) {
+-- 
+2.55.0
+

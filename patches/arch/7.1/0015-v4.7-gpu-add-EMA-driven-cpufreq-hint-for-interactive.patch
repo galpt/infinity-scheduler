@@ -1,7 +1,7 @@
-From fcd65d0f72db70ade5631a2c4d9684caf961c5ff Mon Sep 17 00:00:00 2001
+From 60c6c541ccabde437e61e98d0f093203db8f83de Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:36 +0700
-Subject: [PATCH 15/23] v4.7-gpu: add EMA-driven cpufreq hint for interactive
+Subject: [PATCH 15/45] v4.7-gpu: add EMA-driven cpufreq hint for interactive
  wakeups
 
 Add SCHED_CPUFREQ_INTERACTIVE flag alongside the existing IOWAIT flag.

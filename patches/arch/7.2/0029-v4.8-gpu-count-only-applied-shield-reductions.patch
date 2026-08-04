@@ -1,0 +1,57 @@
+From b0caa86e942ac70509a94c29d797ae0cc72f5779 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:25:39 +0700
+Subject: [PATCH 29/35] v4.8-gpu: count only applied shield reductions
+
+The shield engage counter incremented on every update_cfs_group()
+evaluation that computed a non-zero reduction, which runs per tick via
+entity_tick even when the group share is already at its reduced value.
+The count therefore overstated applied reductions by roughly three orders
+of magnitude.  The counter now fires only when the shield-induced share
+actually differs from the current weight and reweight_entity() runs.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 2d20e3706..36d840f93 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4936,6 +4936,7 @@ static void update_cfs_group(struct sched_entity *se)
+ {
+ 	struct cfs_rq *gcfs_rq = group_cfs_rq(se);
+ 	long shares;
++	bool shield_reduced = false;
+ 
+ 	/*
+ 	 * When a group becomes empty, preserve its weight. This matters for
+@@ -5010,13 +5011,22 @@ static void update_cfs_group(struct sched_entity *se)
+ 				long reduced = shares * (100ULL - red) / 100ULL;
+ 
+ 				shares = max_t(long, reduced, MIN_SHARES);
+-				atomic64_inc(this_cpu_ptr(&infinity_shield_engage_count));
++				shield_reduced = true;
+ 			}
+ 		}
+ 	}
+ 
+-	if (unlikely(se->load.weight != shares))
++	if (unlikely(se->load.weight != shares)) {
+ 		reweight_entity(cfs_rq_of(se), se, shares);
++		/* Infinity: the shield counter counts only shield-induced
++		 * reweights that actually changed the group share.  It
++		 * previously incremented on every update_cfs_group()
++		 * evaluation (per tick via entity_tick), overstating
++		 * applied reductions by ~3 orders of magnitude.
++		 */
++		if (shield_reduced)
++			atomic64_inc(this_cpu_ptr(&infinity_shield_engage_count));
++	}
+ }
+ 
+ #else /* !CONFIG_FAIR_GROUP_SCHED: */
+-- 
+2.55.0
+

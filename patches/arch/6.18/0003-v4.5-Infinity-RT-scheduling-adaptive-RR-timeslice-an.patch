@@ -1,7 +1,7 @@
-From 324f022f6bbeb8ea65fe451ade5172aa2e88a4fc Mon Sep 17 00:00:00 2001
+From 5ff4c36f371ec25a43a5dcf13d7e033a50b9e125 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:43:42 +0700
-Subject: [PATCH 03/23] v4.5: Infinity RT scheduling -- adaptive RR timeslice
+Subject: [PATCH 03/46] v4.5: Infinity RT scheduling -- adaptive RR timeslice
  and requeue safety valve
 
 infinity_rt_consume tracks rt_ema. infinity_rr_timeslice shrinks RR

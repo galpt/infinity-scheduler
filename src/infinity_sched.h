@@ -176,6 +176,8 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 #define INFINITY_RT_BUDGET_NS		10000000ULL
 /** RT alpha. */
 #define INFINITY_RT_ALPHA		4
+/** RT EMA time constant: one tau of accumulated runtime closes the entire remaining gap (640ms). */
+#define INFINITY_RT_TAU_NS (INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE / INFINITY_RT_ALPHA)
 /* ------------------------------------------------------------------ */
 /* RT safety valve -- requeue throttle threshold                        */
 /* ------------------------------------------------------------------ */
@@ -202,6 +204,8 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 #define INFINITY_DIVERGENCE_THRESHOLD		50
 #define INFINITY_DIVERGENCE_THRESHOLD_UNITS \
 	(INFINITY_DIVERGENCE_THRESHOLD * SCHED_CAPACITY_SCALE / 100)
+/** PELT divergence diagnostic: consecutive divergent sleeps before flagging. */
+#define INFINITY_DIVERGENCE_STREAK		3
 
 /* ------------------------------------------------------------------ */
 /* External sysctl tunables                                            */
@@ -230,6 +234,7 @@ DECLARE_PER_CPU(atomic64_t, infinity_divergence_count);
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns, unsigned long cpu_capacity);
 void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 void infinity_fork_init(struct infinity_ctx *ctx, u64 now);
+void infinity_exec_reset(struct infinity_ctx *ctx);
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns);
 void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns);
 unsigned int infinity_rr_timeslice(struct task_struct *p,

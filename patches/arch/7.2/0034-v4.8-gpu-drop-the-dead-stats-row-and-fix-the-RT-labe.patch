@@ -1,0 +1,33 @@
+From e07c3127770a9952c78f130507a4d85104f4a1dd Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:31:48 +0700
+Subject: [PATCH 34/35] v4.8-gpu: drop the dead stats row and fix the RT label
+
+The GPU stats section carried a ">> lock contention" row hardcoded to
+zero with no backing counter -- dead data that also misaligned the GPU
+row indices.  Remove it and reindex the remaining rows.  The RT throttle
+row note said "FIFO rogue demotions"; the valve never demotes, it
+requeues within the RT class, so the note now reads "FIFO rogue
+requeues".
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 49a598edb..18bb9c58f 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -325,7 +325,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	/* ---- RT rows ---- */
+ 	rt_rows[0].label = "RT throttles";
+ 	fill_pretty_llu(rt_rows[0].value, sizeof(rt_rows[0].value), rtc);
+-	strscpy(rt_rows[0].note, "FIFO rogue demotions",
++	strscpy(rt_rows[0].note, "FIFO rogue requeues",
+ 		sizeof(rt_rows[0].note));
+ 
+ 	/* ---- GPU rows ---- */
+-- 
+2.55.0
+

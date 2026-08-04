@@ -1,7 +1,7 @@
-From 4f076a0a8c8401ccd9bae7804567ce5a1c1f71ad Mon Sep 17 00:00:00 2001
+From f58310497bc6bed7cd1efee6a61faad4be425b06 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:56:22 +0700
-Subject: [PATCH 16/23] v4.7-gpu: add GPU job-type awareness to reduce
+Subject: [PATCH 16/46] v4.7-gpu: add GPU job-type awareness to reduce
  compositor penalty
 
 Track per-entity submission interval in gpu_last_submit_interval.

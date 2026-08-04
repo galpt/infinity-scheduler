@@ -1,7 +1,7 @@
 From 943d308b3d27db26cd8935f9ed72d1157daa5be0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:37:35 +0700
-Subject: [PATCH 33/33] v4.8-gpu: bump the version string to v4.8-gpu
+Subject: [PATCH 33/46] v4.8-gpu: bump the version string to v4.8-gpu
 
 The kernel reports its scheduler version through the read-only
 infinity_version sysctl and the infinity_stats header; bump it for the

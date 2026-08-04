@@ -1,7 +1,7 @@
-From fdbb8f4871760bf96a718d2c5b263560266f98f8 Mon Sep 17 00:00:00 2001
+From fe0774ce0828c817f4dcd6655566a3908e3d7c47 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 29 Jul 2026 22:06:05 +0700
-Subject: [PATCH 08/25] v4.7-gpu: fix RT demote threshold off-by-1000 causing
+Subject: [PATCH 08/35] v4.7-gpu: fix RT demote threshold off-by-1000 causing
  false-positive SCHED_FIFO requeues
 
 INFINITY_RT_DEMOTE_THRESHOLD was defined as 9500 (9.5 us) instead of

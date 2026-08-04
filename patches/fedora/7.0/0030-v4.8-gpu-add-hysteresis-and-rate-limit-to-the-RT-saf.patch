@@ -1,7 +1,7 @@
 From 66d9464cc2a01f4ce730dae65430712a0a70571b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:36:18 +0700
-Subject: [PATCH 30/33] v4.8-gpu: add hysteresis and rate limit to the RT
+Subject: [PATCH 30/46] v4.8-gpu: add hysteresis and rate limit to the RT
  safety valve
 
 Dual threshold (engage at 95% rt_ema, re-arm only after it drops below

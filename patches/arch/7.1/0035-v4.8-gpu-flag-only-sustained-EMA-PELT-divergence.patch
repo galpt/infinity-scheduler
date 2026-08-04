@@ -1,0 +1,99 @@
+From 55209bf1d3e265cc4600b14b88aab92ecf7d47c1 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:22:50 +0700
+Subject: [PATCH 35/45] v4.8-gpu: flag only sustained EMA/PELT divergence
+
+The divergence diagnostic bumped the per-CPU counter on every sleep
+transition where |ema_pct - util_pct| exceeded 50 percentage points.
+EMA reacts in milliseconds and PELT in hundreds of milliseconds, so a
+single transient burst could mint a spurious flag for an otherwise
+healthy task.  The counter now fires only after INFINITY_DIVERGENCE_STREAK
+(3) consecutive divergent sleeps, filtering single-burst noise and
+emitting one bump per divergence episode.  The streak is tracked per
+task in struct infinity_ctx and reset on fork.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ include/linux/sched.h         |  5 +++++
+ kernel/sched/fair.c           | 15 ++++++++++++---
+ kernel/sched/infinity_sched.c |  1 +
+ kernel/sched/infinity_sched.h |  2 ++
+ 4 files changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 439378931..35db7f96e 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -827,6 +827,11 @@ struct infinity_ctx {
+ 	u64		ipc_last_boost;	/* Last IPC boost timestamp (ns) */
+ 	bool		rt_valve_armed;
+ 	unsigned long	rt_valve_last_jiffies;
++	/**
++	 * @divergence_streak: Consecutive divergent sleeps (PELT
++	 * divergence diagnostic).
++	 */
++	u32		divergence_streak;
+ 
+ 	/**
+ 	 * @gpu_passovers: GPU scheduling pass-over count.
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index cca5e23c3..2cf705aa9 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7733,7 +7733,10 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 
+ 	/* Infinity: EMA vs PELT divergence diagnostic (observability only).
+ 	 * One compare per sleep; flags tasks whose EMA classification
+-	 * (hog vs interactive) differs from PELT by > 50pp.
++	 * (hog vs interactive) differs from PELT by > 50pp.  The flag is
++	 * raised only after INFINITY_DIVERGENCE_STREAK consecutive
++	 * divergent sleeps, so a transient single-burst noise is filtered
++	 * out and one counter bump is emitted per divergence episode.
+ 	 */
+ 	if (flags & DEQUEUE_SLEEP) {
+ 		u64 ema = READ_ONCE(p->infinity.ema);
+@@ -7742,8 +7745,14 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 						INFINITY_BUDGET_MAX_NS);
+ 		u64 diff = ema_units > util ? ema_units - util : util - ema_units;
+ 
+-		if (diff > INFINITY_DIVERGENCE_THRESHOLD_UNITS)
+-			atomic64_inc(this_cpu_ptr(&infinity_divergence_count));
++		if (diff > INFINITY_DIVERGENCE_THRESHOLD_UNITS) {
++			p->infinity.divergence_streak++;
++			if (p->infinity.divergence_streak ==
++			    INFINITY_DIVERGENCE_STREAK)
++				atomic64_inc(this_cpu_ptr(&infinity_divergence_count));
++		} else {
++			p->infinity.divergence_streak = 0;
++		}
+ 	}
+ 
+ 	if (dequeue_entities(rq, &p->se, flags) < 0)
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 5f7921cf3..bb783367e 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -628,6 +628,7 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ 	ctx->ipc_last_boost = 0;
+ 	ctx->rt_valve_armed = false;
+ 	ctx->rt_valve_last_jiffies = 0;
++	ctx->divergence_streak = 0;
+ }
+ /* ------------------------------------------------------------------ */
+ /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 10e8a494c..a8ab238cc 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -202,6 +202,8 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+ #define INFINITY_DIVERGENCE_THRESHOLD		50
+ #define INFINITY_DIVERGENCE_THRESHOLD_UNITS \
+ 	(INFINITY_DIVERGENCE_THRESHOLD * SCHED_CAPACITY_SCALE / 100)
++/** PELT divergence diagnostic: consecutive divergent sleeps before flagging. */
++#define INFINITY_DIVERGENCE_STREAK		3
+ 
+ /* ------------------------------------------------------------------ */
+ /* External sysctl tunables                                            */
+-- 
+2.55.0
+

@@ -76,22 +76,23 @@ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
 unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
 static int infinity_running_flag = 1;
 static const char infinity_version[] = "v4.8-gpu";
+/* Infinity: smt_divisor bounds.  Out-of-range writes are rejected by the
+ * proc layer (extra1/extra2) instead of silently clamped, closing the
+ * window where an out-of-range value was briefly visible to scheduler
+ * ticks.  The handler only reports changes.
+ */
 static int clamp_smt_divisor(const struct ctl_table *table, int write,
 			     void *buf, size_t *lenp, loff_t *ppos)
 {
-	unsigned long old;
+	unsigned long old, val;
 	int ret;
 
 	old = READ_ONCE(infinity_tune_smt_divisor);
 	ret = proc_doulongvec_minmax(table, write, buf, lenp, ppos);
 	if (write && ret == 0) {
-		unsigned long val;
-
 		val = READ_ONCE(infinity_tune_smt_divisor);
-		val = clamp(val, INFINITY_SMT_DIVISOR_MIN, INFINITY_SMT_DIVISOR_MAX);
 		if (val != old)
 			pr_info("Infinity: smt_divisor %lu -> %lu\n", old, val);
-		WRITE_ONCE(infinity_tune_smt_divisor, val);
 	}
 	return ret;
 }
@@ -222,11 +223,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	 * buffer is sized from the same measurements, so the output can
 	 * never be truncated either.
 	 */
-	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[8];
+	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[7];
 	struct infinity_stats_section sections[3] = {
 		{ "CPU", cpu_rows, 10 },
 		{ "RT",  rt_rows,  1 },
-		{ "GPU", gpu_rows, 8 },
+		{ "GPU", gpu_rows, 7 },
 	};
 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
 	u64 gic, gcca, gpbo, gldr, icf, ismt;
@@ -333,7 +334,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	/* ---- RT rows ---- */
 	rt_rows[0].label = "RT throttles";
 	fill_pretty_llu(rt_rows[0].value, sizeof(rt_rows[0].value), rtc);
-	strscpy(rt_rows[0].note, "FIFO rogue demotions",
+	strscpy(rt_rows[0].note, "FIFO rogue requeues",
 		sizeof(rt_rows[0].note));
 
 	/* ---- GPU rows ---- */
@@ -352,35 +353,30 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	else
 		strscpy(gpu_rows[1].note, "N/A", sizeof(gpu_rows[1].note));
 
-	gpu_rows[2].label = "  >> lock contention";
-	fill_pretty_llu(gpu_rows[2].value, sizeof(gpu_rows[2].value), 0);
-	strscpy(gpu_rows[2].note, "(lock contention)",
+	gpu_rows[2].label = "  >> entity not found";
+	fill_pretty_llu(gpu_rows[2].value, sizeof(gpu_rows[2].value), gskp);
+	strscpy(gpu_rows[2].note, "(entity_kill race)",
 		sizeof(gpu_rows[2].note));
 
-	gpu_rows[3].label = "  >> entity not found";
-	fill_pretty_llu(gpu_rows[3].value, sizeof(gpu_rows[3].value), gskp);
-	strscpy(gpu_rows[3].note, "(entity_kill race)",
+	gpu_rows[3].label = "Idle compensation";
+	fill_pretty_llu(gpu_rows[3].value, sizeof(gpu_rows[3].value), gic);
+	strscpy(gpu_rows[3].note, "proportional idle boost",
 		sizeof(gpu_rows[3].note));
 
-	gpu_rows[4].label = "Idle compensation";
-	fill_pretty_llu(gpu_rows[4].value, sizeof(gpu_rows[4].value), gic);
-	strscpy(gpu_rows[4].note, "proportional idle boost",
+	gpu_rows[4].label = "CPU->GPU coupling";
+	fill_pretty_llu(gpu_rows[4].value, sizeof(gpu_rows[4].value), gcca);
+	strscpy(gpu_rows[4].note, "interactive vtime reduction",
 		sizeof(gpu_rows[4].note));
 
-	gpu_rows[5].label = "CPU->GPU coupling";
-	fill_pretty_llu(gpu_rows[5].value, sizeof(gpu_rows[5].value), gcca);
-	strscpy(gpu_rows[5].note, "interactive vtime reduction",
+	gpu_rows[5].label = "GPU->CPU coupling";
+	fill_pretty_llu(gpu_rows[5].value, sizeof(gpu_rows[5].value), gpbo);
+	strscpy(gpu_rows[5].note, "passover EMA boost",
 		sizeof(gpu_rows[5].note));
 
-	gpu_rows[6].label = "GPU->CPU coupling";
-	fill_pretty_llu(gpu_rows[6].value, sizeof(gpu_rows[6].value), gpbo);
-	strscpy(gpu_rows[6].note, "passover EMA boost",
+	gpu_rows[6].label = "Drain count";
+	fill_pretty_llu(gpu_rows[6].value, sizeof(gpu_rows[6].value), gldr);
+	strscpy(gpu_rows[6].note, "batch drain operations",
 		sizeof(gpu_rows[6].note));
-
-	gpu_rows[7].label = "Drain count";
-	fill_pretty_llu(gpu_rows[7].value, sizeof(gpu_rows[7].value), gldr);
-	strscpy(gpu_rows[7].note, "batch drain operations",
-		sizeof(gpu_rows[7].note));
 
 	/* measure the widest content per column across all sections */
 	for (s = 0; s < 3; s++)
@@ -470,6 +466,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 /* ------------------------------------------------------------------ */
 /* Sysctl table                                                        */
 /* ------------------------------------------------------------------ */
+static unsigned long infinity_smt_divisor_min = INFINITY_SMT_DIVISOR_MIN;
+static unsigned long infinity_smt_divisor_max = INFINITY_SMT_DIVISOR_MAX;
+
 static const struct ctl_table infinity_sysctl_table[] = {
 	{
 		.procname	= "infinity_smt_divisor",
@@ -477,6 +476,8 @@ static const struct ctl_table infinity_sysctl_table[] = {
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= clamp_smt_divisor,
+		.extra1		= &infinity_smt_divisor_min,
+		.extra2		= &infinity_smt_divisor_max,
 	},
 	{
 		.procname	= "infinity_running",
@@ -520,7 +521,7 @@ late_initcall(infinity_sched_init);
 void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 		      unsigned long cpu_capacity)
 {
-	u64 step;
+	u64 step, ema;
 	u32 alpha;
 
 	/*
@@ -539,14 +540,14 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 		alpha = 2048 + (u32)div64_u64(2048ULL * cpu_capacity,
 					      SCHED_CAPACITY_SCALE);
 
-	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
+	ema = READ_ONCE(ctx->ema);
+	if (ema >= INFINITY_BUDGET_MAX_NS)
 		return;
 
 	if (delta_ns > INFINITY_BUDGET_MAX_NS)
 		delta_ns = INFINITY_BUDGET_MAX_NS;
 
-	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
-			 alpha,
+	step = div64_u64((INFINITY_BUDGET_MAX_NS - ema) * delta_ns * alpha,
 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
 	/*
 	 * With alpha up to 4096 (FP_ONE = 256) the step can exceed the
@@ -555,9 +556,9 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 	 * but the raw value must stay within [0, BUDGET] so the
 	 * /proc/<pid>/infinity reading and the EMA invariants hold).
 	 */
-	if (step > INFINITY_BUDGET_MAX_NS - ctx->ema)
-		step = INFINITY_BUDGET_MAX_NS - ctx->ema;
-	ctx->ema += step;
+	if (step > INFINITY_BUDGET_MAX_NS - ema)
+		step = INFINITY_BUDGET_MAX_NS - ema;
+	WRITE_ONCE(ctx->ema, ema + step);
 	atomic64_inc(this_cpu_ptr(&infinity_ema_climb_count));
 }
 /* ------------------------------------------------------------------ */
@@ -595,20 +596,22 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 
 		periods = div64_u64_rem(sleep_ns, 24000000ULL, &residual);
 		if (periods > 63) {
-			ctx->ema = 0;
+			WRITE_ONCE(ctx->ema, 0);
 		} else {
-			ctx->ema >>= periods;
-			if (residual && ctx->ema) {
+			u64 ema = READ_ONCE(ctx->ema);
+
+			ema >>= periods;
+			if (residual && ema) {
 				u64 fraction = div64_u64(residual *
 					INFINITY_FP_ONE, 24000000ULL);
-				u64 linear = (ctx->ema * fraction) >>
+				u64 linear = (ema * fraction) >>
 					INFINITY_FP_SHIFT;
 				u64 quad = ((linear * fraction) >>
 					INFINITY_FP_SHIFT) >> 1;
 				if (linear > quad)
-					ctx->ema -= min(ctx->ema,
-							linear - quad);
+					ema -= min(ema, linear - quad);
 			}
+			WRITE_ONCE(ctx->ema, ema);
 		}
 	}
 	atomic64_inc(this_cpu_ptr(&infinity_wakeup_count));
@@ -628,7 +631,27 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 	ctx->ipc_last_boost = 0;
 	ctx->rt_valve_armed = false;
 	ctx->rt_valve_last_jiffies = 0;
+	ctx->divergence_streak = 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* infinity_exec_reset -- clear per-image scheduler state on exec       */
+/* ------------------------------------------------------------------ */
+void infinity_exec_reset(struct infinity_ctx *ctx)
+{
+	/* exec() reuses the same task: the previous image's EMA penalty,
+	 * RT valve state, IPC rate limit and divergence streak must not
+	 * carry over into the new image (fork() already reinitializes
+	 * everything for new tasks).
+	 */
+	WRITE_ONCE(ctx->ema, 0);
+	WRITE_ONCE(ctx->rt_ema, 0);
+	WRITE_ONCE(ctx->ipc_last_boost, 0);
+	WRITE_ONCE(ctx->rt_valve_armed, false);
+	WRITE_ONCE(ctx->rt_valve_last_jiffies, 0);
+	ctx->divergence_streak = 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
  *  prev_ema, infinity_slice, infinity_vruntime_scale,                  *
@@ -640,23 +663,30 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
 /* ------------------------------------------------------------------ */
 void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
 {
-	u64 step;
+	u64 step, ema;
 
-	if (unlikely(ctx->rt_ema >= INFINITY_RT_BUDGET_NS)) {
-		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
+	ema = READ_ONCE(ctx->rt_ema);
+	if (unlikely(ema >= INFINITY_RT_BUDGET_NS)) {
+		WRITE_ONCE(ctx->rt_ema, INFINITY_RT_BUDGET_NS);
 		return;
 	}
-	/* Clamp delta_ns to prevent u64 overflow in the numerator for
-	 * tickless (NO_HZ_FULL) configurations where delta_ns can span
-	 * hundreds of seconds between calls.  Matches the same clamp
-	 * used in infinity_consume for the Fair class.
+	/* Clamp the fold at one time constant: a tickless (NO_HZ_FULL) run
+	 * longer than one tau (640ms) saturates the EMA at the ceiling.
+	 * The old 10ms delta clamp let a long tickless run add only 1/64
+	 * of the remaining gap per call, making the 95% engage threshold
+	 * unreachable.  The fold below is identical to the old formula for
+	 * deltas under one tau and saturates at or beyond it, so the EMA
+	 * now tracks wall-clock runtime.  The early return also bounds the
+	 * multiply: delta < tau implies (BUDGET - ema) * delta <
+	 * BUDGET * TAU, far below u64 limits.
 	 */
-	if (delta_ns > INFINITY_RT_BUDGET_NS)
-		delta_ns = INFINITY_RT_BUDGET_NS;
-	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
-			   INFINITY_RT_ALPHA,
-			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
-	ctx->rt_ema += step;
+	if (delta_ns >= INFINITY_RT_TAU_NS) {
+		WRITE_ONCE(ctx->rt_ema, INFINITY_RT_BUDGET_NS);
+		return;
+	}
+	step = div64_u64((INFINITY_RT_BUDGET_NS - ema) * delta_ns,
+			 INFINITY_RT_TAU_NS);
+	WRITE_ONCE(ctx->rt_ema, ema + step);
 }
 /* ------------------------------------------------------------------ */
 /* infinity_rt_wakeup -- RT EMA decay on wakeup                         */
@@ -669,20 +699,22 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 		return;
 	periods = div64_u64_rem(sleep_ns, 160000000ULL, &residual);
 	if (periods > 63) {
-		ctx->rt_ema = 0;
+		WRITE_ONCE(ctx->rt_ema, 0);
 	} else {
-		ctx->rt_ema >>= periods;
-		if (residual && ctx->rt_ema) {
+		u64 ema = READ_ONCE(ctx->rt_ema);
+
+		ema >>= periods;
+		if (residual && ema) {
 			u64 fraction = div64_u64(residual *
 				INFINITY_FP_ONE, 160000000ULL);
-			u64 linear = (ctx->rt_ema * fraction) >>
+			u64 linear = (ema * fraction) >>
 				INFINITY_FP_SHIFT;
 			u64 quad = ((linear * fraction) >>
 				INFINITY_FP_SHIFT) >> 1;
 			if (linear > quad)
-				ctx->rt_ema -= min(ctx->rt_ema,
-						   linear - quad);
+				ema -= min(ema, linear - quad);
 		}
+		WRITE_ONCE(ctx->rt_ema, ema);
 	}
 }
 /* ------------------------------------------------------------------ */
@@ -691,12 +723,12 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
 unsigned int infinity_rr_timeslice(struct task_struct *p,
 				   unsigned int rr_default)
 {
+	u64 rt_ema = READ_ONCE(p->infinity.rt_ema);
 	u64 decay_pct;
 
-	if (!p->infinity.rt_ema)
+	if (!rt_ema)
 		return rr_default;
-	decay_pct = div64_u64(p->infinity.rt_ema * 90ULL,
-			      INFINITY_RT_BUDGET_NS);
+	decay_pct = div64_u64(rt_ema * 90ULL, INFINITY_RT_BUDGET_NS);
 	if (decay_pct > 90)
 		decay_pct = 90;
 	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)

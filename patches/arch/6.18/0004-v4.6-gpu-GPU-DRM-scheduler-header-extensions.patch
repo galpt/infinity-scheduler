@@ -1,7 +1,7 @@
-From 95f26e45e468b6ba730b1fae942727d6eb6309a9 Mon Sep 17 00:00:00 2001
+From 03e2409872243b6790baad1067a782af930f6d19 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:43:18 +0700
-Subject: [PATCH 04/23] v4.6-gpu: GPU DRM scheduler header extensions
+Subject: [PATCH 04/46] v4.6-gpu: GPU DRM scheduler header extensions
 
 Extend the DRM scheduler data structures for Infinity's GPU virtual
 time scheduling: per-entity EMA/total/activity fields, the runqueue's

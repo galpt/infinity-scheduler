@@ -1,0 +1,70 @@
+From 00372d6530913e82b794f802d3711db850c5436e Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 23:51:46 +0700
+Subject: [PATCH 35/35] v4.8-gpu: cap the GPU coupling reduction and fix the
+ penalty comment
+
+The CPU-to-GPU coupling fold reduced an entity's vruntime growth by
+50% per interactive signal (futex_waiting and zero CPU EMA), which with
+both signals present removed 100% of the growth and froze the fold.  A
+frozen fold lets an interactive entity monopolize the GPU queue because
+its vruntime never advances relative to the others.  Cap the reduction
+at 75% so the fold keeps growing and the queue stays fair.
+
+While here, fix the EMA burst-penalty comment: fast submitters get the
+penalty reduced by 25% (the code keeps 75%, boost -= boost >> 2), not a
+quarter of it.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_rq.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_rq.c b/drivers/gpu/drm/scheduler/sched_rq.c
+index f7c1ee899..832075156 100644
+--- a/drivers/gpu/drm/scheduler/sched_rq.c
++++ b/drivers/gpu/drm/scheduler/sched_rq.c
+@@ -278,8 +278,9 @@ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ 	/* Infinity: EMA burst penalty.  Busy entities (high EMA) accrue
+ 	 * virtual time faster, so they drift back in the queue and the GPU
+ 	 * stays available to interactive entities.  Compositor-like
+-	 * entities with fast submission intervals (every 1-8 ms) get only a
+-	 * quarter of the penalty.
++	 * entities with fast submission intervals (every 1-8 ms) get the
++	 * burst penalty reduced by 25% (the code keeps 75% of it) so the
++	 * desktop stays smooth while batch workloads keep the full penalty.
+ 	 */
+ 	if (stats->gpu_time_ema > 0 && delta_ns > 0) {
+ 		u64 ema_pct = div64_u64(stats->gpu_time_ema * 100ULL,
+@@ -303,7 +304,10 @@ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ 	 * interactive task whose GPU submissions should not be treated as
+ 	 * bulk load.  Each signal halves this fold's vruntime growth, so
+ 	 * the entity drifts toward the front of the queue while its task
+-	 * stays interactive.
++	 * stays interactive.  The reduction is capped at 75% (both signals
++	 * present) so the fold's vruntime growth never freezes -- a
++	 * fully-frozen fold would let an interactive entity monopolize the
++	 * queue.
+ 	 *
+ 	 * RCU-safe: pid_task() under rcu_read_lock() returns NULL if the
+ 	 * task has exited, leaving the growth unchanged.
+@@ -329,9 +333,15 @@ static ktime_t drm_sched_entity_update_vruntime(struct drm_sched_entity *entity)
+ 		rcu_read_unlock();
+ 
+ 		if (coupling) {
+-			delta_ns = delta_ns * (100 - 50 * coupling) / 100;
++			/* Cap the reduction at 75%: with both signals (coupling == 2)
++			 * the raw 100% reduction would freeze the fold's vruntime
++			 * growth and let an interactive entity monopolize the queue.
++			 */
++			u32 pct = min(50 * coupling, 75);
++
+ 			if (delta_ns < 0)
+ 				delta_ns = 0;
++			delta_ns = delta_ns * (100 - pct) / 100;
+ 			atomic64_inc(this_cpu_ptr(&infinity_gpu_cpu_coupling_activations));
+ 		}
+ 	}
+-- 
+2.55.0
+

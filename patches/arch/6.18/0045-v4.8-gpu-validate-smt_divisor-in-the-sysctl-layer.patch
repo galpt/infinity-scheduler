@@ -1,0 +1,72 @@
+From 95832f7859d686433fb92baa32c3cbe32df1c104 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:31:14 +0700
+Subject: [PATCH 45/46] v4.8-gpu: validate smt_divisor in the sysctl layer
+
+clamp_smt_divisor() clamped out-of-range writes after the fact, leaving a
+window where an out-of-range value was briefly visible to scheduler
+ticks between the proc store and the clamp.  extra1/extra2 on the sysctl
+table entry let the proc layer validate atomically inside the write, so
+out-of-range writes are now rejected instead of silently clamped; the
+handler only reports changes.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 0af9deffc..9787a5b47 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -76,22 +76,23 @@ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+ static int infinity_running_flag = 1;
+ static const char infinity_version[] = "v4.8-gpu";
++/* Infinity: smt_divisor bounds.  Out-of-range writes are rejected by the
++ * proc layer (extra1/extra2) instead of silently clamped, closing the
++ * window where an out-of-range value was briefly visible to scheduler
++ * ticks.  The handler only reports changes.
++ */
+ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ 			     void *buf, size_t *lenp, loff_t *ppos)
+ {
+-	unsigned long old;
++	unsigned long old, val;
+ 	int ret;
+ 
+ 	old = READ_ONCE(infinity_tune_smt_divisor);
+ 	ret = proc_doulongvec_minmax(table, write, buf, lenp, ppos);
+ 	if (write && ret == 0) {
+-		unsigned long val;
+-
+ 		val = READ_ONCE(infinity_tune_smt_divisor);
+-		val = clamp(val, INFINITY_SMT_DIVISOR_MIN, INFINITY_SMT_DIVISOR_MAX);
+ 		if (val != old)
+ 			pr_info("Infinity: smt_divisor %lu -> %lu\n", old, val);
+-		WRITE_ONCE(infinity_tune_smt_divisor, val);
+ 	}
+ 	return ret;
+ }
+@@ -470,6 +471,9 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ /* ------------------------------------------------------------------ */
+ /* Sysctl table                                                        */
+ /* ------------------------------------------------------------------ */
++static unsigned long infinity_smt_divisor_min = INFINITY_SMT_DIVISOR_MIN;
++static unsigned long infinity_smt_divisor_max = INFINITY_SMT_DIVISOR_MAX;
++
+ static const struct ctl_table infinity_sysctl_table[] = {
+ 	{
+ 		.procname	= "infinity_smt_divisor",
+@@ -477,6 +481,8 @@ static const struct ctl_table infinity_sysctl_table[] = {
+ 		.maxlen		= sizeof(unsigned long),
+ 		.mode		= 0644,
+ 		.proc_handler	= clamp_smt_divisor,
++		.extra1		= &infinity_smt_divisor_min,
++		.extra2		= &infinity_smt_divisor_max,
+ 	},
+ 	{
+ 		.procname	= "infinity_running",
+-- 
+2.55.0
+

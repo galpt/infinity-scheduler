@@ -1,0 +1,38 @@
+From 219a07dd12c05f0d3aa7ce82739a9dcfb60a779c Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:25:16 +0700
+Subject: [PATCH 40/46] v4.8-gpu: drop the pick_next_entity WARN
+
+pick_eevdf() legitimately returns NULL when every queued entity is
+ineligible -- the protect path and the tight-deadline windows produced by
+the futex/IPC vslice reductions.  The WARN_ON_ONCE(nr_queued > 0) was
+therefore a spurious alarm on a correct path.  Drop it and document the
+fallback to the leftmost queued entity, which keeps runnable tasks from
+being skipped rather than idling.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 835561208..043e4144c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5748,7 +5748,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+ 
+ 	se = pick_eevdf(cfs_rq);
+ 	if (unlikely(!se)) {
+-		WARN_ON_ONCE(cfs_rq->nr_queued > 0);
++		/* pick_eevdf() legitimately returns NULL when every queued
++		 * entity is ineligible (protect path, tight-deadline windows
++		 * from the futex/IPC vslice reductions).  Falling back to the
++		 * leftmost queued entity keeps runnable tasks from being
++		 * skipped rather than idling.
++		 */
+ 		se = __pick_first_entity(cfs_rq);
+ 		if (!se)
+ 			return NULL;
+-- 
+2.55.0
+

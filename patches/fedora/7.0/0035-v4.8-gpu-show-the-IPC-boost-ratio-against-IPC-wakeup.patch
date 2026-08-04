@@ -1,7 +1,7 @@
 From dbb0708c311e128c3e8a567039c7883655745b3b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 16:43:51 +0700
-Subject: [PATCH] v4.8-gpu: show the IPC boost ratio against IPC wakeups
+Subject: [PATCH 35/46] v4.8-gpu: show the IPC boost ratio against IPC wakeups
 
 The IPC boosts row annotated boosts as a percentage of EMA climbs,
 which is structurally tiny (1.72K boosts vs 242.99K climbs reads as

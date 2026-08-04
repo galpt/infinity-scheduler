@@ -1,0 +1,42 @@
+From 9c44516886e5a9391b5425d386618106f2132271 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:26:14 +0700
+Subject: [PATCH 42/46] v4.8-gpu: clear the wakeup flags on the throttled
+ enqueue path
+
+A wakeup that lands on a throttled cfs_rq returns early from
+enqueue_task_fair() before place_entity() runs, so futex_waiting and
+ipc_waiting were left set for the whole throttle duration and could
+produce a stale vslice boost when the task was finally unthrottled.
+Clear both flags on the throttled path so a boost is only ever granted by
+an actual place_entity() wakeup.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 3541fe442..dc0f8bba3 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7243,8 +7243,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	int rq_h_nr_queued = rq->cfs.h_nr_queued;
+ 	u64 slice = 0;
+ 
+-	if (task_is_throttled(p) && enqueue_throttled_task(p))
++	if (task_is_throttled(p) && enqueue_throttled_task(p)) {
++		/* A wakeup that lands on a throttled cfs_rq does not reach
++		 * place_entity(); clear the wake flags so they cannot produce
++		 * a stale boost when the task is unthrottled later.
++		 */
++		WRITE_ONCE(p->infinity.futex_waiting, false);
++		WRITE_ONCE(p->infinity.ipc_waiting, false);
+ 		return;
++	}
+ 
+ 	/*
+ 	 * The code below (indirectly) updates schedutil which looks at
+-- 
+2.55.0
+

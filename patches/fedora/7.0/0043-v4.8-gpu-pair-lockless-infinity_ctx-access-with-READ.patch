@@ -1,0 +1,355 @@
+From 4d259f4b5f38990409e4c14bb3e7c684d4201bf1 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:29:15 +0700
+Subject: [PATCH 43/46] v4.8-gpu: pair lockless infinity_ctx access with
+ READ_ONCE/WRITE_ONCE
+
+The audit flagged the lockless cross-CPU accesses to struct infinity_ctx
+as formal data races (KCSAN-class; benign on 64-bit but torn reads are
+possible on 32-bit).  Every reader now uses READ_ONCE and every writer
+WRITE_ONCE across ema, rt_ema, futex_waiting, ipc_waiting,
+ipc_last_boost, rt_valve_armed, rt_valve_last_jiffies, last_sleep_ns,
+group_ema and group_ema_sleep_start.  wait_woken() additionally stores
+ipc_waiting BEFORE the task state store, so the waker's try_to_wake_up --
+which pairs with the state store -- reliably observes the flag before the
+task can be scheduled; the unconditional set/clear is harmless on the
+WQ_FLAG_WOKEN fast path because the enqueue that consumes the flag
+already happened before WOKEN was set, and the flag is cleared again
+before the task can run further.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/futex/waitwake.c       |  4 +--
+ kernel/sched/fair.c           | 41 ++++++++++++++++--------------
+ kernel/sched/infinity_sched.c | 48 +++++++++++++++++++----------------
+ kernel/sched/rt.c             | 14 +++++-----
+ kernel/sched/wait.c           | 15 +++++++----
+ 5 files changed, 67 insertions(+), 55 deletions(-)
+
+diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
+index 300c7cce9..47141888b 100644
+--- a/kernel/futex/waitwake.c
++++ b/kernel/futex/waitwake.c
+@@ -356,9 +356,9 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
+ 		 */
+ 		if (!timeout || timeout->task) {
+ 			/* Infinity: signal futex-waiting for vslice boost on wakeup */
+-			current->infinity.futex_waiting = true;
++			WRITE_ONCE(current->infinity.futex_waiting, true);
+ 			schedule();
+-			current->infinity.futex_waiting = false;
++			WRITE_ONCE(current->infinity.futex_waiting, false);
+ 		}
+ 	}
+ 	__set_current_state(TASK_RUNNING);
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index dc0f8bba3..63cd47162 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5442,13 +5442,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	 * reducing IPC wakeup latency.
+ 	 */
+ 	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
+-	    task_of(se)->infinity.futex_waiting) {
++	    READ_ONCE(task_of(se)->infinity.futex_waiting)) {
+ 		vslice >>= 1;
+ 		atomic64_inc(this_cpu_ptr(&infinity_futex_boost_count));
+ 	}
+ 
+ 	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
+-	    task_of(se)->infinity.ipc_waiting &&
++	    READ_ONCE(task_of(se)->infinity.ipc_waiting) &&
+ 	    !(task_of(se)->flags & PF_KTHREAD)) {
+ 		/* Infinity: IPC candidates -- all wait_woken wakeups. */
+ 		u64 now = rq_clock(rq_of(cfs_rq));
+@@ -5783,7 +5783,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+ 	if (entity_is_task(se)) {
+ 		struct task_struct *p = task_of(se);
+ 
+-		if (p->infinity.ema == 0) {
++		if (READ_ONCE(p->infinity.ema) == 0) {
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
+ 			atomic64_inc(this_cpu_ptr(&infinity_cpufreq_interactive_count));
+ 		}
+@@ -7183,9 +7183,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	/* Infinity: EMA decay on wakeup */
+ 	if (flags & ENQUEUE_WAKEUP) {
+ 		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
++		u64 last_sleep = READ_ONCE(p->infinity.last_sleep_ns);
+ 
+-		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
+-			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);
++		if (last_sleep && now > last_sleep)
++			infinity_wakeup(&p->infinity, now - last_sleep);
+ 	}
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	/*
+@@ -7197,7 +7198,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	if (flags & (ENQUEUE_WAKEUP | ENQUEUE_MIGRATED)) {
+ 		struct cfs_rq *pcfs_rq = cfs_rq_of(&p->se);
+ 
+-		if (pcfs_rq->group_ema_sleep_start) {
++		if (READ_ONCE(pcfs_rq->group_ema_sleep_start)) {
+ 			u64 now = rq_clock(rq_of(pcfs_rq));
+ 
+ 			/*
+@@ -7208,18 +7209,20 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 			 * the EMA -- the safe direction, same pattern as the task
+ 			 * (fair.c) and RT paths.
+ 			 */
+-			if (now > pcfs_rq->group_ema_sleep_start) {
+-				u64 old = pcfs_rq->group_ema;
+-				u64 sleep_ns = now - pcfs_rq->group_ema_sleep_start;
++			if (now > READ_ONCE(pcfs_rq->group_ema_sleep_start)) {
++				u64 old = READ_ONCE(pcfs_rq->group_ema);
++				u64 sleep_ns = now -
++					READ_ONCE(pcfs_rq->group_ema_sleep_start);
+ 				u64 periods = div64_u64(sleep_ns,
+ 							 INFINITY_CGROUP_EMA_HALFLIFE_NS);
+ 
+ 				if (periods > 63)
+-					pcfs_rq->group_ema = 0;
++					WRITE_ONCE(pcfs_rq->group_ema, 0);
+ 				else
+-					pcfs_rq->group_ema >>= periods;
++					WRITE_ONCE(pcfs_rq->group_ema,
++						   old >> periods);
+ 				/* Infinity: decay must never raise the EMA. */
+-				WARN_ON_ONCE(pcfs_rq->group_ema > old);
++				WARN_ON_ONCE(READ_ONCE(pcfs_rq->group_ema) > old);
+ 			}
+ 			/* Shield v2: any decay may invalidate the tg-wide max; the
+ 			 * local rq cannot know it is the max-holder cheaply, so mark
+@@ -7233,7 +7236,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 					WRITE_ONCE(tg->infinity_shield.shield_ema_max_stale,
+ 						   true);
+ 			}
+-			pcfs_rq->group_ema_sleep_start = 0;
++			WRITE_ONCE(pcfs_rq->group_ema_sleep_start, 0);
+ 		}
+ 	}
+ #endif
+@@ -7330,11 +7333,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 
+ 	if (flags & ENQUEUE_WAKEUP) {
+ 		/* Check futex_waiting before clearing -- triggers freq ramp for IPC wakeups */
+-		if (p->infinity.futex_waiting)
++		if (READ_ONCE(p->infinity.futex_waiting))
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+ 
+-		p->infinity.futex_waiting = false;
+-		p->infinity.ipc_waiting = false;
++		WRITE_ONCE(p->infinity.futex_waiting, false);
++		WRITE_ONCE(p->infinity.ipc_waiting, false);
+ 
+ 		if (p->in_iowait)
+ 			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+@@ -7493,7 +7496,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ {
+ 	/* Infinity: record sleep start */
+ 	if (flags & DEQUEUE_SLEEP)
+-		p->infinity.last_sleep_ns = rq_clock(rq_of(task_cfs_rq(p)));
++		WRITE_ONCE(p->infinity.last_sleep_ns, rq_clock(rq_of(task_cfs_rq(p))));
+ 
+ 	if (task_is_throttled(p)) {
+ 		dequeue_throttled_task(p, flags);
+@@ -7538,7 +7541,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	 * start so enqueue_task_fair can decay group_ema on next wakeup.
+ 	 */
+ 	if ((flags & DEQUEUE_SLEEP) && cfs_rq_of(&p->se)->nr_queued == 0)
+-		cfs_rq_of(&p->se)->group_ema_sleep_start = rq_clock(rq);
++		WRITE_ONCE(cfs_rq_of(&p->se)->group_ema_sleep_start, rq_clock(rq));
+ #endif
+ 
+ 	/*
+@@ -9047,7 +9050,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		 * This prevents an interactive task from sharing execution
+ 		 * units with a batch task on the other SMT thread.
+ 		 */
+-		if (sched_smt_active() && p->infinity.ema < 1000) {
++		if (sched_smt_active() && READ_ONCE(p->infinity.ema) < 1000) {
+ 			int primary = cpumask_first(
+ 				topology_sibling_cpumask(new_cpu));
+ 
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index f7fd49c48..4f1f99894 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -520,7 +520,7 @@ late_initcall(infinity_sched_init);
+ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+ 		      unsigned long cpu_capacity)
+ {
+-	u64 step;
++	u64 step, ema;
+ 	u32 alpha;
+ 
+ 	/*
+@@ -539,14 +539,14 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+ 		alpha = 2048 + (u32)div64_u64(2048ULL * cpu_capacity,
+ 					      SCHED_CAPACITY_SCALE);
+ 
+-	if (ctx->ema >= INFINITY_BUDGET_MAX_NS)
++	ema = READ_ONCE(ctx->ema);
++	if (ema >= INFINITY_BUDGET_MAX_NS)
+ 		return;
+ 
+ 	if (delta_ns > INFINITY_BUDGET_MAX_NS)
+ 		delta_ns = INFINITY_BUDGET_MAX_NS;
+ 
+-	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
+-			 alpha,
++	step = div64_u64((INFINITY_BUDGET_MAX_NS - ema) * delta_ns * alpha,
+ 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
+ 	/*
+ 	 * With alpha up to 4096 (FP_ONE = 256) the step can exceed the
+@@ -555,9 +555,9 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+ 	 * but the raw value must stay within [0, BUDGET] so the
+ 	 * /proc/<pid>/infinity reading and the EMA invariants hold).
+ 	 */
+-	if (step > INFINITY_BUDGET_MAX_NS - ctx->ema)
+-		step = INFINITY_BUDGET_MAX_NS - ctx->ema;
+-	ctx->ema += step;
++	if (step > INFINITY_BUDGET_MAX_NS - ema)
++		step = INFINITY_BUDGET_MAX_NS - ema;
++	WRITE_ONCE(ctx->ema, ema + step);
+ 	atomic64_inc(this_cpu_ptr(&infinity_ema_climb_count));
+ }
+ /* ------------------------------------------------------------------ */
+@@ -595,20 +595,22 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ 
+ 		periods = div64_u64_rem(sleep_ns, 24000000ULL, &residual);
+ 		if (periods > 63) {
+-			ctx->ema = 0;
++			WRITE_ONCE(ctx->ema, 0);
+ 		} else {
+-			ctx->ema >>= periods;
+-			if (residual && ctx->ema) {
++			u64 ema = READ_ONCE(ctx->ema);
++
++			ema >>= periods;
++			if (residual && ema) {
+ 				u64 fraction = div64_u64(residual *
+ 					INFINITY_FP_ONE, 24000000ULL);
+-				u64 linear = (ctx->ema * fraction) >>
++				u64 linear = (ema * fraction) >>
+ 					INFINITY_FP_SHIFT;
+ 				u64 quad = ((linear * fraction) >>
+ 					INFINITY_FP_SHIFT) >> 1;
+ 				if (linear > quad)
+-					ctx->ema -= min(ctx->ema,
+-							linear - quad);
++					ema -= min(ema, linear - quad);
+ 			}
++			WRITE_ONCE(ctx->ema, ema);
+ 		}
+ 	}
+ 	atomic64_inc(this_cpu_ptr(&infinity_wakeup_count));
+@@ -677,20 +679,22 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ 		return;
+ 	periods = div64_u64_rem(sleep_ns, 160000000ULL, &residual);
+ 	if (periods > 63) {
+-		ctx->rt_ema = 0;
++		WRITE_ONCE(ctx->rt_ema, 0);
+ 	} else {
+-		ctx->rt_ema >>= periods;
+-		if (residual && ctx->rt_ema) {
++		u64 ema = READ_ONCE(ctx->rt_ema);
++
++		ema >>= periods;
++		if (residual && ema) {
+ 			u64 fraction = div64_u64(residual *
+ 				INFINITY_FP_ONE, 160000000ULL);
+-			u64 linear = (ctx->rt_ema * fraction) >>
++			u64 linear = (ema * fraction) >>
+ 				INFINITY_FP_SHIFT;
+ 			u64 quad = ((linear * fraction) >>
+ 				INFINITY_FP_SHIFT) >> 1;
+ 			if (linear > quad)
+-				ctx->rt_ema -= min(ctx->rt_ema,
+-						   linear - quad);
++				ema -= min(ema, linear - quad);
+ 		}
++		WRITE_ONCE(ctx->rt_ema, ema);
+ 	}
+ }
+ /* ------------------------------------------------------------------ */
+@@ -699,12 +703,12 @@ void infinity_rt_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ unsigned int infinity_rr_timeslice(struct task_struct *p,
+ 				   unsigned int rr_default)
+ {
++	u64 rt_ema = READ_ONCE(p->infinity.rt_ema);
+ 	u64 decay_pct;
+ 
+-	if (!p->infinity.rt_ema)
++	if (!rt_ema)
+ 		return rr_default;
+-	decay_pct = div64_u64(p->infinity.rt_ema * 90ULL,
+-			      INFINITY_RT_BUDGET_NS);
++	decay_pct = div64_u64(rt_ema * 90ULL, INFINITY_RT_BUDGET_NS);
+ 	if (decay_pct > 90)
+ 		decay_pct = 90;
+ 	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index fc2bee97f..adbbdac27 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2570,10 +2570,10 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 	 * re-armed window it deserves.
+ 	 */
+ 	if (p->policy != SCHED_RR && !(p->flags & PF_KTHREAD)) {
+-		if (p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
+-			if (!p->infinity.rt_valve_armed ||
++		if (READ_ONCE(p->infinity.rt_ema) >= INFINITY_RT_DEMOTE_THRESHOLD) {
++			if (!READ_ONCE(p->infinity.rt_valve_armed) ||
+ 			    time_after_eq(jiffies,
+-					  p->infinity.rt_valve_last_jiffies +
++					  READ_ONCE(p->infinity.rt_valve_last_jiffies) +
+ 					  msecs_to_jiffies(INFINITY_RT_REQUEUE_MS))) {
+ 				WRITE_ONCE(p->infinity.rt_valve_armed, true);
+ 				WRITE_ONCE(p->infinity.rt_valve_last_jiffies, jiffies);
+@@ -2585,10 +2585,10 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 			}
+ 			return;
+ 		}
+-		if (p->infinity.rt_valve_armed &&
+-		    p->infinity.rt_ema < INFINITY_RT_REARM_THRESHOLD) {
+-			p->infinity.rt_valve_armed = false;
+-			p->infinity.rt_valve_last_jiffies = 0;
++		if (READ_ONCE(p->infinity.rt_valve_armed) &&
++		    READ_ONCE(p->infinity.rt_ema) < INFINITY_RT_REARM_THRESHOLD) {
++			WRITE_ONCE(p->infinity.rt_valve_armed, false);
++			WRITE_ONCE(p->infinity.rt_valve_last_jiffies, 0);
+ 		}
+ 	}
+ 
+diff --git a/kernel/sched/wait.c b/kernel/sched/wait.c
+index f66b804e6..df4c94779 100644
+--- a/kernel/sched/wait.c
++++ b/kernel/sched/wait.c
+@@ -437,13 +437,18 @@ long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode, long timeout)
+ 	 * either we see the store to wq_entry->flags in woken_wake_function()
+ 	 * or woken_wake_function() sees our store to current->state.
+ 	 */
++	/* Infinity: flag IPC wait for the vslice boost on wakeup.  The store
++	 * precedes the state store so ttwu's acquire observes it; the
++	 * unconditional set/clear is harmless on the WQ_FLAG_WOKEN fast path
++	 * (the enqueue that would consume the flag already happened before
++	 * WOKEN was set, and the flag is cleared again before the task can run
++	 * further).  The sleeper-side clear covers all paths.
++	 */
++	WRITE_ONCE(current->infinity.ipc_waiting, true);
+ 	set_current_state(mode); /* A */
+-	if (!(wq_entry->flags & WQ_FLAG_WOKEN) && !kthread_should_stop_or_park()) {
+-		/* Infinity: flag IPC wait for the vslice boost on wakeup */
+-		current->infinity.ipc_waiting = true;
++	if (!(wq_entry->flags & WQ_FLAG_WOKEN) && !kthread_should_stop_or_park())
+ 		timeout = schedule_timeout(timeout);
+-		current->infinity.ipc_waiting = false;
+-	}
++	WRITE_ONCE(current->infinity.ipc_waiting, false);
+ 	__set_current_state(TASK_RUNNING);
+ 
+ 	/*
+-- 
+2.55.0
+
