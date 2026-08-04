@@ -78,6 +78,29 @@ resolve_latest_rc() {
     echo "$SERIES_RC_BASE"
 }
 
+# resolve_latest_72 — the 7.2 target: the latest stable 7.2 release
+# (base tag v7.2 or a 7.2.x stable patch) when one exists, otherwise the
+# latest 7.2 RC.  Falls back to the series base if both queries fail.
+resolve_latest_72() {
+    local stable
+
+    if command -v git &>/dev/null; then
+        stable=$(git ls-remote --refs --tags \
+            "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" \
+            "refs/tags/v7.2*" 2>/dev/null | \
+            sed 's|.*refs/tags/v||' | \
+            grep -v -e '-rc' -e '-test' | \
+            sort -V | tail -1)
+        if [ -n "$stable" ]; then
+            echo "$stable"
+            return
+        fi
+    fi
+
+    # No stable 7.2 release yet — use the latest RC.
+    resolve_latest_rc 7.2
+}
+
 # Interactive kernel target selection: stay on the running kernel's
 # series (default) or try the latest 7.2 RC.  Only offered on a TTY when
 # no explicit version argument was given; scripted runs keep the current
@@ -86,9 +109,10 @@ if [ -z "${1:-}" ] && [ "$RC_TARGET" != "1" ] && [ -t 0 ] && [ -t 1 ] && [ "$EUI
     echo ""
     info "Kernel target:"
     echo "  1) Latest ${KERNEL_MAJOR}.x stable (recommended)"
-    echo "  2) Latest 7.2 RC (experimental — mainline RC base with the"
-    echo "     upstream FAIR DRM scheduler; NVIDIA DKMS support for 7.2"
-    echo "     RCs depends on NVIDIA releasing compatible headers)"
+    echo "  2) Latest 7.2 (stable once available, otherwise the latest"
+    echo "     RC — experimental mainline base with the upstream FAIR"
+    echo "     DRM scheduler; NVIDIA DKMS support for 7.2 depends on"
+    echo "     NVIDIA releasing compatible headers)"
     read -r -p "Choose [1/2, default 1]: " target_choice || true
     case "$target_choice" in
         2|7.2)
@@ -185,13 +209,18 @@ if [ ! -d "$PATCH_DIR" ] && [ "$RC_TARGET" != "1" ]; then
 fi
 
 if [ "$RC_TARGET" = "1" ]; then
-    # 7.2 RC target: the source is a vanilla mainline clone, so use the
+    # 7.2 target: the source is a vanilla mainline clone, so use the
     # vanilla arch/7.2 series regardless of the distro family, and
-    # resolve the latest v7.2-rc tag instead of a stable x.y.z.
+    # resolve the best 7.2 kernel — the latest stable when one exists,
+    # otherwise the latest RC.
     PATCH_DIR="$INFINITY_DIR/patches/arch/7.2"
     PATCH_VER="7.2"
-    KERNEL_VER="$(resolve_latest_rc 7.2)"
-    info "Using kernel source v$KERNEL_VER (latest 7.2 RC; series applies with fuzz)."
+    KERNEL_VER="$(resolve_latest_72)"
+    if [[ "$KERNEL_VER" == *-rc* ]]; then
+        info "Using kernel source v$KERNEL_VER (latest 7.2 RC; series applies with fuzz)."
+    else
+        info "Using kernel source v$KERNEL_VER (latest 7.2 stable; series applies with fuzz)."
+    fi
 else
     # Resolve the latest stable patch version for the supported major.minor.
     # If patches target 7.1, find the latest non-RC 7.1.x release (e.g. 7.1.4)
@@ -286,15 +315,16 @@ prepare_source() {
 
     setup_kernel_config
 
-    # 7.2 RC: the series was generated from $SERIES_RC_BASE.  If the
-    # latest RC has drifted so the series no longer applies, fall back
-    # to the base automatically instead of failing mid-install.
+    # 7.2 target: the series was generated from $SERIES_RC_BASE.  If
+    # the selected kernel has drifted so the series no longer applies,
+    # fall back to the base automatically instead of failing
+    # mid-install.
     if [ "$RC_TARGET" = "1" ] && [ "$KERNEL_VER" != "$SERIES_RC_BASE" ]; then
         if ! ( cd "$KERNEL_SRC" && for p in "${PATCH_FILES[@]}"; do
                    patch -p1 -N -F 10 --dry-run -s < "$p" >/dev/null 2>&1 || exit 1
                done ); then
-            warn "Latest 7.2 RC $KERNEL_VER drifted from the series base ($SERIES_RC_BASE)."
-            warn "Falling back to $SERIES_RC_BASE, the RC the series was built for."
+            warn "Kernel v$KERNEL_VER drifted from the series base ($SERIES_RC_BASE);"
+            warn "the series no longer applies cleanly.  Falling back to $SERIES_RC_BASE."
             KERNEL_VER="$SERIES_RC_BASE"
             rm -rf "$KERNEL_SRC"
             mkdir -p "$(dirname "$KERNEL_SRC")"
