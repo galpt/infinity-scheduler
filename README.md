@@ -11,11 +11,11 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/            35 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/             34 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/             34 patches — Vanilla kernel.org 7.1
-│   ├── arch/7.2/             24 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
-│   └── fedora/7.0/           35 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/            48 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/             47 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/             47 patches — Vanilla kernel.org 7.1
+│   ├── arch/7.2/             37 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
+│   └── fedora/7.0/           48 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -34,6 +34,8 @@ cd infinity-scheduler
 # 2. Build and install (defaults to the running kernel's series; an interactive
 #    prompt also offers the latest 7.2 kernel — stable when available, else RC)
 sudo bash tools/install-infinity-scheduler.sh
+#    Fedora/kernel-ark users: use the variant script instead
+#    sudo bash tools/install-infinity-scheduler-fedora.sh
 
 # 3. Reboot and select "Infinity scheduler kernel" at the boot menu
 reboot
@@ -62,10 +64,32 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 
 | Parameter | Default | Range | Description |
 |---|---|---|---|
-| `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving) |
+| `infinity_smt_divisor` | 2 | [1, 16] | SMT secondary slice divisor (1 = no halving); out-of-range writes rejected in the sysctl layer |
 | `infinity_running` | 1 (ro) | — | Active flag |
 | `infinity_version` | v4.8-gpu (ro) | — | Branch version string |
 | `infinity_stats` | — (ro) | — | CPU + GPU accounting table with cross-scheduler coupling and drain counters |
+
+## Regression testing
+
+`tools/regression/run-v48-regression.sh` runs the six v4.8 regression
+scenarios with a per-scenario timeout and exits 1 on any failure (run as
+root for the perf/cyclictest parts):
+
+```bash
+sudo bash tools/regression/run-v48-regression.sh
+```
+
+| Scenario | Tool | Floor (sanity) |
+|---|---|---|
+| `alt-tab` | stress-ng + schbench | wakeup p99 < 10 ms under CPU-hog saturation |
+| `wakeup-latency` | schbench | best-of-3 wakeup p99 < 3 ms |
+| `socket-latency` | netperf TCP_RR | transactions > 1000/s |
+| `rt` | cyclictest + rogue SCHED_FIFO | max latency < 50 ms (valve requeue) |
+| `fork` | stress-ng --fork | forks > 2000/s |
+| `ema-pelt-trace` | /proc/<pid>/infinity + perf | EMA vs PELT divergence ≤ 50pp on a sustained burn |
+
+Missing tools produce a WARN and a skip, never a false FAIL. See
+`tools/regression/README.md` for the full method and baselining procedure.
 
 ## CPU scheduling
 
@@ -252,7 +276,7 @@ passover → gpu_passovers (fair-class gated; GPU→CPU feedback)"]
 | Fair-share slice | Yes | Yes |
 | Budget model | Linear consumption | EMA |
 | SMT halving | No | Yes |
-| EEVDF Invariant Assert | N/A (BPF) | Yes (WARN_ON_ONCE) |
+| EEVDF pick fallback | No | Yes (leftmost queued entity when none eligible) |
 | Wakeup deadline boost | N/A | Asymptotic vslice |
 | Work stealing | Yes (BPF) | No (EEVDF load balancer) |
 | Adaptive RR timeslice | No | Yes (rt_ema-based, 10–100ms) |
@@ -270,6 +294,7 @@ passover → gpu_passovers (fair-class gated; GPU→CPU feedback)"]
 | SMT interactive placement | No | Yes (v4.7: low-EMA → idle core) |
 | GPU job-type awareness | No | Yes (v4.7: submission-interval aware) |
 | Per-process EMA visibility | No | Yes (v4.7: `/proc/<pid>/infinity`) |
+| EMA/PELT divergence diagnostic | No | Yes (sustained-episode flagging) |
 
 ## License
 
