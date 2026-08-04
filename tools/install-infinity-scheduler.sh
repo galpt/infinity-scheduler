@@ -310,8 +310,10 @@ prepare_source() {
 
     git clone --depth 1 --branch "v$KERNEL_VER" \
         "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" "$KERNEL_SRC" \
-        2>/dev/null || git clone --depth 1 --branch "v$KERNEL_VER" \
-        "https://github.com/torvalds/linux.git" "$KERNEL_SRC"
+        2>/dev/null || \
+    git clone --depth 1 --branch "v$KERNEL_VER" \
+        "https://github.com/torvalds/linux.git" "$KERNEL_SRC" 2>&1 | tail -5 || \
+        die "Failed to clone v$KERNEL_VER (see errors above)."
 
     setup_kernel_config
 
@@ -328,9 +330,15 @@ prepare_source() {
             KERNEL_VER="$SERIES_RC_BASE"
             rm -rf "$KERNEL_SRC"
             mkdir -p "$(dirname "$KERNEL_SRC")"
-            git clone --depth 1 --branch "v$KERNEL_VER" \
-                "https://github.com/torvalds/linux.git" "$KERNEL_SRC" 2>/dev/null || \
-                die "Failed to clone v$KERNEL_VER"
+            # Try both mainline mirrors with the error visible, so a
+            # transient failure is retried and a real one is explained.
+            if ! git clone --depth 1 --branch "v$KERNEL_VER" \
+                    "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git" "$KERNEL_SRC" 2>&1 | tail -5; then
+                if ! git clone --depth 1 --branch "v$KERNEL_VER" \
+                        "https://github.com/torvalds/linux.git" "$KERNEL_SRC" 2>&1 | tail -5; then
+                    die "Failed to clone v$KERNEL_VER from either mirror (see errors above)."
+                fi
+            fi
             setup_kernel_config
         fi
     fi
