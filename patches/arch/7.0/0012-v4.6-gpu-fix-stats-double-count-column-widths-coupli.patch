@@ -1,7 +1,7 @@
 From cee97ce8f6c0311624ee8dc7a76258785e6edaa3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 18:24:46 +0700
-Subject: [PATCH 12/45] v4.6-gpu: fix stats double-count, column widths,
+Subject: [PATCH 12/46] v4.6-gpu: fix stats double-count, column widths,
  coupling guards
 
 - Remove double-count of infinity_gpu_accounting_applied: keep the

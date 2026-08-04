@@ -1,7 +1,7 @@
 From 64ae31c1bf1dbf748b223fc0608d49cdc48309f1 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:47:58 +0700
-Subject: [PATCH 25/46] v4.8-gpu: repair the pre-existing kernel-ark port
+Subject: [PATCH 25/47] v4.8-gpu: repair the pre-existing kernel-ark port
  defects
 
 The v4.7 fedora port carried an orphaned 'if (unlikely(!se))' fallback

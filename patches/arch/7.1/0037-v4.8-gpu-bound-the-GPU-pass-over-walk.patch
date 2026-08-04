@@ -1,7 +1,7 @@
 From c52bec3dc9b21e2dce7d56bd4fce8622386b98ea Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:24:34 +0700
-Subject: [PATCH 37/45] v4.8-gpu: bound the GPU pass-over walk
+Subject: [PATCH 37/46] v4.8-gpu: bound the GPU pass-over walk
 
 drm_sched_rq_select_entity_infinity() credited gpu_passovers to every
 ready right-neighbor in the vtime rbtree, an O(N) walk under rq->lock

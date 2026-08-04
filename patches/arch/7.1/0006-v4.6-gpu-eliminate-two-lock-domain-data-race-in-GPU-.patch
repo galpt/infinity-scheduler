@@ -1,7 +1,7 @@
 From 0b6954bd15e92cfbe299895f9ef745327fc5ae14 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:16:18 +0700
-Subject: [PATCH 06/45] v4.6-gpu: eliminate two-lock-domain data race in GPU
+Subject: [PATCH 06/46] v4.6-gpu: eliminate two-lock-domain data race in GPU
  time accounting
 
 Replace the direct gpu_time_total/gpu_time_ema writes in

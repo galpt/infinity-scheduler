@@ -1,7 +1,7 @@
 From 550e7bdd664660f7e165c9538ac02799fa3d40d2 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:13:30 +0700
-Subject: [PATCH 01/45] v4.5: core Infinity scheduler infrastructure
+Subject: [PATCH 01/46] v4.5: core Infinity scheduler infrastructure
 
 Add struct infinity_ctx to task_struct, futex_waiting flag for IPC
 wakeup boost, infinity_sched.c/h algorithm implementation, fork init

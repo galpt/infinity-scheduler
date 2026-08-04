@@ -1,7 +1,7 @@
 From 22c38ca097bfeec77b1e77801647936d61455833 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:54:40 +0700
-Subject: [PATCH 13/46] v4.6-gpu: batch RCU read lock across passover loop
+Subject: [PATCH 13/47] v4.6-gpu: batch RCU read lock across passover loop
 
 Move rcu_read_lock() outside the passover iteration loop in
 drm_sched_rq_select_entity_infinity(), holding it for the entire

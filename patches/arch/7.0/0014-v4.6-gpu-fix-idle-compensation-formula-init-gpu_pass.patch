@@ -1,7 +1,7 @@
 From 93eb983d413f2da8da67c8fdfcde1f6f62d41d4e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Mon, 27 Jul 2026 19:14:40 +0700
-Subject: [PATCH 14/45] v4.6-gpu: fix idle compensation formula, init
+Subject: [PATCH 14/46] v4.6-gpu: fix idle compensation formula, init
  gpu_passovers on fork, clean up stats descriptions
 
 - Swap the terms in the idle compensation blend formula so that idle

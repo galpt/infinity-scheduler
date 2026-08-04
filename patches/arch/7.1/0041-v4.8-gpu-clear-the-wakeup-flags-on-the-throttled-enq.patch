@@ -1,7 +1,7 @@
 From a32d40713f26c80552546c414796ef491d7f76ba Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:26:14 +0700
-Subject: [PATCH 41/45] v4.8-gpu: clear the wakeup flags on the throttled
+Subject: [PATCH 41/46] v4.8-gpu: clear the wakeup flags on the throttled
  enqueue path
 
 A wakeup that lands on a throttled cfs_rq returns early from

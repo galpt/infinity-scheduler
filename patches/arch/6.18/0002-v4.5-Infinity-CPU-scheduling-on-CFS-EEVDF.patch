@@ -1,7 +1,7 @@
 From a168b73e34fc86a4f7477c7a935fd3d4d7a36330 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:42:26 +0700
-Subject: [PATCH 02/46] v4.5: Infinity CPU scheduling on CFS/EEVDF
+Subject: [PATCH 02/47] v4.5: Infinity CPU scheduling on CFS/EEVDF
 
 Infinity_update_weight in update_deadline() modulates EEVDF weight.
 place_entity() halves vslice for futex-waking tasks.

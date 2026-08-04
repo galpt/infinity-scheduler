@@ -1,0 +1,95 @@
+From e9376c31c5d8bce539d78dc0e9581bac47823ddb Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 5 Aug 2026 00:11:23 +0700
+Subject: [PATCH 46/46] v4.8-gpu: pair the remaining lockless infinity_ctx
+ reads
+
+The security re-review found three residual lockless infinity_ctx reads of
+the same KCSAN class the READ_ONCE/WRITE_ONCE pairing commit was meant
+to close:
+
+  - infinity_update_weight() read p->infinity.ema without READ_ONCE
+    while infinity_consume()/infinity_wakeup() write it under the rq
+    clock from another CPU.
+  - proc_infinity_show() read ctx->ema, ctx->rt_ema and
+    ctx->futex_waiting without READ_ONCE while the scheduler mutates
+    them concurrently; the neighboring PELT fields already used
+    READ_ONCE, making these three reads inconsistent.
+  - enqueue_task_rt() read p->infinity.rt_last_sleep_ns three times
+    without READ_ONCE while dequeue_task_rt() writes it on the owning
+    rq (a wakeup can land on a different rq).  The write is paired with
+    WRITE_ONCE for symmetry, matching the fair-side last_sleep_ns.
+
+All of these are benign on 64-bit (single-copy atomic) but are now
+consistent with the pairing discipline established by the previous
+commit.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ fs/proc/base.c      | 6 +++---
+ kernel/sched/fair.c | 2 +-
+ kernel/sched/rt.c   | 8 ++++----
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index 3bffdd965..ffc279c60 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -3308,9 +3308,9 @@ static int proc_infinity_show(struct seq_file *m, struct pid_namespace *ns,
+ {
+ 	struct infinity_ctx *ctx = &task->infinity;
+ 
+-	seq_printf(m, "ema:\t\t%llu\n", ctx->ema);
+-	seq_printf(m, "rt_ema:\t\t%llu\n", ctx->rt_ema);
+-	seq_printf(m, "futex_waiting:\t%d\n", ctx->futex_waiting);
++	seq_printf(m, "ema:\t\t%llu\n", READ_ONCE(ctx->ema));
++	seq_printf(m, "rt_ema:\t\t%llu\n", READ_ONCE(ctx->rt_ema));
++	seq_printf(m, "futex_waiting:\t%d\n", READ_ONCE(ctx->futex_waiting));
+ 	seq_printf(m, "gpu_passovers:\t%d\n",
+ 		   atomic_read(&ctx->gpu_passovers));
+ 	seq_printf(m, "util_avg:\t%lu\n", READ_ONCE(task->se.avg.util_avg));
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 86be6d15a..497b0bad6 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -69,7 +69,7 @@ static void infinity_update_weight(struct cfs_rq *cfs_rq,
+ 	u64 ema;
+ 	u32 new_weight;
+ 
+-	ema = p->infinity.ema;
++	ema = READ_ONCE(p->infinity.ema);
+ 	if (ema > INFINITY_BUDGET_MAX_NS)
+ 		ema = INFINITY_BUDGET_MAX_NS;
+ 	new_weight = infinity_calc_weight(p, ema);
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index ee7dacace..027966d4e 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -1442,12 +1442,12 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+ 		rt_se->timeout = 0;
+ 
+ 		/* Infinity: RR EMA decay on wakeup for adaptive timeslice */
+-		if (p->infinity.rt_last_sleep_ns) {
++		if (READ_ONCE(p->infinity.rt_last_sleep_ns)) {
+ 			u64 now = rq_clock(rq);
+ 
+-			if (now > p->infinity.rt_last_sleep_ns)
++			if (now > READ_ONCE(p->infinity.rt_last_sleep_ns))
+ 				infinity_rt_wakeup(&p->infinity,
+-					now - p->infinity.rt_last_sleep_ns);
++					now - READ_ONCE(p->infinity.rt_last_sleep_ns));
+ 		}
+ 	}
+ 
+@@ -1472,7 +1472,7 @@ static bool dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
+ 
+ 	/* Infinity: record sleep timestamp for RR EMA decay */
+ 	if ((flags & DEQUEUE_SLEEP) && p)
+-		p->infinity.rt_last_sleep_ns = rq_clock(rq);
++		WRITE_ONCE(p->infinity.rt_last_sleep_ns, rq_clock(rq));
+ 
+ 	dequeue_pushable_task(rq, p);
+ 
+-- 
+2.55.0
+

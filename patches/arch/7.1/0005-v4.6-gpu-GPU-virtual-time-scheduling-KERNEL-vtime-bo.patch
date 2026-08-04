@@ -1,7 +1,7 @@
 From 06cca4393a07838d68a77b47ab6b653c01ce170a Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 25 Jul 2026 11:37:15 +0700
-Subject: [PATCH 05/45] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
+Subject: [PATCH 05/46] v4.6-gpu: GPU virtual time scheduling, KERNEL vtime
  boost, idle-start, deferred accounting, em dash fix
 
 Includes timeout path UAF fix: clear infinity_entity under job_list_lock
