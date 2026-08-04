@@ -338,12 +338,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 
 	cpu_rows[1].label = "EMA climbs";
 	fill_pretty_llu(cpu_rows[1].value, sizeof(cpu_rows[1].value), emc);
-	{
-		u64 avg_wakeup = mul_u64_u32_div(emc, 100, max(wkc, 1ULL));
+	if (wkc) {
+		u64 avg_wakeup = mul_u64_u32_div(emc, 100, wkc);
 
 		scnprintf(cpu_rows[1].note, sizeof(cpu_rows[1].note),
 			  "~%llu.%02llu/wakeup",
 			  avg_wakeup / 100, avg_wakeup % 100);
+	} else {
+		strscpy(cpu_rows[1].note, "N/A", sizeof(cpu_rows[1].note));
 	}
 
 	cpu_rows[2].label = "Wakeup decays";

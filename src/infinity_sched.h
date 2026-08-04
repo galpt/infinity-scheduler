@@ -64,11 +64,11 @@
 #define INFINITY_IPC_GRADIENT_FULL_NS	1000000ULL
 #define INFINITY_IPC_GRADIENT_MAX_NS	8000000ULL
 /** IPC boost EMA gate: only wakees with at most this much recent runtime
- *  (about 12us at BUDGET/32) get the IPC boost, so busy wakeups are
+ *  (about 23us at BUDGET/16) get the IPC boost, so busy wakeups are
  *  rejected and per-packet boost flooding stays bounded.  The rejected
  *  count is visible as the 'IPC gate blocks' row in infinity_stats.
  */
-#define INFINITY_IPC_EMA_GATE_NS	(INFINITY_BUDGET_MAX_NS / 32)
+#define INFINITY_IPC_EMA_GATE_NS	(INFINITY_BUDGET_MAX_NS / 16)
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
 /* ------------------------------------------------------------------ */
