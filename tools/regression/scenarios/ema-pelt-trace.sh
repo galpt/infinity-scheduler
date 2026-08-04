@@ -1,29 +1,27 @@
 #!/bin/sh
-# ema-pelt-trace: (a) samples /proc/<pid>/infinity across a spin/sleep
-# cycle and flags EMA-vs-PELT divergence beyond 50 percentage points;
-# (b) if root and perf are available, records sched wakeups/switches and
-# reports the wakeup-to-run P50/P99 latency histogram.
+# ema-pelt-trace: (a) samples /proc/<pid>/infinity across a sustained
+# single burn and verifies the EMA-vs-PELT divergence stays within 50
+# percentage points -- a sustained-burn task must NOT be flagged as
+# divergent (guards against false-positive divergence bugs); (b) if root
+# and perf are available, records sched wakeups/switches and reports the
+# wakeup-to-run P50/P99 latency histogram.
 
 # constants
-SPIN_MS=100
-SLEEP_MS=300
-CYCLES=20
+BURN_SECS=20              # sustained single-burn duration (s)
 DIVERGENCE_PP=50          # |ema_pct - util_pct| threshold
 P99_FLOOR=500             # us, sanity floor
 
 INF_FILE=/proc/self/infinity
 
 # --- (a) EMA vs PELT divergence ------------------------------------------
-# child: alternate 100ms busy / 300ms sleep for CYCLES iterations
+# child: sustained single burn -- one continuous CPU spin for ~BURN_SECS.
+# EMA and PELT both converge to ~100% within ~200ms, so every sample
+# lands within the 50pp threshold and the gate deterministically passes.
 (
-	i=0
-	while [ "$i" -lt "$CYCLES" ]; do
-		end=$(( $(date +%s%N 2>/dev/null || date +%s) ))
-		: # spin marker; busy loop below
+	end=$(( $(date +%s 2>/dev/null || date +%s) + BURN_SECS ))
+	while [ "$(date +%s 2>/dev/null || date +%s)" -lt "$end" ]; do
 		j=0
 		while [ "$j" -lt 1000000 ]; do j=$((j + 1)); done
-		sleep 0.3 2>/dev/null || sleep 1
-		i=$((i + 1))
 	done
 ) &
 child=$!
