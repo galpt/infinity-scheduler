@@ -1,7 +1,7 @@
-From dcd43f5aeff3cc3ee8c77a59c59caed9a039156d Mon Sep 17 00:00:00 2001
+From ff897000602f434244b09690e95115fa41529bf4 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 16/25] v4.8-gpu: gate GPU coupling on the fair scheduler class
+Date: Tue, 4 Aug 2026 15:05:10 +0700
+Subject: [PATCH 19/22] v4.8-gpu: gate GPU coupling on the fair scheduler class
 
 The DRM scheduler's CPU<->GPU coupling reads the owning task's CPU-side
 interactivity signals (futex_waiting, ema == 0) and the passover loop
@@ -27,11 +27,10 @@ are gated in drm_sched_entity_update_vruntime() and the gpu_passovers
 accumulation loop in drm_sched_select_entity() (both in sched_rq.c);
 the 7.1 sched_main.c hunks do not apply (drm_sched_entity_calc_vtime
 and drm_sched_rq_select_entity_infinity are absent in the 7.2 tree).
-The 7.2 passover loop also pairs an infinity_gpu_passover_boosts
-counter with each gpu_passovers increment; both sit inside the gate.
+The prototype is added to include/drm/gpu_scheduler.h and the helper
+to kernel/sched/infinity_sched.c, ported as-is from the 7.1 series.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
-(cherry picked from commit 1f5a955e6e9ae85eaf1d83fd2a19ece75071636a)
 ---
  drivers/gpu/drm/scheduler/sched_rq.c | 15 +++++++++++++--
  include/drm/gpu_scheduler.h          |  5 +++++
@@ -86,10 +85,10 @@ index 323dba6e1..3b0468a76 100644
 +
  #endif
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 03bd80bf1..4a3ba7edb 100644
+index 92860ceca..165226015 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -566,3 +566,14 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
+@@ -664,3 +664,14 @@ unsigned int infinity_rr_timeslice(struct task_struct *p,
  	return max(1U, (unsigned int)(rr_default * (100ULL - decay_pct)
  				      / 100ULL));
  }

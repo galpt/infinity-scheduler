@@ -1,7 +1,7 @@
-From a4e916d59f28b49ebecf3f8819ba4a0c346d87b8 Mon Sep 17 00:00:00 2001
+From 87ce5ed3539b8d850e064bf3ff5910569688b49e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 18/25] v4.8-gpu: add hysteresis and rate limit to the RT
+Date: Tue, 4 Aug 2026 15:04:55 +0700
+Subject: [PATCH 18/22] v4.8-gpu: add hysteresis and rate limit to the RT
  safety valve
 
 Dual threshold (engage 95%, re-arm 85%) removes boundary oscillation;
@@ -16,7 +16,6 @@ RR timeslice (infinity_rr_timeslice reads rt_ema) during the
 valve-release phase -- bounded by the same EMA math and accepted.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
-(cherry picked from commit 2887593149c46a4f28bca4d07141b4793c3ac34a)
 ---
  include/linux/sched.h         |  2 ++
  kernel/sched/infinity_sched.c |  2 ++
@@ -25,36 +24,36 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  4 files changed, 44 insertions(+), 6 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 7a0d40f5c..c01135432 100644
+index f7daa6565..c4c9aff53 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -830,6 +830,8 @@ struct infinity_ctx {
- 	u64		rt_last_sleep_ns; /* Sleep timestamp for RT EMA decay */
+@@ -831,6 +831,8 @@ struct infinity_ctx {
  	bool		futex_waiting;
  	bool		ipc_waiting;
+ 	u64		ipc_last_boost;	/* Last IPC boost timestamp (ns) */
 +	bool		rt_valve_armed;
 +	unsigned long	rt_valve_last_jiffies;
  	atomic_t	gpu_passovers; /* GPU->CPU feedback counter */
  
  };
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 4f812039c..d40a412e2 100644
+index db4c15bc6..92860ceca 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -533,6 +533,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
- 	atomic_set(&ctx->gpu_passovers, 0);
+@@ -588,6 +588,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
  	ctx->futex_waiting = false;
  	ctx->ipc_waiting = false;
+ 	ctx->ipc_last_boost = 0;
 +	ctx->rt_valve_armed = false;
 +	ctx->rt_valve_last_jiffies = 0;
  }
  /* ------------------------------------------------------------------ */
  /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index 8eae1c517..6589e9ab9 100644
+index e48bcb083..7c4d35850 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
-@@ -176,6 +176,15 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+@@ -180,6 +180,15 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
   * of the budget to prevent unit mismatch errors.
   */
  #define INFINITY_RT_DEMOTE_THRESHOLD    (INFINITY_RT_BUDGET_NS * 95ULL / 100ULL)

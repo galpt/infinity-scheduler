@@ -1,21 +1,23 @@
-From 631be1b51a9a20291d5542e68d90a4b513238769 Mon Sep 17 00:00:00 2001
+From 91017208435e54e39d125d09ddbf229974f8d67c Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:31:00 +0700
-Subject: [PATCH 14/25] v4.8-gpu: guard cgroup EMA monotonicity and cross-rq
- clock skew
+Date: Tue, 4 Aug 2026 14:55:38 +0700
+Subject: [PATCH 14/22] v4.8-gpu: harden the EMA math
 
-The cgroup group_ema decay path lacked the monotonicity guard the task
-and RT EMA paths already have, and its sleep stamp can cross rq-clock
-domains after migration.  A backward clock (broken TSC sync or cross-rq
-skew) now retains the EMA, the safe direction, while WARN_ON_ONCE
-guards surface any wraparound or corruption in both the climb and the
-decay paths.
+Clamp the task EMA climb step at the remaining gap to the budget
+ceiling: with the hardware-adaptive alpha at 4096 and FP_ONE at 256 a
+single step can overshoot INFINITY_BUDGET_MAX_NS, pushing the raw ema
+past the 6ms ceiling (the weight math clamps downstream, but the raw
+value must stay within [0, BUDGET]).  Add monotonicity guards to the
+cgroup group_ema climb and decay: the decay path lacked the guard the
+task and RT paths already have, and its sleep stamp can cross rq-clock
+domains after migration, so a backward clock retains the EMA (the safe
+direction) while WARN_ON_ONCE surfaces any wraparound or corruption.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
-(cherry picked from commit 511afc5ba9796453c75f884a3d79ce9ab56398eb)
 ---
- kernel/sched/fair.c | 34 +++++++++++++++++++++++++++-------
- 1 file changed, 27 insertions(+), 7 deletions(-)
+ kernel/sched/fair.c           | 34 +++++++++++++++++++++++++++-------
+ kernel/sched/infinity_sched.c | 10 ++++++++++
+ 2 files changed, 37 insertions(+), 7 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index a1b511472..813774a04 100644
@@ -73,6 +75,28 @@ index a1b511472..813774a04 100644
  			pcfs_rq->group_ema_sleep_start = 0;
  		}
  	}
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index fe2eb62b3..1263a6d95 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -408,7 +408,17 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+ 	step = div64_u64((INFINITY_BUDGET_MAX_NS - ctx->ema) * delta_ns *
+ 			 alpha,
+ 			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
++	/*
++	 * With alpha up to 4096 (FP_ONE = 256) the step can exceed the
++	 * remaining gap to the ceiling, which would push ema past
++	 * INFINITY_BUDGET_MAX_NS (the weight math clamps it downstream,
++	 * but the raw value must stay within [0, BUDGET] so the
++	 * /proc/<pid>/infinity reading and the EMA invariants hold).
++	 */
++	if (step > INFINITY_BUDGET_MAX_NS - ctx->ema)
++		step = INFINITY_BUDGET_MAX_NS - ctx->ema;
+ 	ctx->ema += step;
++	atomic64_inc(this_cpu_ptr(&infinity_ema_climb_count));
+ }
+ /* ------------------------------------------------------------------ */
+ /* infinity_wakeup -- EMA decay on wakeup                               */
 -- 
 2.55.0
 

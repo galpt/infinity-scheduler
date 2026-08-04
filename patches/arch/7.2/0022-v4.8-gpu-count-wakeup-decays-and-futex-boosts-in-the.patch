@@ -1,7 +1,7 @@
-From d04e6f27c796030479c53429edff7015b248db7a Mon Sep 17 00:00:00 2001
+From 2ebe85300c7669f3e993a4f42bf4ae5d873ccfb0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 13:27:32 +0700
-Subject: [PATCH 26/28] v4.8-gpu: count wakeup decays and futex boosts in the
+Date: Tue, 4 Aug 2026 15:05:55 +0700
+Subject: [PATCH 22/22] v4.8-gpu: count wakeup decays and futex boosts in the
  7.2 port
 
 The 7.2 port never incremented infinity_wakeup_count or
@@ -18,7 +18,7 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5d1d39493..27edee540 100644
+index 869acc676..63fa54240 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -6264,8 +6264,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
@@ -34,10 +34,10 @@ index 5d1d39493..27edee540 100644
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
  	    task_of(se)->infinity.ipc_waiting &&
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index e0c4d7f88..2799f4171 100644
+index 5026e203d..af46940ee 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -580,6 +580,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+@@ -582,6 +582,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
  			}
  		}
  	}
