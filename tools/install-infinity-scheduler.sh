@@ -5,8 +5,9 @@
 # kernel stays as the default boot option.
 #
 # Usage:
-#   sudo bash install-infinity-scheduler.sh                         # build + install (auto-detect kernel)
-#   sudo bash install-infinity-scheduler.sh 7.1                     # build for kernel 7.1
+#   sudo bash install-infinity-scheduler.sh                         # build + install (auto-detect kernel; interactive
+#                                                                   #   prompt offers latest x.y stable or 7.2 RC)
+#   sudo bash install-infinity-scheduler.sh 7.1                     # build for kernel 7.1 (or 7.2 for the latest 7.2 RC)
 #   sudo bash install-infinity-scheduler.sh --remove                 # remove Infinity boot entries
 #   sudo bash install-infinity-scheduler.sh --status                 # show current state
 # ──────────────────────────────────────────────────────────────────────────────
@@ -24,6 +25,15 @@ die()   { err "$*"; exit 1; }
 # DKMS rebuild and the nvidia_drm.modeset=1 setup in the install step.
 NVIDIA_PRESENT=0
 
+# Set to 1 when the user targets the 7.2 RC kernel (interactive choice
+# or an explicit '7.2' argument).  RCs live only in the mainline tree,
+# so the source clone and version resolution take the RC path.
+RC_TARGET=0
+# The RC the patches/arch/7.2 series was generated from.  The latest RC
+# is tried first; if the series no longer applies, the installer falls
+# back to this base.
+SERIES_RC_BASE="7.2-rc5"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFINITY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KERNEL_VER="${KERNEL_VER:-$(uname -r | grep -oP '^\d+\.\d+(\.\d+)?')}"
@@ -32,6 +42,11 @@ KERNEL_VER="${KERNEL_VER:-$(uname -r | grep -oP '^\d+\.\d+(\.\d+)?')}"
 # Example:  sudo KERNEL_VER=7.1 bash install-infinity-scheduler.sh
 if [ -n "${1:-}" ] && [[ "$1" != "--"* ]]; then
     KERNEL_VER="$1"
+fi
+
+# An explicit 7.2 target means the latest 7.2 RC kernel.
+if [ "$KERNEL_VER" = "7.2" ]; then
+    RC_TARGET=1
 fi
 
 # Detect distro family
@@ -43,6 +58,46 @@ fi
 
 # Map kernel version to patch directory (e.g. 7.0.12 -> 7.0, 7.1.5 -> 7.1)
 KERNEL_MAJOR="$(echo "$KERNEL_VER" | grep -oP '^\d+\.\d+')"
+
+# resolve_latest_rc — latest v<major.minor>-rc tag from the mainline tree
+# (RC tags exist only in torvalds/linux, not in stable).  Falls back to
+# the series base if the query fails.
+resolve_latest_rc() {
+    local major_minor="$1"
+    if command -v git &>/dev/null; then
+        local tag
+        tag=$(git ls-remote --refs --tags \
+            "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git" \
+            "refs/tags/v${major_minor}-rc*" 2>/dev/null | \
+            sed 's|.*refs/tags/v||' | sort -V | tail -1)
+        if [ -n "$tag" ]; then
+            echo "$tag"
+            return
+        fi
+    fi
+    echo "$SERIES_RC_BASE"
+}
+
+# Interactive kernel target selection: stay on the running kernel's
+# series (default) or try the latest 7.2 RC.  Only offered on a TTY when
+# no explicit version argument was given; scripted runs keep the current
+# behavior.
+if [ -z "${1:-}" ] && [ "$RC_TARGET" != "1" ] && [ -t 0 ] && [ -t 1 ] && [ "$EUID" -eq 0 ]; then
+    echo ""
+    info "Kernel target:"
+    echo "  1) Latest ${KERNEL_MAJOR}.x stable (recommended)"
+    echo "  2) Latest 7.2 RC (experimental — mainline RC base with the"
+    echo "     upstream FAIR DRM scheduler; NVIDIA DKMS support for 7.2"
+    echo "     RCs depends on NVIDIA releasing compatible headers)"
+    read -r -p "Choose [1/2, default 1]: " target_choice || true
+    case "$target_choice" in
+        2|7.2)
+            RC_TARGET=1
+            KERNEL_MAJOR="7.2"
+            info "Targeting the latest 7.2 RC kernel."
+            ;;
+    esac
+fi
 
 # resolve_latest_patch — query kernel.org for the latest stable release
 # matching a given major.minor (e.g. 7.1 → 7.1.4).  Excludes -rc and
@@ -102,7 +157,7 @@ except Exception:
 PATCH_DIR="$INFINITY_DIR/patches/$DISTRO_FAMILY/$KERNEL_MAJOR"
 PATCH_VER="$KERNEL_MAJOR"
 
-if [ ! -d "$PATCH_DIR" ]; then
+if [ ! -d "$PATCH_DIR" ] && [ "$RC_TARGET" != "1" ]; then
     # No patches for this exact major — find the closest available
     local_base="$KERNEL_MAJOR"
     BEST_DIST=999
@@ -129,12 +184,22 @@ if [ ! -d "$PATCH_DIR" ]; then
     info "Using patches for $PATCH_VER (apply to kernel $KERNEL_VER with fuzz)."
 fi
 
-# Resolve the latest stable patch version for the supported major.minor.
-# If patches target 7.1, find the latest non-RC 7.1.x release (e.g. 7.1.4)
-# so users running a newer kernel (e.g. 7.2) still build against a version
-# the patches are known to work on.
-KERNEL_VER="$(resolve_latest_patch "$PATCH_VER")"
-info "Using kernel source v$KERNEL_VER (patches for $PATCH_VER)."
+if [ "$RC_TARGET" = "1" ]; then
+    # 7.2 RC target: the source is a vanilla mainline clone, so use the
+    # vanilla arch/7.2 series regardless of the distro family, and
+    # resolve the latest v7.2-rc tag instead of a stable x.y.z.
+    PATCH_DIR="$INFINITY_DIR/patches/arch/7.2"
+    PATCH_VER="7.2"
+    KERNEL_VER="$(resolve_latest_rc 7.2)"
+    info "Using kernel source v$KERNEL_VER (latest 7.2 RC; series applies with fuzz)."
+else
+    # Resolve the latest stable patch version for the supported major.minor.
+    # If patches target 7.1, find the latest non-RC 7.1.x release (e.g. 7.1.4)
+    # so users running a newer kernel (e.g. 7.2) still build against a version
+    # the patches are known to work on.
+    KERNEL_VER="$(resolve_latest_patch "$PATCH_VER")"
+    info "Using kernel source v$KERNEL_VER (patches for $PATCH_VER)."
+fi
 
 # Collect patch files sorted by name
 PATCH_FILES=()
@@ -185,19 +250,7 @@ cmd_status() {
     echo "  To remove:  sudo bash $0 --remove"
 }
 
-prepare_source() {
-    # Always start fresh — delete any previous clone and re-clone.
-    # This avoids all edge cases with stale patches, committed changes,
-    # half-built trees, or .rej/.orig files from failed runs.
-    info "Cloning kernel source v$KERNEL_VER to $KERNEL_SRC..."
-    rm -rf "$KERNEL_SRC"
-    mkdir -p "$(dirname "$KERNEL_SRC")"
-
-    git clone --depth 1 --branch "v$KERNEL_VER" \
-        "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" "$KERNEL_SRC" \
-        2>/dev/null || git clone --depth 1 --branch "v$KERNEL_VER" \
-        "https://github.com/torvalds/linux.git" "$KERNEL_SRC"
-
+setup_kernel_config() {
     cd "$KERNEL_SRC"
 
     # Generate .config from the running kernel
@@ -215,6 +268,41 @@ prepare_source() {
         fi
         ./scripts/config --disable CONFIG_LOCALVERSION_AUTO 2>/dev/null || true
         make olddefconfig >/dev/null 2>&1 || true
+    fi
+}
+
+prepare_source() {
+    # Always start fresh — delete any previous clone and re-clone.
+    # This avoids all edge cases with stale patches, committed changes,
+    # half-built trees, or .rej/.orig files from failed runs.
+    info "Cloning kernel source v$KERNEL_VER to $KERNEL_SRC..."
+    rm -rf "$KERNEL_SRC"
+    mkdir -p "$(dirname "$KERNEL_SRC")"
+
+    git clone --depth 1 --branch "v$KERNEL_VER" \
+        "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" "$KERNEL_SRC" \
+        2>/dev/null || git clone --depth 1 --branch "v$KERNEL_VER" \
+        "https://github.com/torvalds/linux.git" "$KERNEL_SRC"
+
+    setup_kernel_config
+
+    # 7.2 RC: the series was generated from $SERIES_RC_BASE.  If the
+    # latest RC has drifted so the series no longer applies, fall back
+    # to the base automatically instead of failing mid-install.
+    if [ "$RC_TARGET" = "1" ] && [ "$KERNEL_VER" != "$SERIES_RC_BASE" ]; then
+        if ! ( cd "$KERNEL_SRC" && for p in "${PATCH_FILES[@]}"; do
+                   patch -p1 -N -F 10 --dry-run -s < "$p" >/dev/null 2>&1 || exit 1
+               done ); then
+            warn "Latest 7.2 RC $KERNEL_VER drifted from the series base ($SERIES_RC_BASE)."
+            warn "Falling back to $SERIES_RC_BASE, the RC the series was built for."
+            KERNEL_VER="$SERIES_RC_BASE"
+            rm -rf "$KERNEL_SRC"
+            mkdir -p "$(dirname "$KERNEL_SRC")"
+            git clone --depth 1 --branch "v$KERNEL_VER" \
+                "https://github.com/torvalds/linux.git" "$KERNEL_SRC" 2>/dev/null || \
+                die "Failed to clone v$KERNEL_VER"
+            setup_kernel_config
+        fi
     fi
 }
 
