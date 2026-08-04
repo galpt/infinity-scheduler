@@ -4,6 +4,7 @@
 
 # constants
 HOGS=$(( $(nproc) - 2 ))   # leave headroom for the probe
+[ "$HOGS" -lt 1 ] && HOGS=1   # small machines: keep at least one hog
 RUNTIME=60
 # Sanity floor only (see wakeup-latency.sh); deltas vs the v4.7 baseline
 # are the real signal.
