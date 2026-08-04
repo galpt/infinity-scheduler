@@ -101,6 +101,16 @@ if [ ${#PATCH_FILES[@]} -eq 0 ]; then
     while IFS= read -r -d '' f; do PATCH_FILES+=("$f"); done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
 fi
 KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
+# Refuse dangerous paths before any destructive step (rm -rf below).
+case "$KERNEL_SRC" in
+    /*) ;;
+    *) die "KERNEL_SRC must be an absolute path (got '$KERNEL_SRC')" ;;
+esac
+case "$KERNEL_SRC" in
+    /|//|*"/.."*)
+        die "Refusing unsafe KERNEL_SRC path '$KERNEL_SRC'";;
+esac
+[ "$KERNEL_SRC" = "$HOME" ] && die "KERNEL_SRC must not be \$HOME ('$KERNEL_SRC')"
 DISTRO="Fedora"
 
 

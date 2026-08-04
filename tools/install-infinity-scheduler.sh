@@ -238,6 +238,16 @@ done < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' -print0 | sort -z)
 [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches found in $PATCH_DIR"
 
 KERNEL_SRC="${KERNEL_SRC:-/usr/src/linux-infinity}"
+# Refuse dangerous paths before any destructive step (rm -rf below).
+case "$KERNEL_SRC" in
+    /*) ;;
+    *) die "KERNEL_SRC must be an absolute path (got '$KERNEL_SRC')" ;;
+esac
+case "$KERNEL_SRC" in
+    /|//|*"/.."*)
+        die "Refusing unsafe KERNEL_SRC path '$KERNEL_SRC'";;
+esac
+[ "$KERNEL_SRC" = "$HOME" ] && die "KERNEL_SRC must not be \$HOME ('$KERNEL_SRC')"
 DISTRO="$(if [ "$DISTRO_FAMILY" = "fedora" ]; then echo "Fedora"; else echo "Arch/CachyOS"; fi)"
 
 
