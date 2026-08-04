@@ -1,0 +1,50 @@
+From d04e6f27c796030479c53429edff7015b248db7a Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 13:27:32 +0700
+Subject: [PATCH 26/28] v4.8-gpu: count wakeup decays and futex boosts in the
+ 7.2 port
+
+The 7.2 port never incremented infinity_wakeup_count or
+infinity_futex_boost_count, so the 'Wakeup decays' and 'Futex boosts'
+rows in infinity_stats read zero on the 7.2 arch even though the
+mechanisms fire.  Add both increments at the 7.1 reference sites: the
+wakeup decay counter at the end of infinity_wakeup(), and the futex
+boost counter in the place_entity futex block.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c           | 4 +++-
+ kernel/sched/infinity_sched.c | 1 +
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 5d1d39493..27edee540 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6264,8 +6264,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	 * reducing IPC wakeup latency.
+ 	 */
+ 	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
+-	    task_of(se)->infinity.futex_waiting)
++	    task_of(se)->infinity.futex_waiting) {
+ 		vslice >>= 1;
++		atomic64_inc(this_cpu_ptr(&infinity_futex_boost_count));
++	}
+ 
+ 	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
+ 	    task_of(se)->infinity.ipc_waiting &&
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index e0c4d7f88..2799f4171 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -580,6 +580,7 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ 			}
+ 		}
+ 	}
++	atomic64_inc(this_cpu_ptr(&infinity_wakeup_count));
+ }
+ /* ------------------------------------------------------------------ */
+ /* infinity_fork_init                                                   */
+-- 
+2.55.0
+
