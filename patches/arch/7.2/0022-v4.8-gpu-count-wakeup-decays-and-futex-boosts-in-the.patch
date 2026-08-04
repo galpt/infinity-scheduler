@@ -1,7 +1,7 @@
 From 2ebe85300c7669f3e993a4f42bf4ae5d873ccfb0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 15:05:55 +0700
-Subject: [PATCH 22/36] v4.8-gpu: count wakeup decays and futex boosts in the
+Subject: [PATCH 22/37] v4.8-gpu: count wakeup decays and futex boosts in the
  7.2 port
 
 The 7.2 port never incremented infinity_wakeup_count or

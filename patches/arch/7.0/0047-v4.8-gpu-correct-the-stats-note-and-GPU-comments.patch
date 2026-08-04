@@ -1,0 +1,75 @@
+From f75a66cea3f1fcd329290ec3acb4e415b82a8daf Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Wed, 5 Aug 2026 00:16:48 +0700
+Subject: [PATCH 47/47] v4.8-gpu: correct the stats note and GPU comments
+
+Three text corrections:
+
+  - The divergence stats note said 'tasks flagged' but the sustained
+    divergence flag now counts one episode per 3+ consecutive divergent
+    sleeps (INFINITY_DIVERGENCE_STREAK), not one per sleep.  The note
+    reads 'sustained episodes' to match the counter semantics.
+
+  - The idle-compensation blend comment claimed the mul_u64_u32_div
+    result 'is exact for any value'; each term is truncated, so the
+    result is at most 1 ns below the exact convex combination.  The
+    comment now says the blend cannot overflow and quantifies the
+    truncation error as far below vtime ordering precision.
+
+  - The pass-over walk comment claimed per-selection cost O(K) instead
+    of O(N); the walk itself can still traverse ineligible nodes beyond
+    K, only the credited accounting (and its locked atomics) is bounded.
+    The comment now states that distinction precisely.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 12 ++++++++----
+ kernel/sched/infinity_sched.c          |  2 +-
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index 8f5db171c..72d8c429b 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -191,8 +191,10 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+ 			 * plain multiply wraps u64 once min_gpu_vtime >=
+ 			 * 2^48 ns (~3.26 days of accumulated GPU time).
+ 			 * mul_u64_u32_div computes the products in 128-bit
+-			 * intermediates, so the blend is exact for any
+-			 * value.
++			 * intermediates, so the blend cannot overflow; each
++			 * truncated term keeps the result at most 1 ns below
++			 * the exact convex combination, far below vtime
++			 * ordering precision.
+ 			 */
+ 			effective_total =
+ 				mul_u64_u32_div(rq->min_gpu_vtime,
+@@ -476,8 +478,10 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 		 * nearest entities are the closest to the next pick (most
+ 		 * relevant for starvation feedback); entities deeper than K
+ 		 * are credited on subsequent selections as the winner moves.
+-		 * This keeps per-selection cost O(K) under rq->lock instead
+-		 * of O(N) for clients with many contexts.
++		 * This bounds the credited work (and the locked atomics) to K
++		 * entities per selection; the walk may still pass over
++		 * ineligible nodes beyond K, but the expensive per-entity
++		 * accounting is bounded.
+ 		 */
+ 		if (entity->infinity_pid) {
+ 			struct rb_node *rb2;
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index a7d39843f..b9eca42fc 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -329,7 +329,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 	cpu_rows[9].label = "EMA vs PELT divergence";
+ 	fill_pretty_llu(cpu_rows[9].value, sizeof(cpu_rows[9].value), dvg);
+-	strscpy(cpu_rows[9].note, "tasks flagged", sizeof(cpu_rows[9].note));
++	strscpy(cpu_rows[9].note, "sustained episodes", sizeof(cpu_rows[9].note));
+ 
+ 	/* ---- RT rows ---- */
+ 	rt_rows[0].label = "RT throttles";
+-- 
+2.55.0
+

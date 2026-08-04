@@ -1,7 +1,7 @@
 From 963913103122a7cf4fce1634ef84f276bd620dba Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:19:31 +0700
-Subject: [PATCH 07/47] v4.6-gpu: replace fixed catch-up with proportional idle
+Subject: [PATCH 07/48] v4.6-gpu: replace fixed catch-up with proportional idle
  compensation
 
 Replace the EMA-gated idle-start (gpu_time_ema == 0 gate) and fixed

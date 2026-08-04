@@ -1,7 +1,7 @@
 From a960de7877137d35383671bed3424a3768687640 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:25:39 +0700
-Subject: [PATCH 41/47] v4.8-gpu: count only applied shield reductions
+Subject: [PATCH 41/48] v4.8-gpu: count only applied shield reductions
 
 The shield engage counter incremented on every update_cfs_group()
 evaluation that computed a non-zero reduction, which runs per tick via

@@ -1,7 +1,7 @@
 From 318e49e100d39b01ca2cbe388df0c7e6a7e26bd4 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:33:01 +0700
-Subject: [PATCH 28/47] v4.8-gpu: boost interactive IPC wakeups from
+Subject: [PATCH 28/48] v4.8-gpu: boost interactive IPC wakeups from
  wait_woken()
 
 The futex boost only covers futex_do_wait() waits.  The IPC paths that

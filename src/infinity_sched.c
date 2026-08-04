@@ -329,7 +329,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 
 	cpu_rows[9].label = "EMA vs PELT divergence";
 	fill_pretty_llu(cpu_rows[9].value, sizeof(cpu_rows[9].value), dvg);
-	strscpy(cpu_rows[9].note, "tasks flagged", sizeof(cpu_rows[9].note));
+	strscpy(cpu_rows[9].note, "sustained episodes", sizeof(cpu_rows[9].note));
 
 	/* ---- RT rows ---- */
 	rt_rows[0].label = "RT throttles";
