@@ -88,7 +88,7 @@ flowchart TB
         TASK --> FUTEX["futex_do_wait() / wait_woken()\n───\nset futex_waiting / ipc_waiting\n→ schedule() → cleared on wakeup"]
         class FUTEX algo
 
-        FUTEX --> PLACE["place_entity()\n───\nfutex: vslice >>= 1\nipc (ema==0): gradient 2x→1x\n→ earlier deadline on wakeup"]
+        FUTEX --> PLACE["place_entity()\n───\nfutex: vslice >>= 1\nipc (light-runtime gate): gradient 2x→1x\n→ earlier deadline on wakeup"]
         class PLACE algo
 
         PLACE --> GAUGE
@@ -256,7 +256,7 @@ passover → gpu_passovers (fair-class gated; GPU→CPU feedback)"]
 | Work stealing | Yes (BPF) | No (not needed — EEVDF + kernel load balancer) |
 | Adaptive RR timeslice | No | Yes (rt_ema-based, 10–100ms) |
 | Hardware-adaptive alpha | No | Yes (2048–4096 via cpu_capacity) |
-| Futex IPC wakeup boost | No | Yes (vslice halved on futex wakeup; v4.8: also wait_woken IPC wakes, ema==0-gated gradient) |
+| Futex IPC wakeup boost | No | Yes (vslice halved on futex wakeup; v4.8: also wait_woken IPC wakes, light-runtime-gated gradient) |
 | Migration hysteresis | No | Yes (EMA-driven cache pinning) |
 | Cgroup defense shield | No | Yes (group EMA, quantized cross-CPU ramp) |
 | RT cross-class safety | No | Yes (native requeue throttling) |

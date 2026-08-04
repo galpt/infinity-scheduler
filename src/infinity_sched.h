@@ -63,6 +63,12 @@
 /** IPC boost gradient: full 2x below 1ms sleep, linear falloff to 1x at 8ms. */
 #define INFINITY_IPC_GRADIENT_FULL_NS	1000000ULL
 #define INFINITY_IPC_GRADIENT_MAX_NS	8000000ULL
+/** IPC boost EMA gate: only wakees with at most this much recent runtime
+ *  (about 12us at BUDGET/32) get the IPC boost, so busy wakeups are
+ *  rejected and per-packet boost flooding stays bounded.  The rejected
+ *  count is visible as the 'IPC gate blocks' row in infinity_stats.
+ */
+#define INFINITY_IPC_EMA_GATE_NS	(INFINITY_BUDGET_MAX_NS / 32)
 /* ------------------------------------------------------------------ */
 /* SMT divisor bounds                                                  */
 /* ------------------------------------------------------------------ */
@@ -203,6 +209,7 @@ extern unsigned long infinity_tune_smt_divisor;
 /* ------------------------------------------------------------------ */
 DECLARE_PER_CPU(atomic64_t, infinity_futex_boost_count);
 DECLARE_PER_CPU(atomic64_t, infinity_ipc_boost_count);
+DECLARE_PER_CPU(atomic64_t, infinity_ipc_gate_block_count);
 DECLARE_PER_CPU(atomic64_t, infinity_ema_climb_count);
 DECLARE_PER_CPU(atomic64_t, infinity_wakeup_count);
 DECLARE_PER_CPU(atomic64_t, infinity_rt_throttle_count);
