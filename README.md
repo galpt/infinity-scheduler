@@ -14,7 +14,7 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 │   ├── arch/6.18/            24 patches — Vanilla kernel.org 6.18
 │   ├── arch/7.0/             24 patches — Vanilla kernel.org 7.0
 │   ├── arch/7.1/             24 patches — Vanilla kernel.org 7.1
-│   ├── arch/7.2/             13 patches — Vanilla kernel.org 7.2 (RC base)
+│   ├── arch/7.2/             13 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
 │   └── fedora/7.0/           24 patches — Fedora kernel-ark archived-7.0
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
@@ -31,7 +31,8 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 git clone -b v4.7-gpu --depth 1 https://github.com/galpt/infinity-scheduler.git
 cd infinity-scheduler
 
-# 2. Build and install (detects running kernel version automatically)
+# 2. Build and install (defaults to the running kernel's series; an interactive
+#    prompt also offers the latest 7.2 kernel — stable when available, else RC)
 sudo bash tools/install-infinity-scheduler.sh
 
 # 3. Reboot and select "Infinity scheduler kernel" at the boot menu
