@@ -1,0 +1,39 @@
+From bee5ebd884d7cbe9a3facd076a1283674dc52374 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 13:28:33 +0700
+Subject: [PATCH 37/37] v4.8-gpu: show N/A for the climbs-per-wakeup ratio with
+ no decays
+
+With zero wakeup decays the max(wkc, 1) denominator produced an
+absurd '~787928.00/wakeup' annotation.  When wkc is zero, print N/A
+instead of a meaningless ratio.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index ec6b8cdfa..04992b0ab 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -338,12 +338,14 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 
+ 	cpu_rows[1].label = "EMA climbs";
+ 	fill_pretty_llu(cpu_rows[1].value, sizeof(cpu_rows[1].value), emc);
+-	{
+-		u64 avg_wakeup = mul_u64_u32_div(emc, 100, max(wkc, 1ULL));
++	if (wkc) {
++		u64 avg_wakeup = mul_u64_u32_div(emc, 100, wkc);
+ 
+ 		scnprintf(cpu_rows[1].note, sizeof(cpu_rows[1].note),
+ 			  "~%llu.%02llu/wakeup",
+ 			  avg_wakeup / 100, avg_wakeup % 100);
++	} else {
++		strscpy(cpu_rows[1].note, "N/A", sizeof(cpu_rows[1].note));
+ 	}
+ 
+ 	cpu_rows[2].label = "Wakeup decays";
+-- 
+2.55.0
+
