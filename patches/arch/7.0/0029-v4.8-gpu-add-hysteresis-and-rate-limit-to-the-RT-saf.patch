@@ -1,22 +1,22 @@
-From e442582e37f0b7e66403a7d2b04d4397df29582b Mon Sep 17 00:00:00 2001
+From 2c5b0d4ef1f69cc3b236341cc0be9f84bc960a0d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 29/33] v4.8-gpu: add hysteresis and rate limit to the RT
+Date: Tue, 4 Aug 2026 14:36:18 +0700
+Subject: [PATCH 29/32] v4.8-gpu: add hysteresis and rate limit to the RT
  safety valve
 
-Dual threshold (engage 95%, re-arm 85%) removes boundary oscillation;
-the requeue-time decay of rt_ema is required, because rt_ema climbs
-only on consume and decays only on wakeup, so without it the release
-threshold is unreachable for a continuously running rogue.  The decay
-quantum (100 ms) leaves ~57% of the EMA, dropping a 95% burner below
-the re-arm point in one requeue.  The jiffies-based window is
-global-safe under NO_HZ_FULL tick offload and gates both requeue and
-resched.  Documented interaction: the decayed rt_ema also widens the
-RR timeslice (infinity_rr_timeslice reads rt_ema) during the
-valve-release phase -- bounded by the same EMA math and accepted.
+Dual threshold (engage at 95% rt_ema, re-arm only after it drops below
+85%) removes boundary oscillation; the requeue-time decay of rt_ema is
+required, because rt_ema climbs only on consume and decays only on
+wakeup, so without it the release threshold is unreachable for a
+continuously running rogue FIFO.  The decay quantum (100ms) leaves
+about 57% of the EMA, dropping a 95% burner below the re-arm point in
+one requeue.  The jiffies-based window is global-safe under NO_HZ_FULL
+tick offload and gates both requeue_task_rt() and resched_curr().
+Documented interaction: the decayed rt_ema also widens the RR
+timeslice (infinity_rr_timeslice reads rt_ema) during the
+valve-release phase, bounded by the same EMA math.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
-(cherry picked from commit 2887593149c46a4f28bca4d07141b4793c3ac34a)
 ---
  include/linux/sched.h         |  2 ++
  kernel/sched/infinity_sched.c |  2 ++
@@ -25,36 +25,36 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  4 files changed, 44 insertions(+), 7 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index e31f0a18e..35119c83a 100644
+index 94accc3e6..33e605856 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -824,6 +824,8 @@ struct infinity_ctx {
- 	u64		rt_last_sleep_ns; /* Sleep timestamp for RT EMA decay */
+@@ -825,6 +825,8 @@ struct infinity_ctx {
  	bool		futex_waiting;
  	bool		ipc_waiting;
+ 	u64		ipc_last_boost;	/* Last IPC boost timestamp (ns) */
 +	bool		rt_valve_armed;
 +	unsigned long	rt_valve_last_jiffies;
  
  	/**
  	 * @gpu_passovers: GPU scheduling pass-over count.
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 87d931d63..8ce5bb100 100644
+index 2cf1dbcd3..644d55f66 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -632,6 +632,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
- 	atomic_set(&ctx->gpu_passovers, 0);
+@@ -686,6 +686,8 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
  	ctx->futex_waiting = false;
  	ctx->ipc_waiting = false;
+ 	ctx->ipc_last_boost = 0;
 +	ctx->rt_valve_armed = false;
 +	ctx->rt_valve_last_jiffies = 0;
  }
  /* ------------------------------------------------------------------ */
  /* (Removed in v4.5: carriage_ns, auto_carriage_ns, two-pole,          *
 diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
-index df9078acc..73f074608 100644
+index 09992b5a9..95aa8a340 100644
 --- a/kernel/sched/infinity_sched.h
 +++ b/kernel/sched/infinity_sched.h
-@@ -176,6 +176,15 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+@@ -180,6 +180,15 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
   * of the budget to prevent unit mismatch errors.
   */
  #define INFINITY_RT_DEMOTE_THRESHOLD    (INFINITY_RT_BUDGET_NS * 95ULL / 100ULL)
