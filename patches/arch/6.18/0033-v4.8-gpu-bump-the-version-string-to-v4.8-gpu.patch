@@ -1,23 +1,22 @@
-From 73b5bd542dbdf4101b8a29aeb49e4a5a609b1a47 Mon Sep 17 00:00:00 2001
+From 49c46061285abdd09ce6f7bfa4d9fd368d8cedcb Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
-Date: Tue, 4 Aug 2026 00:37:49 +0700
-Subject: [PATCH 32/36] v4.8-gpu: bump the version string to v4.8-gpu
+Date: Tue, 4 Aug 2026 14:37:35 +0700
+Subject: [PATCH 33/33] v4.8-gpu: bump the version string to v4.8-gpu
 
 The kernel reports its scheduler version through the read-only
 infinity_version sysctl and the infinity_stats header; bump it for the
 v4.8-gpu series.
 
 Signed-off-by: Galih Tama <galpt@v.recipes>
-(cherry picked from commit 05baf6524ad9927df757226ed77a23ac716938dc)
 ---
  kernel/sched/infinity_sched.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
-index 096811b71..63e8b3f53 100644
+index 74889e95b..7a9b6222b 100644
 --- a/kernel/sched/infinity_sched.c
 +++ b/kernel/sched/infinity_sched.c
-@@ -73,7 +73,7 @@ EXPORT_PER_CPU_SYMBOL(infinity_divergence_count);
+@@ -74,7 +74,7 @@ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
  /* ------------------------------------------------------------------ */
  unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
  static int infinity_running_flag = 1;
