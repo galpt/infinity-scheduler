@@ -32,7 +32,7 @@ RC_TARGET=0
 # The RC the patches/arch/7.2 series was generated from.  The latest RC
 # is tried first; if the series no longer applies, the installer falls
 # back to this base.
-SERIES_RC_BASE="7.2-rc5"
+SERIES_RC_BASE="7.2-rc6"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFINITY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
