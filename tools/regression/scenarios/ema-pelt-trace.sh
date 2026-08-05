@@ -69,7 +69,7 @@ perf script -i /tmp/ema-pelt-perf.data 2>/dev/null | awk '
 	/switch/ { if (match($0, /next_pid=[0-9]+/)) {
 			n = substr($0, RSTART + 9, RLENGTH - 9);
 			if (wake[n] != "") { lat[++cnt] = ($4 - wake[n]) * 1000000; wake[n] = "" } } }
-	END { for (k = 1; k <= cnt; k++) print lat[k]; print cnt }
+	END { for (k = 1; k <= cnt; k++) print lat[k] > "/tmp/ema-pelt-lats.txt"; print cnt }
 ' > /tmp/ema-pelt-count.txt
 
 cnt=$(cat /tmp/ema-pelt-count.txt)
