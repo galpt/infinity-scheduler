@@ -16,6 +16,7 @@ wait "$srv" 2>/dev/null
 
 # netperf TCP_RR reports transactions/s in the last column of the result row
 rate=$(printf '%s\n' "$out" | awk 'NR>5 && $1 ~ /^[0-9]/ {print $NF; exit}')
+rate=${rate%%.*}   # netperf prints decimals; [ -gt ] needs an integer
 
 if [ -z "$rate" ]; then
 	echo "RESULT socket-latency FAIL no-rate 0 netperf-parse-error"
