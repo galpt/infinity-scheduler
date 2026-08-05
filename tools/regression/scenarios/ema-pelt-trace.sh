@@ -64,10 +64,12 @@ perf record -a -e sched:sched_wakeup,sched:sched_switch -o /tmp/ema-pelt-perf.da
 	-- sleep 10 >/dev/null 2>&1 || { echo "RESULT ema-pelt-trace WARN perf-failed 0"; exit 0; }
 
 perf script -i /tmp/ema-pelt-perf.data 2>/dev/null | awk '
-	/wakeup/ { split($0,a,"pid="); split(a[2],b,","); wake[b[1]]=$4 }
-	/switch/ { split($0,a,"next_pid="); split(a[2],b,","); n=b[1];
-		   if (wake[n] != "") { lat[n]=$4-wake[n]; wake[n]=""; cnt++ } }
-	END { for (k in lat) print lat[k] > "/tmp/ema-pelt-lats.txt"; print cnt }
+	/wakeup/ { if (match($0, /pid=[0-9]+/))
+			wake[substr($0, RSTART + 4, RLENGTH - 4)] = $4 }
+	/switch/ { if (match($0, /next_pid=[0-9]+/)) {
+			n = substr($0, RSTART + 9, RLENGTH - 9);
+			if (wake[n] != "") { lat[++cnt] = ($4 - wake[n]) * 1000000; wake[n] = "" } } }
+	END { for (k = 1; k <= cnt; k++) print lat[k]; print cnt }
 ' > /tmp/ema-pelt-count.txt
 
 cnt=$(cat /tmp/ema-pelt-count.txt)
