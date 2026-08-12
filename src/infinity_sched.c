@@ -223,11 +223,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	 * buffer is sized from the same measurements, so the output can
 	 * never be truncated either.
 	 */
-	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[7];
+	struct infinity_stats_row *all_rows, *cpu_rows, *rt_rows, *gpu_rows;
 	struct infinity_stats_section sections[3] = {
-		{ "CPU", cpu_rows, 10 },
-		{ "RT",  rt_rows,  1 },
-		{ "GPU", gpu_rows, 7 },
+		{ "CPU", NULL,     10 },
+		{ "RT",  NULL,     1  },
+		{ "GPU", NULL,     7  },
 	};
 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
 	u64 gic, gcca, gpbo, gldr, icf, ismt;
@@ -239,6 +239,18 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 
 	if (write)
 		return -EROFS;
+	/* Allocate all rows in one block to keep stack frame small */
+	all_rows = kmalloc_array(18, sizeof(*all_rows), GFP_KERNEL);
+	if (!all_rows)
+		return -ENOMEM;
+
+	cpu_rows = all_rows;
+	rt_rows  = all_rows + 10;
+	gpu_rows = all_rows + 11;
+
+	sections[0].rows = cpu_rows;
+	sections[1].rows = rt_rows;
+	sections[2].rows = gpu_rows;
 
 	fbc  = infinity_stats_total(&infinity_futex_boost_count);
 	emc  = infinity_stats_total(&infinity_ema_climb_count);
@@ -403,8 +415,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 
 	buf = kmalloc(bufsz, GFP_KERNEL);
 	if (!buf)
+	{
+		kfree(all_rows);
 		return -ENOMEM;
-
+	}
 	off = scnprintf(buf, bufsz, "Infinity Scheduler %s\n\n",
 			infinity_version);
 
@@ -461,6 +475,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 		proc_dostring(&tmp, write, buffer, lenp, ppos);
 	}
 	kfree(buf);
+	kfree(all_rows);
 	return 0;
 }
 /* ------------------------------------------------------------------ */
