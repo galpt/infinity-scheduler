@@ -42,6 +42,8 @@
 #ifndef __INFINITY_SCHED_H
 #define __INFINITY_SCHED_H
 #include <linux/math64.h>
+#include <linux/sched/prio.h>
+#include <linux/sched/topology.h>
 #include <linux/sched.h>
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -84,8 +86,9 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
 		return INFINITY_FP_ONE / 2;
 	if (sleep_ns >= INFINITY_IPC_GRADIENT_MAX_NS)
 		return 0;
-	return div64_u64((span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS)) *
-			 INFINITY_FP_ONE / 2, span);
+	u64 diff = span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS);
+	/* Use mul_u64_u32_div for better precision and efficiency */
+	return mul_u64_u32_div(diff, INFINITY_FP_ONE / 2, span);
 }
 /**
  * Weight reduction slope: effective = base × (100 - pct × 98/100) / 100.
@@ -129,13 +132,16 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 	if (task_has_idle_policy(p))
 		return scale_load(WEIGHT_IDLEPRIO);
 
+	int idx = p->static_prio - MAX_RT_PRIO;
+	if (idx < 0 || idx >= ARRAY_SIZE(sched_prio_to_weight))
+		return scale_load(WEIGHT_IDLEPRIO);
+
+	u32 base = scale_load(sched_prio_to_weight[idx]);
+
 #ifdef CONFIG_UCLAMP_TASK
 	if (p->uclamp_req[UCLAMP_MIN].value > 0)
-		return scale_load(sched_prio_to_weight[p->static_prio - MAX_RT_PRIO]);
+		return base;
 #endif
-
-	int idx = p->static_prio - MAX_RT_PRIO;
-	u32 base = scale_load(sched_prio_to_weight[idx]);
 
 	if (ema > INFINITY_BUDGET_MAX_NS)
 		ema = INFINITY_BUDGET_MAX_NS;

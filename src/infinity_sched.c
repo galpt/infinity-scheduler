@@ -566,14 +566,20 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
 	if (delta_ns > INFINITY_BUDGET_MAX_NS)
 		delta_ns = INFINITY_BUDGET_MAX_NS;
 
-	step = div64_u64((INFINITY_BUDGET_MAX_NS - ema) * delta_ns * alpha,
-			 INFINITY_BUDGET_MAX_NS * INFINITY_FP_ONE);
 	/*
-	 * With alpha up to 4096 (FP_ONE = 256) the step can exceed the
-	 * remaining gap to the ceiling, which would push ema past
-	 * INFINITY_BUDGET_MAX_NS (the weight math clamps it downstream,
-	 * but the raw value must stay within [0, BUDGET] so the
-	 * /proc/<pid>/infinity reading and the EMA invariants hold).
+	 * Safe from u64 overflow: (BUDGET * delta) is at most ~10^16.
+	 * Divide by BUDGET first, then multiply by alpha (4096) and divide by FP_ONE.
+	 * Use mul_u64_u32_div to make the division by FP_ONE (u32) more efficient.
+	 */
+
+	step = div64_u64((INFINITY_BUDGET_MAX_NS - ema) * delta_ns,
+			INFINITY_BUDGET_MAX_NS);
+	step = mul_u64_u32_div(step, alpha, INFINITY_FP_ONE);
+
+	/*
+	 * Clamp the step so it does not exceed the BUDGET_MAX ceiling. With the new
+	 * EMA algorithm, the step is guaranteed not to overflow, so this clamp
+	 * is sufficient to safely handle upper-bound edge cases.
 	 */
 	if (step > INFINITY_BUDGET_MAX_NS - ema)
 		step = INFINITY_BUDGET_MAX_NS - ema;
