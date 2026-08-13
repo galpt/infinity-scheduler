@@ -16,7 +16,7 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 │   ├── arch/7.1/             47 patches — Vanilla kernel.org 7.1
 │   ├── arch/7.2/             37 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
 │   ├── fedora/7.0/           48 patches — Fedora kernel-ark archived-7.0
-│   └── cachyos/7.1/          47 patches — CachyOS (community-maintained series)
+│   └── cachyos/7.1/          47 patches — CachyOS kernel fork (cachyos-7.1.5-1)
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -30,7 +30,8 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 >   verified on real hardware. If you encounter issues or have a working
 >   configuration for another bootloader, a pull request is welcome.
 > - The install script targets **vanilla Arch Linux**. For **CachyOS**,
->   apply the series under `patches/cachyos/7.1/` manually.
+>   apply the series under `patches/cachyos/7.1/` manually (built for the
+>   CachyOS 7.1.5 kernel fork).
 
 ```bash
 # 1. Clone the repo (v4.8-gpu: IPC-wakeup boost, continuous cgroup shield with cross-CPU detection, RT valve hysteresis, PELT diagnostics — all always-on, no new knobs)
