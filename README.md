@@ -11,11 +11,11 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 .
 ├── src/                    ★ Reference implementation (kernel/sched/infinity_sched.[ch])
 ├── patches/
-│   ├── arch/6.18/            48 patches — Vanilla kernel.org 6.18
-│   ├── arch/7.0/             47 patches — Vanilla kernel.org 7.0
-│   ├── arch/7.1/             47 patches — Vanilla kernel.org 7.1
-│   ├── arch/7.2/             37 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
-│   ├── fedora/7.0/           48 patches — Fedora kernel-ark archived-7.0
+│   ├── arch/6.18/            49 patches — Vanilla kernel.org 6.18
+│   ├── arch/7.0/             48 patches — Vanilla kernel.org 7.0
+│   ├── arch/7.1/             48 patches — Vanilla kernel.org 7.1
+│   ├── arch/7.2/             38 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
+│   ├── fedora/7.0/           49 patches — Fedora kernel-ark archived-7.0
 │   └── cachyos/7.1/          47 patches — CachyOS kernel fork (cachyos-7.1.5-1)
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
@@ -320,3 +320,4 @@ GPL-2.0
 - **[lostf1sh](https://github.com/lostf1sh)** — Bug reports and code review, helping identify issues and improve the scheduler's correctness.
 - **[RiverOnVenus](https://github.com/RiverOnVenus)** — Code review, helping identify issues and improve the scheduler's correctness.
 - **[dim-geo](https://github.com/dim-geo)** — CachyOS packaging: contributed the adapted 7.1 patch series under `patches/cachyos/7.1/`.
+- **[sxlmnwb](https://github.com/sxlmnwb)** — Salman Wahib, for moving the `infinity_stats` rows to a heap allocation, fixing the stack frame warning and the error-path cleanup.
