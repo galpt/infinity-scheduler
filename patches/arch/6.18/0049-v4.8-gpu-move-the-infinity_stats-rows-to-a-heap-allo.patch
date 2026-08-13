@@ -1,0 +1,87 @@
+From cb3f4680b530ff23fccc49a5fad8769c0de98108 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Thu, 13 Aug 2026 21:31:11 +0700
+Subject: [PATCH 49/49] v4.8-gpu: move the infinity_stats rows to a heap
+ allocation
+
+infinity_stats_proc_handler() declared the 18 stats rows (10 CPU + 1 RT +
+7 GPU) on the stack, pushing the frame past the 2048 byte kernel stack
+safety limit.  Allocate the rows in one kmalloc_array block instead and
+point the sections[] rows at the block, then free it on both the
+buffer-allocation error path and the success path.
+
+Adapted from the contribution by Salman Wahib (sxlmnwb) via PR #19, with
+the allocation count tied to the per-arch table layout (10 + 1 + 7 on the
+7.1 layout, 10 + 1 + 5 on 7.2) and K&R braces on the error path.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 29 ++++++++++++++++++++++++-----
+ 1 file changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index b9eca42fc..07f7e81fe 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -223,11 +223,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	 * buffer is sized from the same measurements, so the output can
+ 	 * never be truncated either.
+ 	 */
+-	struct infinity_stats_row cpu_rows[10], rt_rows[1], gpu_rows[7];
++	struct infinity_stats_row *all_rows, *cpu_rows, *rt_rows, *gpu_rows;
+ 	struct infinity_stats_section sections[3] = {
+-		{ "CPU", cpu_rows, 10 },
+-		{ "RT",  rt_rows,  1 },
+-		{ "GPU", gpu_rows, 7 },
++		{ "CPU", NULL,     10 },
++		{ "RT",  NULL,     1  },
++		{ "GPU", NULL,     7  },
+ 	};
+ 	u64 fbc, emc, wkc, rtc, gcb, gapp, gskp;
+ 	u64 gic, gcca, gpbo, gldr, icf, ismt;
+@@ -240,6 +240,22 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	if (write)
+ 		return -EROFS;
+ 
++	/* Allocate all rows in one block to keep the stack frame small:
++	 * 10 CPU + 1 RT + 7 GPU rows, matching the nrows literals in
++	 * sections[] above.
++	 */
++	all_rows = kmalloc_array(10 + 1 + 7, sizeof(*all_rows), GFP_KERNEL);
++	if (!all_rows)
++		return -ENOMEM;
++
++	cpu_rows = all_rows;
++	rt_rows  = all_rows + 10;
++	gpu_rows = all_rows + 11;
++
++	sections[0].rows = cpu_rows;
++	sections[1].rows = rt_rows;
++	sections[2].rows = gpu_rows;
++
+ 	fbc  = infinity_stats_total(&infinity_futex_boost_count);
+ 	emc  = infinity_stats_total(&infinity_ema_climb_count);
+ 	wkc  = infinity_stats_total(&infinity_wakeup_count);
+@@ -402,8 +418,10 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 	bufsz += 256;
+ 
+ 	buf = kmalloc(bufsz, GFP_KERNEL);
+-	if (!buf)
++	if (!buf) {
++		kfree(all_rows);
+ 		return -ENOMEM;
++	}
+ 
+ 	off = scnprintf(buf, bufsz, "Infinity Scheduler %s\n\n",
+ 			infinity_version);
+@@ -461,6 +479,7 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
+ 		proc_dostring(&tmp, write, buffer, lenp, ppos);
+ 	}
+ 	kfree(buf);
++	kfree(all_rows);
+ 	return 0;
+ }
+ /* ------------------------------------------------------------------ */
+-- 
+2.55.0
+

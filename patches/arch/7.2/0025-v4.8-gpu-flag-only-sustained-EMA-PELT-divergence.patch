@@ -1,7 +1,7 @@
 From a3fac60af456e8745b5f95f5278aa2f0cac9d2a5 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:22:50 +0700
-Subject: [PATCH 25/37] v4.8-gpu: flag only sustained EMA/PELT divergence
+Subject: [PATCH 25/38] v4.8-gpu: flag only sustained EMA/PELT divergence
 
 The divergence diagnostic bumped the per-CPU counter on every sleep
 transition where |ema_pct - util_pct| exceeded 50 percentage points.

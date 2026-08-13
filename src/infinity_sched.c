@@ -239,8 +239,12 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 
 	if (write)
 		return -EROFS;
-	/* Allocate all rows in one block to keep stack frame small */
-	all_rows = kmalloc_array(18, sizeof(*all_rows), GFP_KERNEL);
+
+	/* Allocate all rows in one block to keep the stack frame small:
+	 * 10 CPU + 1 RT + 7 GPU rows, matching the nrows literals in
+	 * sections[] above.
+	 */
+	all_rows = kmalloc_array(10 + 1 + 7, sizeof(*all_rows), GFP_KERNEL);
 	if (!all_rows)
 		return -ENOMEM;
 
@@ -414,11 +418,11 @@ static int infinity_stats_proc_handler(const struct ctl_table *ctl, int write,
 	bufsz += 256;
 
 	buf = kmalloc(bufsz, GFP_KERNEL);
-	if (!buf)
-	{
+	if (!buf) {
 		kfree(all_rows);
 		return -ENOMEM;
 	}
+
 	off = scnprintf(buf, bufsz, "Infinity Scheduler %s\n\n",
 			infinity_version);
 

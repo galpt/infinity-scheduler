@@ -1,7 +1,7 @@
 From 4fe9b18ab625b98a796416580cec88018b510cd3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:10:49 +0700
-Subject: [PATCH 23/48] v4.7-gpu: apply cgroup EMA decay when a migrated task
+Subject: [PATCH 23/49] v4.7-gpu: apply cgroup EMA decay when a migrated task
  ends an idle period
 
 The group EMA idle window (group_ema_sleep_start) was only consumed on

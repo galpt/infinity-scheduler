@@ -1,7 +1,7 @@
 From 3baa41504f91dd57596e8f475e788b5050bc54c7 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:27:40 +0700
-Subject: [PATCH 09/47] v4.6-gpu: add GPU-to-CPU feedback via gpu_passovers
+Subject: [PATCH 09/48] v4.6-gpu: add GPU-to-CPU feedback via gpu_passovers
 
 Add a closed-loop feedback path from the GPU scheduler back to the
 CPU side to break compounding GPU+CPU starvation:

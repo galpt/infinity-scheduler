@@ -1,7 +1,7 @@
 From 9ca0cbeed4801a6e9cc82925aa53e6c2618e3c32 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 5 Aug 2026 00:11:23 +0700
-Subject: [PATCH 36/37] v4.8-gpu: pair the remaining lockless infinity_ctx
+Subject: [PATCH 36/38] v4.8-gpu: pair the remaining lockless infinity_ctx
  reads
 
 The security re-review found three residual lockless infinity_ctx reads of

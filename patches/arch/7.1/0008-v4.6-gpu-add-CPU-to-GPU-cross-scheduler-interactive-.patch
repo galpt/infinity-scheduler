@@ -1,7 +1,7 @@
 From 80faf64ebabf68b5f907068817cddc40ac060a01 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:23:31 +0700
-Subject: [PATCH 08/47] v4.6-gpu: add CPU-to-GPU cross-scheduler interactive
+Subject: [PATCH 08/48] v4.6-gpu: add CPU-to-GPU cross-scheduler interactive
  coupling
 
 Add a pid-based cross-scheduler signal path from the CPU scheduler to

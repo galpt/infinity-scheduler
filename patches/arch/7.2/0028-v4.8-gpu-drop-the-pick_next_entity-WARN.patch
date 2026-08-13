@@ -1,7 +1,7 @@
 From ce6c0d21cc883baecb7bff3c0aaf38146ddcaf28 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:25:16 +0700
-Subject: [PATCH 28/37] v4.8-gpu: drop the pick_next_entity WARN
+Subject: [PATCH 28/38] v4.8-gpu: drop the pick_next_entity WARN
 
 pick_eevdf() legitimately returns NULL when every queued entity is
 ineligible -- the protect path and the tight-deadline windows produced by

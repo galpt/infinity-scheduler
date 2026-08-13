@@ -1,7 +1,7 @@
 From eda1fbe08a176233030c65525e9cdf35becde2d8 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:29:11 +0700
-Subject: [PATCH 25/47] v4.8-gpu: harden the EMA math
+Subject: [PATCH 25/48] v4.8-gpu: harden the EMA math
 
 Clamp the task EMA climb step at the remaining gap to the budget
 ceiling: with the hardware-adaptive alpha at 4096 and FP_ONE at 256 a

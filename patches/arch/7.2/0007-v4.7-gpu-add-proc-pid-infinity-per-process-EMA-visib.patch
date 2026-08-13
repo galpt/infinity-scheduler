@@ -1,7 +1,7 @@
 From 32fa09cac776802f122d46fe12f6092ffa65b1a3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 28 Jul 2026 07:12:37 +0700
-Subject: [PATCH 07/37] v4.7-gpu: add /proc/<pid>/infinity per-process EMA
+Subject: [PATCH 07/38] v4.7-gpu: add /proc/<pid>/infinity per-process EMA
  visibility
 
 Show ema, rt_ema, futex_waiting, and gpu_passovers for each process.

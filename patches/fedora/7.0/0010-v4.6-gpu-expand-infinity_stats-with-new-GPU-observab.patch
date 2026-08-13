@@ -1,7 +1,7 @@
 From b750055abb1051a4c87c534ef998a7d9c5213661 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sun, 26 Jul 2026 16:34:53 +0700
-Subject: [PATCH 10/48] v4.6-gpu: expand infinity_stats with new GPU
+Subject: [PATCH 10/49] v4.6-gpu: expand infinity_stats with new GPU
  observability counters
 
 Add four new counters to infinity_stats for diagnosing GPU scheduling

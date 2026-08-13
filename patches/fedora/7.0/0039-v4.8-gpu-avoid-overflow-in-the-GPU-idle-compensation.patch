@@ -1,7 +1,7 @@
 From c4defcd7809daacf93671fdcadabd7f8e74e419b Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:24:56 +0700
-Subject: [PATCH 39/48] v4.8-gpu: avoid overflow in the GPU idle compensation
+Subject: [PATCH 39/49] v4.8-gpu: avoid overflow in the GPU idle compensation
  blend
 
 The idle-compensation blend multiplied min_gpu_vtime (and

@@ -1,7 +1,7 @@
 From bd9ae45ad6546108603dcffb0b719019d6791c20 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:48:43 +0700
-Subject: [PATCH 32/48] v4.8-gpu: expose PELT divergence diagnostics in the
+Subject: [PATCH 32/49] v4.8-gpu: expose PELT divergence diagnostics in the
  stats surfaces
 
 Observability only, no control path.  Three per-task PELT fields are

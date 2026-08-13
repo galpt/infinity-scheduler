@@ -1,7 +1,7 @@
 From 7fa857e75a054f9fdc8768d0378c32d57c2db622 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:36:31 +0700
-Subject: [PATCH 30/47] v4.8-gpu: gate GPU coupling on the fair scheduler class
+Subject: [PATCH 30/48] v4.8-gpu: gate GPU coupling on the fair scheduler class
 
 The GPU scheduler's CPU<->GPU coupling reads the EMA and futex state
 of the task behind each DRM entity.  infinity_pid resolves to the
