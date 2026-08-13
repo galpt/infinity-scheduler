@@ -15,7 +15,8 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 │   ├── arch/7.0/             47 patches — Vanilla kernel.org 7.0
 │   ├── arch/7.1/             47 patches — Vanilla kernel.org 7.1
 │   ├── arch/7.2/             37 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
-│   └── fedora/7.0/           48 patches — Fedora kernel-ark archived-7.0
+│   ├── fedora/7.0/           48 patches — Fedora kernel-ark archived-7.0
+│   └── cachyos/7.1/          47 patches — CachyOS (community-maintained series)
 ├── tools/                     Install script, build helpers, patch fixers
 ├── CONTRIBUTING.md
 └── LICENSE
@@ -24,7 +25,12 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 ## Quick start
 
 > [!NOTE]
-> The install script below is tested and working with the **Limine** bootloader. Support for **GRUB** and **systemd-boot** has been added but not yet tested on real hardware. If you encounter issues or have a working version for your bootloader, please send a pull request.
+> - The install script is tested and working with the **Limine** bootloader.
+>   **GRUB** and **systemd-boot** support is included but has not yet been
+>   verified on real hardware. If you encounter issues or have a working
+>   configuration for another bootloader, a pull request is welcome.
+> - The install script targets **vanilla Arch Linux**. For **CachyOS**,
+>   apply the series under `patches/cachyos/7.1/` manually.
 
 ```bash
 # 1. Clone the repo (v4.8-gpu: IPC-wakeup boost, continuous cgroup shield with cross-CPU detection, RT valve hysteresis, PELT diagnostics — all always-on, no new knobs)
@@ -312,3 +318,4 @@ GPL-2.0
 - **[u3z05en](https://github.com/u3z05en)** — Jonathan, for helping with the code review, addressing several subtle issues that made Infinity more correct and robust.
 - **[lostf1sh](https://github.com/lostf1sh)** — Bug reports and code review, helping identify issues and improve the scheduler's correctness.
 - **[RiverOnVenus](https://github.com/RiverOnVenus)** — Code review, helping identify issues and improve the scheduler's correctness.
+- **[dim-geo](https://github.com/dim-geo)** — CachyOS packaging: contributed the adapted 7.1 patch series under `patches/cachyos/7.1/`.
