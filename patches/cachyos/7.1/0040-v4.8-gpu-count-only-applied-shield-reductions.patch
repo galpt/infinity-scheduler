@@ -19,7 +19,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index df614a62b..92c932fac 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -4338,6 +4338,7 @@ static void update_cfs_group(struct sched_entity *se)
+@@ -4348,6 +4348,7 @@ static void update_cfs_group(struct sched_entity *se)
  {
  	struct cfs_rq *gcfs_rq = group_cfs_rq(se);
  	long shares;
@@ -27,7 +27,7 @@ index df614a62b..92c932fac 100644
  
  	/*
  	 * When a group becomes empty, preserve its weight. This matters for
-@@ -4411,13 +4412,22 @@ static void update_cfs_group(struct sched_entity *se)
+@@ -4421,13 +4422,22 @@ static void update_cfs_group(struct sched_entity *se)
  				long reduced = shares * (100ULL - red) / 100ULL;
  
  				shares = max_t(long, reduced, MIN_SHARES);

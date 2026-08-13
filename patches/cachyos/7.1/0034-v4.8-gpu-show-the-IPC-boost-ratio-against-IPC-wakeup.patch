@@ -20,7 +20,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 28ea0d5dc..cca5e23c3 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7565,6 +7565,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7575,6 +7575,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
  
  		p->infinity.futex_waiting = false;

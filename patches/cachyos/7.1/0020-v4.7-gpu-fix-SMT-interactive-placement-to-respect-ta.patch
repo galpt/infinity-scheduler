@@ -23,7 +23,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 4fbef41d3..b5a13ab3d 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -9105,7 +9105,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9218,7 +9218,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			int primary = cpumask_first(
  				topology_sibling_cpumask(new_cpu));
  

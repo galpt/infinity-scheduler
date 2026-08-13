@@ -23,7 +23,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 70333ae29..c82bb19ce 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -1492,10 +1492,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1502,10 +1502,15 @@ static void update_curr(struct cfs_rq *cfs_rq)
  
  			if (delta > INFINITY_CGROUP_EMA_CLIMB_NS)
  				delta = INFINITY_CGROUP_EMA_CLIMB_NS;
@@ -39,7 +39,7 @@ index 70333ae29..c82bb19ce 100644
  		}
  	}
  
-@@ -7338,13 +7343,28 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7348,13 +7353,28 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  
  		if (pcfs_rq->group_ema_sleep_start) {
  			u64 now = rq_clock(rq_of(pcfs_rq));

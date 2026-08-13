@@ -40,7 +40,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index cca5e23c3..2cf705aa9 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7733,7 +7733,10 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7743,7 +7743,10 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  
  	/* Infinity: EMA vs PELT divergence diagnostic (observability only).
  	 * One compare per sleep; flags tasks whose EMA classification
@@ -52,7 +52,7 @@ index cca5e23c3..2cf705aa9 100644
  	 */
  	if (flags & DEQUEUE_SLEEP) {
  		u64 ema = READ_ONCE(p->infinity.ema);
-@@ -7742,8 +7745,14 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7752,8 +7755,14 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  						INFINITY_BUDGET_MAX_NS);
  		u64 diff = ema_units > util ? ema_units - util : util - ema_units;
  

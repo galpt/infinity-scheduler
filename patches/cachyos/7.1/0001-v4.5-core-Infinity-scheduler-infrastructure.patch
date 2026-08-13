@@ -27,7 +27,7 @@ diff --git a/MAINTAINERS b/MAINTAINERS
 index f74da6422..91425a767 100644
 --- a/MAINTAINERS
 +++ b/MAINTAINERS
-@@ -29492,3 +29492,10 @@ S:	Buried alive in reporters
+@@ -29517,3 +29517,10 @@ S:	Buried alive in reporters
  T:	git git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
  F:	*
  F:	*/
@@ -124,7 +124,7 @@ index 69c2aa8c6..c1fcbb3e3 100644
  #include "smp.h"
  
  #include "../workqueue_internal.h"
-@@ -4743,6 +4744,12 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
+@@ -4746,6 +4747,12 @@ int sched_fork(u64 clone_flags, struct task_struct *p)
  
  	init_entity_runnable_average(&p->se);
  

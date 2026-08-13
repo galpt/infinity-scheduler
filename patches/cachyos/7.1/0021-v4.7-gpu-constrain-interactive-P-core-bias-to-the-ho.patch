@@ -23,7 +23,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index b5a13ab3d..1a862143c 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -9028,10 +9028,14 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9134,10 +9134,14 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			return cpu;
  
  		/*
@@ -42,7 +42,7 @@ index b5a13ab3d..1a862143c 100644
  		 *
  		 * Lockless read of p->infinity.ema: only p->pi_lock is held
  		 * here, not rq->lock.  READ_ONCE prevents compiler tearing
-@@ -9039,17 +9043,36 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9145,17 +9149,36 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		 */
  		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
  			struct asym_cap_data *entry;

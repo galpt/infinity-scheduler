@@ -20,7 +20,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 92c932fac..6b3364748 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7496,8 +7496,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7506,8 +7506,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	int rq_h_nr_queued = rq->cfs.h_nr_queued;
  	u64 slice = 0;
  

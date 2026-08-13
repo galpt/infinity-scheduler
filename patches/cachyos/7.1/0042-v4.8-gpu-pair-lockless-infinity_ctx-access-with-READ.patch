@@ -46,7 +46,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 6b3364748..84acdcbdf 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5675,13 +5675,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5685,13 +5685,13 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	 * reducing IPC wakeup latency.
  	 */
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
@@ -62,7 +62,7 @@ index 6b3364748..84acdcbdf 100644
  	    !(task_of(se)->flags & PF_KTHREAD)) {
  		/* Infinity: IPC candidates -- all wait_woken wakeups. */
  		u64 now = rq_clock(rq_of(cfs_rq));
-@@ -6018,7 +6018,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -6028,7 +6028,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	if (entity_is_task(se)) {
  		struct task_struct *p = task_of(se);
  
@@ -71,7 +71,7 @@ index 6b3364748..84acdcbdf 100644
  			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
  			atomic64_inc(this_cpu_ptr(&infinity_cpufreq_interactive_count));
  		}
-@@ -7436,9 +7436,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7446,9 +7446,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	/* Infinity: EMA decay on wakeup */
  	if (flags & ENQUEUE_WAKEUP) {
  		u64 now = rq_clock(rq_of(task_cfs_rq(p)));
@@ -84,7 +84,7 @@ index 6b3364748..84acdcbdf 100644
  	}
  #ifdef CONFIG_FAIR_GROUP_SCHED
  	/*
-@@ -7450,7 +7451,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7460,7 +7461,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (flags & (ENQUEUE_WAKEUP | ENQUEUE_MIGRATED)) {
  		struct cfs_rq *pcfs_rq = cfs_rq_of(&p->se);
  
@@ -93,7 +93,7 @@ index 6b3364748..84acdcbdf 100644
  			u64 now = rq_clock(rq_of(pcfs_rq));
  
  			/*
-@@ -7461,18 +7462,20 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7471,18 +7472,20 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  			 * the EMA -- the safe direction, same pattern as the task
  			 * (fair.c) and RT paths.
  			 */
@@ -120,7 +120,7 @@ index 6b3364748..84acdcbdf 100644
  			}
  			/* Shield v2: any decay may invalidate the tg-wide max; the
  			 * local rq cannot know it is the max-holder cheaply, so mark
-@@ -7486,7 +7489,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7496,7 +7499,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  					WRITE_ONCE(tg->infinity_shield.shield_ema_max_stale,
  						   true);
  			}
@@ -129,7 +129,7 @@ index 6b3364748..84acdcbdf 100644
  		}
  	}
  #endif
-@@ -7583,11 +7586,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7593,11 +7596,11 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  
  	if (flags & ENQUEUE_WAKEUP) {
  		/* Check futex_waiting before clearing -- triggers freq ramp for IPC wakeups */
@@ -144,7 +144,7 @@ index 6b3364748..84acdcbdf 100644
  
  		if (p->in_iowait)
  			cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
-@@ -7743,7 +7746,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7753,7 +7756,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	/* Infinity: record sleep start */
  	if (flags & DEQUEUE_SLEEP)
@@ -153,7 +153,7 @@ index 6b3364748..84acdcbdf 100644
  
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
-@@ -7787,7 +7790,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7797,7 +7800,7 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	 * start so enqueue_task_fair can decay group_ema on next wakeup.
  	 */
  	if ((flags & DEQUEUE_SLEEP) && cfs_rq_of(&p->se)->nr_queued == 0)
@@ -162,7 +162,7 @@ index 6b3364748..84acdcbdf 100644
  #endif
  
  	/*
-@@ -9299,7 +9302,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9412,7 +9415,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		 * This prevents an interactive task from sharing execution
  		 * units with a batch task on the other SMT thread.
  		 */

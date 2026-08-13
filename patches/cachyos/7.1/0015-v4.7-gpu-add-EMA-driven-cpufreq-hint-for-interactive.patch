@@ -15,11 +15,11 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
 ---
  include/linux/sched/cpufreq.h    |  1 +
  kernel/sched/cpufreq_schedutil.c | 12 +++++++++---
- kernel/sched/fair.c              | 26 +++++++++++++++++++++++---
- 3 files changed, 33 insertions(+), 6 deletions(-)
+ kernel/sched/fair.c              | 20 ++++++++++++++++++--
+ 3 files changed, 28 insertions(+), 5 deletions(-)
 
-index bdd31ab93..336dc2366 100644
 diff --git a/include/linux/sched/cpufreq.h b/include/linux/sched/cpufreq.h
+index bdd31ab93..336dc2366 100644
 --- a/include/linux/sched/cpufreq.h
 +++ b/include/linux/sched/cpufreq.h
 @@ -9,6 +9,7 @@
@@ -31,7 +31,7 @@ diff --git a/include/linux/sched/cpufreq.h b/include/linux/sched/cpufreq.h
  #ifdef CONFIG_CPU_FREQ
  struct cpufreq_policy;
 diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
-diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
+index a4e689eef..985a91ede 100644
 --- a/kernel/sched/cpufreq_schedutil.c
 +++ b/kernel/sched/cpufreq_schedutil.c
 @@ -265,27 +265,33 @@ static bool sugov_iowait_reset(struct sugov_cpu *sg_cpu, u64 time,
@@ -72,10 +72,10 @@ diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
  		return;
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 8ee8ba358..b2ff7fce8 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5905,7 +5905,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5915,7 +5915,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  		struct task_struct *p = task_of(se);
  
  		if (p->infinity.ema == 0)
@@ -84,40 +84,31 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
  	}
  
  	return se;
-@@ -9090,8 +9090,28 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9204,7 +9204,24 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		if (is_idle_core(prev_cpu, p))
+ 			return prev_cpu;
  
-        /* Fast path */
-        if (wake_flags & WF_TTWU) {
--               /*
--                * If the previous CPU is an idle core, retain the same for
--                * cache locality. Otherwise, search for an idle sibling.
--                */
--               if (is_idle_core(prev_cpu, p))
--                       return prev_cpu;
-+               new_cpu = select_idle_sibling(p, prev_cpu, new_cpu, sync);
+-		return select_idle_sibling(p, prev_cpu, new_cpu, sync);
++		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu, sync);
 +
-+#ifdef CONFIG_INFINITY_SCHED
-+               /* SMT interactive placement: if the selected CPU is an SMT
-+                * thread with a busy sibling, and the waking task has low
-+                * EMA, try the primary thread of the same core instead.
-+                * This prevents an interactive task from sharing execution
-+                * units with a batch task on the other SMT thread.
-+                */
-+               if (sched_smt_active() && p->infinity.ema < 1000) {
-+                       int primary = cpumask_first(
-+                               topology_sibling_cpumask(new_cpu));
++		/* SMT interactive placement: if the selected CPU is an SMT
++		 * thread with a busy sibling, and the waking task has low
++		 * EMA, try the primary thread of the same core instead.
++		 * This prevents an interactive task from sharing execution
++		 * units with a batch task on the other SMT thread.
++		 */
++		if (sched_smt_active() && p->infinity.ema < 1000) {
++			int primary = cpumask_first(
++				topology_sibling_cpumask(new_cpu));
 +
-+                       if (primary != new_cpu &&
-+                           cpu_rq(primary)->nr_running == 0)
-+                               new_cpu = primary;
-+               }
-+#endif
++			if (primary != new_cpu &&
++			    cpu_rq(primary)->nr_running == 0)
++				new_cpu = primary;
++		}
++
++		return new_cpu;
+ 	}
  
--               return select_idle_sibling(p, prev_cpu, new_cpu, sync);
-+               return new_cpu;
-        }
- 
-        return new_cpu;
+ 	return new_cpu;
 -- 
 2.55.0
-

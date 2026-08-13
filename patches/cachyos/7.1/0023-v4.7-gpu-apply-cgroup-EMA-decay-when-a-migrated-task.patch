@@ -22,7 +22,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 0b6f803f7..bd1ab7691 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7325,28 +7325,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7335,28 +7335,30 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  
  		if (p->infinity.last_sleep_ns && now > p->infinity.last_sleep_ns)
  			infinity_wakeup(&p->infinity, now - p->infinity.last_sleep_ns);

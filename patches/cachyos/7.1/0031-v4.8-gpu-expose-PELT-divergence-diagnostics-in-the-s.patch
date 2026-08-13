@@ -41,7 +41,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 8136c0637..28ea0d5dc 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7730,6 +7730,21 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7740,6 +7740,21 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (!p->se.sched_delayed)
  		util_est_dequeue(&rq->cfs, p);
  

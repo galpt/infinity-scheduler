@@ -106,7 +106,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 1a862143c..0b6f803f7 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5596,7 +5596,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5606,7 +5606,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
  	    task_of(se)->infinity.futex_waiting) {
  		vslice >>= 1;
@@ -115,7 +115,7 @@ index 1a862143c..0b6f803f7 100644
  	}
  
  	/*
-@@ -5906,7 +5906,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5916,7 +5916,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  
  		if (p->infinity.ema == 0) {
  			cpufreq_update_util(rq, SCHED_CPUFREQ_INTERACTIVE);
@@ -124,7 +124,7 @@ index 1a862143c..0b6f803f7 100644
  		}
  	}
  
-@@ -9137,7 +9137,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9250,7 +9250,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  			    cpumask_test_cpu(primary, p->cpus_ptr) &&
  			    available_idle_cpu(primary)) {
  				new_cpu = primary;

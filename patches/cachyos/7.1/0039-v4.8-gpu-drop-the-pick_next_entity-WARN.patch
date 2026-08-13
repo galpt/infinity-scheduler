@@ -19,7 +19,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 2cf705aa9..df614a62b 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5983,7 +5983,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5993,7 +5993,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  
  	se = pick_eevdf(cfs_rq, protect);
  	if (unlikely(!se)) {

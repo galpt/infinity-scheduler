@@ -49,10 +49,10 @@ index 44565014c..98818ff40 100644
  	REG("timens_offsets",  S_IRUGO|S_IWUSR, proc_timens_offsets_operations),
  #endif
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 106f555ba..4fbef41d3 100644
+index b2ff7fce8..a4fdf036c 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5904,8 +5904,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5914,8 +5914,10 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	if (entity_is_task(se)) {
  		struct task_struct *p = task_of(se);
  
@@ -64,15 +64,7 @@ index 106f555ba..4fbef41d3 100644
  	}
  
  	return se;
-@@ -9093,7 +9095,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
- 	if (wake_flags & WF_TTWU) {
- 		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
- 
--#ifdef CONFIG_INFINITY_SCHED
- 		/* SMT interactive placement: if the selected CPU is an SMT
- 		 * thread with a busy sibling, and the waking task has low
- 		 * EMA, try the primary thread of the same core instead.
-@@ -9105,10 +9106,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -9217,8 +9219,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  				topology_sibling_cpumask(new_cpu));
  
  			if (primary != new_cpu &&
@@ -82,10 +74,8 @@ index 106f555ba..4fbef41d3 100644
 +				atomic_inc(&infinity_smt_interactive_count);
 +			}
  		}
--#endif
  
  		return new_cpu;
- 	}
 diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
 index d8badbd07..054865196 100644
 --- a/kernel/sched/infinity_sched.c
@@ -186,4 +176,3 @@ index 346092aa9..36983bd2d 100644
  /* ------------------------------------------------------------------ */
 -- 
 2.55.0
-

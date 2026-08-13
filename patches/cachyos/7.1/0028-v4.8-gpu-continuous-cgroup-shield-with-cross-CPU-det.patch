@@ -30,7 +30,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 5af9b1a90..8136c0637 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -1501,6 +1501,20 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1511,6 +1511,20 @@ static void update_curr(struct cfs_rq *cfs_rq)
  			 * a regression here indicates wraparound/corruption.
  			 */
  			WARN_ON_ONCE(gcfs_rq->group_ema < old);
@@ -51,7 +51,7 @@ index 5af9b1a90..8136c0637 100644
  		}
  	}
  
-@@ -4334,19 +4348,71 @@ static void update_cfs_group(struct sched_entity *se)
+@@ -4344,19 +4358,71 @@ static void update_cfs_group(struct sched_entity *se)
  
  	shares = calc_group_shares(gcfs_rq);
  
@@ -132,7 +132,7 @@ index 5af9b1a90..8136c0637 100644
  		}
  	}
  
-@@ -7393,6 +7459,18 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7403,6 +7469,18 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  				/* Infinity: decay must never raise the EMA. */
  				WARN_ON_ONCE(pcfs_rq->group_ema > old);
  			}

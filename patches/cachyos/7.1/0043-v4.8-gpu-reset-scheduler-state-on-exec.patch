@@ -21,7 +21,7 @@ diff --git a/kernel/sched/core.c b/kernel/sched/core.c
 index c1fcbb3e3..ef6e326a1 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -5518,6 +5518,9 @@ void sched_exec(void)
+@@ -5521,6 +5521,9 @@ void sched_exec(void)
  	struct migration_arg arg;
  	int dest_cpu;
  

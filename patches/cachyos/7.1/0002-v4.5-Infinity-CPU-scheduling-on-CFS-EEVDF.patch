@@ -49,7 +49,7 @@ index abb76775a..9d990726f 100644
  
  /*
   * The initial- and re-scaling of tunables is configurable
-@@ -1244,10 +1264,43 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1254,10 +1274,43 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * For EEVDF the virtual time slope is determined by w_i (iow.
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
@@ -94,7 +94,7 @@ index abb76775a..9d990726f 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
  	 */
-@@ -1424,6 +1477,28 @@ static void update_curr(struct cfs_rq *cfs_rq)
+@@ -1434,6 +1487,28 @@ static void update_curr(struct cfs_rq *cfs_rq)
  	if (unlikely(delta_exec <= 0))
  		return;
  
@@ -123,7 +123,7 @@ index abb76775a..9d990726f 100644
  	curr->vruntime += calc_delta_fair(delta_exec, curr);
  	resched = update_deadline(cfs_rq, curr);
  
-@@ -4253,6 +4328,23 @@ static void update_cfs_group(struct sched_entity *se)
+@@ -4263,6 +4338,23 @@ static void update_cfs_group(struct sched_entity *se)
  		return;
  
  	shares = calc_group_shares(gcfs_rq);
@@ -147,7 +147,7 @@ index abb76775a..9d990726f 100644
  	if (unlikely(se->load.weight != shares))
  		reweight_entity(cfs_rq_of(se), se, shares);
  }
-@@ -5496,6 +5588,15 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5506,6 +5598,15 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
  		vslice /= 2;
  
@@ -163,7 +163,7 @@ index abb76775a..9d990726f 100644
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
  	 */
-@@ -5780,6 +5881,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5790,6 +5891,12 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  	struct sched_entity *se;
  
  	se = pick_eevdf(cfs_rq, protect);
@@ -176,7 +176,7 @@ index abb76775a..9d990726f 100644
  	if (se->sched_delayed) {
  		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
  		/*
-@@ -5787,6 +5894,18 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
+@@ -5797,6 +5904,18 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq, bool protect)
  		 */
  		return NULL;
  	}
@@ -195,7 +195,7 @@ index abb76775a..9d990726f 100644
  	return se;
  }
  
-@@ -7195,6 +7314,35 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7205,6 +7324,35 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
  	struct cfs_rq *cfs_rq;
  	struct sched_entity *se = &p->se;
@@ -231,7 +231,7 @@ index abb76775a..9d990726f 100644
  	int h_nr_idle = task_has_idle_policy(p);
  	int h_nr_runnable = 1;
  	int task_new = !(flags & ENQUEUE_WAKEUP);
-@@ -7279,6 +7427,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7289,6 +7437,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  			h_nr_idle = 1;
  	}
  
@@ -249,7 +249,7 @@ index abb76775a..9d990726f 100644
  	if (!rq_h_nr_queued && rq->cfs.h_nr_queued)
  		dl_server_start(&rq->fair_server);
  
-@@ -7427,6 +7586,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+@@ -7437,6 +7596,10 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
   */
  static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  {
@@ -260,7 +260,7 @@ index abb76775a..9d990726f 100644
  	if (task_is_throttled(p)) {
  		dequeue_throttled_task(p, flags);
  		return true;
-@@ -7438,6 +7601,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -7448,6 +7611,16 @@ static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (dequeue_entities(rq, &p->se, flags) < 0)
  		return false;
  
@@ -277,7 +277,7 @@ index abb76775a..9d990726f 100644
  	/*
  	 * Must not reference @p after dequeue_entities(DEQUEUE_DELAYED).
  	 */
-@@ -8850,6 +9023,31 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+@@ -8956,6 +9129,31 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  		    cpumask_test_cpu(cpu, p->cpus_ptr))
  			return cpu;
  
@@ -309,7 +309,7 @@ index abb76775a..9d990726f 100644
  		if (!is_rd_overutilized(this_rq()->rd)) {
  			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
  			if (new_cpu >= 0)
-@@ -9821,6 +10019,23 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
+@@ -9935,6 +10133,23 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
  		return 0;
  	}
  

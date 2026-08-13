@@ -43,7 +43,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index c82bb19ce..5af9b1a90 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5604,6 +5604,34 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5614,6 +5614,34 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  		atomic64_inc(this_cpu_ptr(&infinity_futex_boost_count));
  	}
  

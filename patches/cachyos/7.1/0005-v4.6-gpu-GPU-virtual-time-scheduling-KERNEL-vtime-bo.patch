@@ -607,7 +607,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 9d990726f..82b53afe0 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5594,8 +5594,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5604,8 +5604,10 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	 * reducing IPC wakeup latency.
  	 */
  	if (entity_is_task(se) && (flags & ENQUEUE_WAKEUP) &&
