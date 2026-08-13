@@ -1,0 +1,131 @@
+From 40f8dda9989e0c8ed6c3b44e6384ae4ecbb174ea Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:24:01 +0700
+Subject: [PATCH 36/47] v4.8-gpu: make the RT valve tickless-safe and report
+ the adaptive RR slice
+
+infinity_rt_consume() clamped the elapsed delta at the 10ms budget, so
+under NO_HZ_FULL a tickless run could only add 1/64 of the remaining gap
+per call and the 95% engage threshold became unreachable in practice.
+Replace the clamp with a saturating time-proportional fold against one
+time constant (INFINITY_RT_TAU_NS = 640ms): identical to the old formula
+for deltas under one tau, saturating at or beyond it, so the RT EMA now
+tracks wall-clock runtime.  The task_tick_rt() comment documents the
+lone-FIFO limitation honestly (native requeue is a no-op for a FIFO alone
+at its priority level; the valve still rate-limits and drives the
+synthetic decay), and the valve state writes use WRITE_ONCE as they can
+come from a remote tick.  get_rr_interval_rt() now reports the adaptive
+SCHED_RR slice to userspace via infinity_rr_timeslice() instead of the
+fixed default.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 33 ++++++++++++++++++++-------------
+ kernel/sched/infinity_sched.h |  2 ++
+ kernel/sched/rt.c             | 15 ++++++++++++---
+ 3 files changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index bb783367e..f7fd49c48 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -641,23 +641,30 @@ void infinity_fork_init(struct infinity_ctx *ctx, u64 now)
+ /* ------------------------------------------------------------------ */
+ void infinity_rt_consume(struct infinity_ctx *ctx, u64 delta_ns)
+ {
+-	u64 step;
++	u64 step, ema;
+ 
+-	if (unlikely(ctx->rt_ema >= INFINITY_RT_BUDGET_NS)) {
+-		ctx->rt_ema = INFINITY_RT_BUDGET_NS;
++	ema = READ_ONCE(ctx->rt_ema);
++	if (unlikely(ema >= INFINITY_RT_BUDGET_NS)) {
++		WRITE_ONCE(ctx->rt_ema, INFINITY_RT_BUDGET_NS);
+ 		return;
+ 	}
+-	/* Clamp delta_ns to prevent u64 overflow in the numerator for
+-	 * tickless (NO_HZ_FULL) configurations where delta_ns can span
+-	 * hundreds of seconds between calls.  Matches the same clamp
+-	 * used in infinity_consume for the Fair class.
++	/* Clamp the fold at one time constant: a tickless (NO_HZ_FULL) run
++	 * longer than one tau (640ms) saturates the EMA at the ceiling.
++	 * The old 10ms delta clamp let a long tickless run add only 1/64
++	 * of the remaining gap per call, making the 95% engage threshold
++	 * unreachable.  The fold below is identical to the old formula for
++	 * deltas under one tau and saturates at or beyond it, so the EMA
++	 * now tracks wall-clock runtime.  The early return also bounds the
++	 * multiply: delta < tau implies (BUDGET - ema) * delta <
++	 * BUDGET * TAU, far below u64 limits.
+ 	 */
+-	if (delta_ns > INFINITY_RT_BUDGET_NS)
+-		delta_ns = INFINITY_RT_BUDGET_NS;
+-	step = div64_u64((INFINITY_RT_BUDGET_NS - ctx->rt_ema) * delta_ns *
+-			   INFINITY_RT_ALPHA,
+-			   INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE);
+-	ctx->rt_ema += step;
++	if (delta_ns >= INFINITY_RT_TAU_NS) {
++		WRITE_ONCE(ctx->rt_ema, INFINITY_RT_BUDGET_NS);
++		return;
++	}
++	step = div64_u64((INFINITY_RT_BUDGET_NS - ema) * delta_ns,
++			 INFINITY_RT_TAU_NS);
++	WRITE_ONCE(ctx->rt_ema, ema + step);
+ }
+ /* ------------------------------------------------------------------ */
+ /* infinity_rt_wakeup -- RT EMA decay on wakeup                         */
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index a8ab238cc..72c09f422 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -176,6 +176,8 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+ #define INFINITY_RT_BUDGET_NS		10000000ULL
+ /** RT alpha. */
+ #define INFINITY_RT_ALPHA		4
++/** RT EMA time constant: one tau of accumulated runtime closes the entire remaining gap (640ms). */
++#define INFINITY_RT_TAU_NS (INFINITY_RT_BUDGET_NS * INFINITY_FP_ONE / INFINITY_RT_ALPHA)
+ /* ------------------------------------------------------------------ */
+ /* RT safety valve -- requeue throttle threshold                        */
+ /* ------------------------------------------------------------------ */
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 4e0873f22..aa0f8905d 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2573,6 +2573,15 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 	 * the release threshold is actually reachable for a continuously
+ 	 * running rogue FIFO (rt_ema otherwise climbs only on consume and
+ 	 * decays only on wakeup).
++	 *
++	 * Lone-FIFO limitation: native requeue can only yield to
++	 * same-priority competitors; for a FIFO that is alone at its
++	 * priority level the requeue is a no-op by RT semantics (no
++	 * cross-class demotion by design).  The valve still rate-limits
++	 * and drives the synthetic decay, and the tickless fold (see
++	 * infinity_rt_consume) keeps the EMA meaningful when ticks are
++	 * stopped, so a later same-priority arrival is granted the
++	 * re-armed window it deserves.
+ 	 */
+ 	if (p->policy != SCHED_RR && !(p->flags & PF_KTHREAD)) {
+ 		if (p->infinity.rt_ema >= INFINITY_RT_DEMOTE_THRESHOLD) {
+@@ -2580,8 +2589,8 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
+ 			    time_after_eq(jiffies,
+ 					  p->infinity.rt_valve_last_jiffies +
+ 					  msecs_to_jiffies(INFINITY_RT_REQUEUE_MS))) {
+-				p->infinity.rt_valve_armed = true;
+-				p->infinity.rt_valve_last_jiffies = jiffies;
++				WRITE_ONCE(p->infinity.rt_valve_armed, true);
++				WRITE_ONCE(p->infinity.rt_valve_last_jiffies, jiffies);
+ 				requeue_task_rt(rq, p, 0);
+ 				resched_curr(rq);
+ 				atomic64_inc(this_cpu_ptr(&infinity_rt_throttle_count));
+@@ -2628,7 +2637,7 @@ static unsigned int get_rr_interval_rt(struct rq *rq, struct task_struct *task)
+ 	 * Time slice is 0 for SCHED_FIFO tasks
+ 	 */
+ 	if (task->policy == SCHED_RR)
+-		return sched_rr_timeslice;
++		return infinity_rr_timeslice(task, sched_rr_timeslice);
+ 	else
+ 		return 0;
+ }
+-- 
+2.55.0
+

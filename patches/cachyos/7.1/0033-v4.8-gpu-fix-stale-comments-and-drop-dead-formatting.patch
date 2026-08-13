@@ -1,0 +1,199 @@
+From e5432f954f6462e69c3b6f89e26c00293699a0c3 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 15:34:25 +0700
+Subject: [PATCH 33/47] v4.8-gpu: fix stale comments and drop dead formatting
+ helpers
+
+The reference implementation still carried v4.7-gpu version headers,
+an architecture comment that did not mention the wait_woken IPC
+wakeup signal, a tunables list missing the version and stats sysctls,
+a 'without any clamps' claim that the v4.8 climb clamp invalidated,
+an imprecise GPU passover decay description, and a misleading
+'current default' note on the hardware-adaptive alpha.  Correct all
+of them, and remove the fmt_human/fmt_val helpers that the
+self-adjusting stats table left orphaned (dead code).
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.c | 81 +++--------------------------------
+ kernel/sched/infinity_sched.h | 15 ++++---
+ 2 files changed, 16 insertions(+), 80 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.c b/kernel/sched/infinity_sched.c
+index 7a9b6222b..53b874e98 100644
+--- a/kernel/sched/infinity_sched.c
++++ b/kernel/sched/infinity_sched.c
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
+  *
+- * infinity_sched.c -- Infinity scheduler algorithm (v4.7-gpu).
++ * infinity_sched.c -- Infinity scheduler algorithm (v4.8-gpu).
+  *
+  * Fully continuous limit-based scheduling:
+  *
+@@ -14,7 +14,7 @@
+  *                      at EMA=100%: base × 2%
+  *
+  * All task classification data is observed within the scheduler
+- * (uclamp declarations, EMA tracking, futex_waiting flag).
++ * (uclamp declarations, EMA tracking, futex_waiting and ipc_waiting flags).
+  */
+ #include <linux/fs.h>
+ #include <linux/math64.h>
+@@ -70,6 +70,7 @@ DEFINE_PER_CPU(atomic64_t, infinity_cpufreq_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_cpufreq_interactive_count);
+ DEFINE_PER_CPU(atomic64_t, infinity_smt_interactive_count);
+ EXPORT_PER_CPU_SYMBOL(infinity_smt_interactive_count);
++/* ------------------------------------------------------------------ */
+ /* Sysctl tunables                                                     */
+ /* ------------------------------------------------------------------ */
+ unsigned long infinity_tune_smt_divisor = INFINITY_SMT_DIVISOR_DEFAULT;
+@@ -95,77 +96,6 @@ static int clamp_smt_divisor(const struct ctl_table *table, int write,
+ 	return ret;
+ }
+ /* ------------------------------------------------------------------ */
+-/* Human-readable number formatting                                    */
+-/* ------------------------------------------------------------------ */
+-static __maybe_unused void fmt_human(char *buf, size_t sz, u64 val)
+-{
+-	static const struct {
+-		u64 divisor;
+-		const char *unit;
+-	} table[] = {
+-		{ 1000000000000000000ULL, "E" },
+-		{ 1000000000000000ULL,    "P" },
+-		{ 1000000000000ULL,       "T" },
+-		{ 1000000000ULL,          "B" },
+-		{ 1000000ULL,             "M" },
+-		{ 1000ULL,                "K" },
+-	};
+-	int i;
+-	char tmp[32];
+-
+-	for (i = 0; i < ARRAY_SIZE(table); i++) {
+-		if (val >= table[i].divisor) {
+-			u64 whole = val / table[i].divisor;
+-			u64 frac = (val % table[i].divisor) /
+-				   (table[i].divisor / 100);
+-			scnprintf(tmp, sizeof(tmp), "%llu.%02llu %s",
+-				  whole, frac, table[i].unit);
+-			strlcat(buf, tmp, sz);
+-			return;
+-		}
+-	}
+-
+-	scnprintf(tmp, sizeof(tmp), "%llu", (unsigned long long)val);
+-	strlcat(buf, tmp, sz);
+-}
+-/* ------------------------------------------------------------------ */
+-/* fmt_val -- Write val to buf with comma separators, right-aligned    *
+- * to @width.  If @width is 0, no padding is applied.
+- */
+-/* ------------------------------------------------------------------ */
+-static __maybe_unused void fmt_val(char *buf, size_t sz, u64 val, unsigned int width)
+-{
+-	char tmp[32];
+-	unsigned int len;
+-
+-	if (val == 0) {
+-		scnprintf(tmp, sizeof(tmp), "0");
+-	} else {
+-		char raw[24];
+-		int raw_len, i, pos = 0;
+-
+-		scnprintf(raw, sizeof(raw), "%llu", (unsigned long long)val);
+-		raw_len = strlen(raw);
+-
+-		for (i = 0; i < raw_len; i++) {
+-			if (i > 0 && (raw_len - i) % 3 == 0)
+-				tmp[pos++] = ',';
+-			tmp[pos++] = raw[i];
+-		}
+-		tmp[pos] = '\0';
+-	}
+-
+-	len = strlen(tmp);
+-	if (width > 0 && len < width) {
+-		char padded[32];
+-
+-		scnprintf(padded, sizeof(padded), "%*s", width, tmp);
+-		strlcat(buf, padded, sz);
+-	} else {
+-		strlcat(buf, tmp, sz);
+-	}
+-}
+-/* ------------------------------------------------------------------ */
+ /*
+  * fill_pretty_llu - format u64 with K/M/B/T/Qa/Qi suffixes, two
+  * decimal digits, floor-truncated (1230 -> "1.23K").  The output is
+@@ -599,7 +529,7 @@ void infinity_consume(struct infinity_ctx *ctx, u64 delta_ns,
+ 	 * (power saving, thermal throttle) it backs down to 2048.
+ 	 *
+ 	 *   cap=1024 (max perf) → α = 4096  (τ_climb ≈ 0.38ms)
+-	 *   cap= 512 (mid)      → α = 3072  (τ_climb ≈ 0.5ms,  current default)
++	 *   cap= 512 (mid)      → α = 3072  (τ_climb ≈ 0.5ms)
+ 	 *   cap= 256 (low)      → α = 2560  (τ_climb ≈ 0.6ms)
+ 	 */
+ 	if (cpu_capacity >= SCHED_CAPACITY_SCALE)
+@@ -640,7 +570,8 @@ void infinity_wakeup(struct infinity_ctx *ctx, u64 sleep_ns)
+ 	/* GPU-to-CPU feedback: if this task's GPU entity has been
+ 	 * repeatedly passed over in scheduling, accelerate the EMA
+ 	 * decay so the task appears more interactive on the CPU side.
+-	 * Each passover is worth one extra half-life of decay.
++	 * Each passover adds one extra sleep-duration of decay (a 24ms
++	 * sleep with one passover decays twice as far).
+ 	 */
+ 	{
+ 		int passovers = atomic_xchg(&ctx->gpu_passovers, 0);
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 880ea49d8..10e8a494c 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2026 Galih Tama <galpt@v.recipes>
+  *
+- * infinity_sched.h -- Infinity scheduler API (v4.7-gpu).
++ * infinity_sched.h -- Infinity scheduler API (v4.8-gpu).
+  *
+  * Architecture:
+  *
+@@ -11,7 +11,7 @@
+  *   update_deadline()        ──call──► infinity_update_weight() -- EMA weight
+  *   update_curr()            ──call──► infinity_consume()       -- EMA budget
+  *   enqueue_task_fair()      ──call──► infinity_wakeup()        -- EMA decay
+- *   place_entity()   ──check──► futex_waiting   -- halve vslice on wakeup
++ *   place_entity()   ──check──► futex/ipc_waiting -- halve vslice on wakeup
+  *   dequeue_task_fair()      ──call──► (records last_sleep_ns)  -- sleep tracking
+  *   update_curr_rt()         ──call──► infinity_rt_consume()    -- RT EMA climb
+  *   enqueue_task_rt()        ──call──► infinity_rt_wakeup()     -- RT EMA decay
+@@ -31,9 +31,12 @@
+  * Tunables:
+  *   kernel.infinity_smt_divisor   -- SMT secondary slice divisor (default 2)
+  *   kernel.infinity_running       -- read-only flag, 1 if active
++ *   kernel.infinity_version       -- read-only branch version string
++ *   kernel.infinity_stats         -- read-only CPU/GPU accounting table
+  *
+- * Self-stabilizing by construction: the EMA naturally converges between
+- * 0 and BUDGET_MAX without any clamps or external feedback loop.
++ * Self-stabilizing by construction: the EMA converges toward BUDGET_MAX
++ * while running and is shifted down by sleep decay; the climb step is
++ * clamped at the ceiling, so the EMA always stays within [0, BUDGET_MAX].
+  * Higher EMA → lower effective weight → later deadline.
+  */
+ #ifndef __INFINITY_SCHED_H
+@@ -46,7 +49,9 @@
+ /** Maximum budget ceiling (6ms). */
+ #define INFINITY_BUDGET_MAX_NS		6000000ULL
+ /**
+- * EMA time constant: step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
++ * Documentational EMA time constant (the live alpha is hardware-adaptive,
++ * computed from cpu_capacity in infinity_consume, 2048-4096):
++ * step = (BUDGET_MAX - ema) × runtime × ALPHA / (...)
+  * α = 3072 gives ~500µs continuous runtime to reach full EMA penalty.
+  */
+ #define INFINITY_EMA_ALPHA		3072
+-- 
+2.55.0
+

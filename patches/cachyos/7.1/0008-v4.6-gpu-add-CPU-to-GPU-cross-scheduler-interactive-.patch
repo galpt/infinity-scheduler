@@ -1,0 +1,167 @@
+From 80faf64ebabf68b5f907068817cddc40ac060a01 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sun, 26 Jul 2026 16:23:31 +0700
+Subject: [PATCH 08/47] v4.6-gpu: add CPU-to-GPU cross-scheduler interactive
+ coupling
+
+Add a pid-based cross-scheduler signal path from the CPU scheduler to
+the GPU scheduler:
+
+1. struct pid *infinity_pid on drm_sched_entity, captured once in
+   drm_sched_entity_init() via get_task_pid() and released in
+   drm_sched_entity_fini() via put_pid().  Immutable after init --
+   no mid-life races regardless of concurrent push_job threads.
+
+2. In drm_sched_entity_calc_vtime(), under CONFIG_INFINITY_SCHED:
+   resolve infinity_pid to task_struct via pid_task() under
+   rcu_read_lock(), read the CPU-side infinity_ctx fields
+   (futex_waiting, ema), and compute a coupling_boost that reduces
+   effective_total before priority scaling.
+
+   - futex_waiting == true:  50% reduction (strong interactive signal,
+     task just woke from an IPC round-trip)
+   - cpu_ema == 0:           50% reduction (pure interactive, no CPU
+     load)
+   - both true:              100% reduction (vtime driven entirely
+     by priority and EMA penalties)
+   - Cap at 100% to prevent negative effective_total.
+
+3. RCU-safe: pid_task() returns NULL if the task has exited, leaving
+   effective_total unchanged.  No task_struct reference is held across
+   scheduling decisions -- only a single read under the RCU lock.
+
+This addresses Issue #16 (browser-after-game Alt+Tab): when the user
+switches back to the browser, the browser process wakes (futex),
+its CPU EMA is 0 (idle), and the GPU entity gets ~100% vtime
+reduction.  The browser's entity jumps to the left of the rbtree
+regardless of how much GPU time the game has accumulated.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c | 18 +++++++++++
+ drivers/gpu/drm/scheduler/sched_main.c   | 39 ++++++++++++++++++++++++
+ include/drm/gpu_scheduler.h              | 15 +++++++++
+ 3 files changed, 72 insertions(+)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index 09909eb7c..7a5d59358 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -117,6 +117,17 @@ int drm_sched_entity_init(struct drm_sched_entity *entity,
+ 	atomic_set(&entity->fence_seq, 0);
+ 	entity->fence_context = dma_fence_context_alloc(2);
+ 
++#ifdef CONFIG_INFINITY_SCHED
++	/* Capture the owning process PID for cross-scheduler coupling.
++	 * get_task_pid() takes a reference on the pid struct -- safe even
++	 * if the process exits before entity_fini releases it.
++	 * The group_leader PID is used so that all threads of a process
++	 * share the same coupling identity (consistent with last_user).
++	 */
++	entity->infinity_pid = get_task_pid(current->group_leader,
++					    PIDTYPE_PID);
++#endif
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(drm_sched_entity_init);
+@@ -383,6 +394,13 @@ void drm_sched_entity_fini(struct drm_sched_entity *entity)
+ 
+ 	dma_fence_put(rcu_dereference_check(entity->last_scheduled, true));
+ 	RCU_INIT_POINTER(entity->last_scheduled, NULL);
++
++#ifdef CONFIG_INFINITY_SCHED
++	if (entity->infinity_pid) {
++		put_pid(entity->infinity_pid);
++		entity->infinity_pid = NULL;
++	}
++#endif
+ }
+ EXPORT_SYMBOL(drm_sched_entity_fini);
+ 
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index bba8bf81a..652355b9a 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -196,6 +196,45 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+ 		effective_total = entity->gpu_time_total;
+ 	}
+ 
++#ifdef CONFIG_INFINITY_SCHED
++	/* CPU-to-GPU cross-scheduler coupling.
++	 *
++	 * Read the owning task's CPU-side interactivity signals via the
++	 * entity's infinity_pid.  futex_waiting and low CPU EMA indicate
++	 * an interactive task whose GPU submissions should not be treated
++	 * as bulk load.  Reduce effective_total proportionally so the
++	 * entity gets a vtime advantage in the rbtree.
++	 *
++	 * Coupling boost is capped at effective_total (100% reduction).
++	 * RCU-safe: pid_task() under rcu_read_lock() returns NULL if the
++	 * task has exited, leaving effective_total unchanged.
++	 */
++	if (entity->infinity_pid) {
++		struct task_struct *p;
++		u64 coupling_boost = 0;
++
++		rcu_read_lock();
++		p = pid_task(entity->infinity_pid, PIDTYPE_PID);
++		if (p) {
++			struct infinity_ctx *inf = &p->infinity;
++			u64 cpu_ema = READ_ONCE(inf->ema);
++			bool futex = READ_ONCE(inf->futex_waiting);
++
++			if (futex)
++				coupling_boost += effective_total >> 1;
++
++			if (cpu_ema == 0)
++				coupling_boost += effective_total >> 1;
++
++			if (coupling_boost > effective_total)
++				coupling_boost = effective_total;
++		}
++		rcu_read_unlock();
++
++		effective_total -= coupling_boost;
++	}
++#endif
++
+ 	vtime = effective_total;
+ 
+ 	switch (entity->priority) {
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index 19a835846..8891662b3 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -26,6 +26,7 @@
+ 
+ #include <drm/spsc_queue.h>
+ #include <linux/atomic.h>
++#include <linux/pid.h>
+ #include <linux/dma-fence.h>
+ #include <linux/completion.h>
+ #include <linux/xarray.h>
+@@ -270,6 +271,20 @@ struct drm_sched_entity {
+ 	 * (completion path) and rq->lock (scheduling path).
+ 	 */
+ 	atomic64_t			pending_gpu_ns;
++
++	/**
++	 * @infinity_pid: PID of the owning process.
++	 *
++	 * Captured once in drm_sched_entity_init() via get_task_pid() of the
++	 * submitting process's group_leader.  Released in drm_sched_entity_fini()
++	 * via put_pid().  Never modified mid-life -- safe from the concurrent
++	 * push_job race that would affect a per-submission PID store.
++	 *
++	 * Resolved to task_struct under rcu_read_lock() via pid_task() in
++	 * drm_sched_entity_calc_vtime() for CPU-side interactive coupling.
++	 * Returns NULL if the task has exited -- always safe to dereference.
++	 */
++	struct pid			*infinity_pid;
+ };
+ 
+ /**
+-- 
+2.55.0
+

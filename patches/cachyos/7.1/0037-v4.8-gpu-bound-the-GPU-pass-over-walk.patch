@@ -1,0 +1,73 @@
+From c52bec3dc9b21e2dce7d56bd4fce8622386b98ea Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:24:34 +0700
+Subject: [PATCH 37/47] v4.8-gpu: bound the GPU pass-over walk
+
+drm_sched_rq_select_entity_infinity() credited gpu_passovers to every
+ready right-neighbor in the vtime rbtree, an O(N) walk under rq->lock
+for clients with many contexts.  The walk is now bounded to the K nearest
+right-neighbors (INFINITY_GPU_PASSOVER_MAX_ENTITIES = 32) -- the entities
+closest to the next pick and therefore the most relevant for starvation
+feedback; entities deeper than K are credited on subsequent selections as
+the winner moves.  Per-selection cost is O(K) instead of O(N).
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 17 +++++++++++++----
+ include/drm/gpu_scheduler.h            |  2 ++
+ 2 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index 5f33ed8bb..9806ec75d 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -460,13 +460,19 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 		if (entity->cached_gpu_vtime > rq->min_gpu_vtime)
+ 			rq->min_gpu_vtime = entity->cached_gpu_vtime;
+ 
+-		/* GPU-to-CPU feedback: increment gpu_passovers on all other
+-		 * ready entities that are further right in the rbtree (higher
+-		 * vtime), so their owning tasks' CPU-side infinity_wakeup()
+-		 * can detect GPU-side starvation and accelerate EMA decay.
++		/* GPU-to-CPU feedback: increment gpu_passovers on the K
++		 * nearest right-neighbors in the rbtree (higher vtime), so
++		 * their owning tasks' CPU-side infinity_wakeup() can detect
++		 * GPU-side starvation and accelerate EMA decay.  The K
++		 * nearest entities are the closest to the next pick (most
++		 * relevant for starvation feedback); entities deeper than K
++		 * are credited on subsequent selections as the winner moves.
++		 * This keeps per-selection cost O(K) under rq->lock instead
++		 * of O(N) for clients with many contexts.
+ 		 */
+ 		if (entity->infinity_pid) {
+ 			struct rb_node *rb2;
++			int credited = 0;
+ 
+ 			rcu_read_lock();
+ 			for (rb2 = rb_next(rb); rb2; rb2 = rb_next(rb2)) {
+@@ -489,6 +495,9 @@ drm_sched_rq_select_entity_infinity(struct drm_gpu_scheduler *sched,
+ 					if (!infinity_is_interactive_candidate(p))
+ 						continue;
+ 					atomic_inc(&p->infinity.gpu_passovers);
++					if (++credited >=
++					    INFINITY_GPU_PASSOVER_MAX_ENTITIES)
++						break;
+ 				}
+ 			}
+ 			rcu_read_unlock();
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index 49ac6914f..c30647401 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -844,6 +844,8 @@ class_drm_sched_pending_job_iter_lock_ptr(class_drm_sched_pending_job_iter_t *_T
+ #define INFINITY_GPU_EMA_HALFLIFE_NS    32000000ULL
+ #define INFINITY_GPU_FAST_SUBMIT_NS     8000000ULL
+ #define INFINITY_GPU_CATCHUP_BONUS_NS   5000000ULL
++/** GPU->CPU pass-over feedback: max entities credited per selection (bounds the O(N) walk). */
++#define INFINITY_GPU_PASSOVER_MAX_ENTITIES 32
+ 
+ /* ------------------------------------------------------------------ */
+ /* Infinity stats counters (accessible from infinity_sched.c)          */
+-- 
+2.55.0
+

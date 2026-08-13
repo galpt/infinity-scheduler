@@ -1,0 +1,51 @@
+From d5a5bed078d01e557e5913c481cd97ddccb319d2 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sun, 26 Jul 2026 16:57:38 +0700
+Subject: [PATCH 11/47] v4.6-gpu: fix group_ema placement outside
+ CONFIG_FAIR_GROUP_SCHED guard
+
+The group_ema and group_ema_sleep_start fields in struct cfs_rq were
+placed inside the #ifdef CONFIG_FAIR_GROUP_SCHED guard, but the code
+that accesses them in fair.c (update_curr, update_cfs_group) is
+unconditional.  This causes a compile error when CONFIG_FAIR_GROUP_SCHED
+is not enabled:
+
+  error: 'struct cfs_rq' has no member named 'group_ema'
+
+Move both fields before the guard so they are always available
+regardless of the FAIR_GROUP_SCHED config.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/sched.h | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 22f34f7fd..5e3bf3175 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -716,6 +716,10 @@ struct cfs_rq {
+ 		unsigned long	runnable_avg;
+ 	} removed;
+ 
++	/* Infinity: aggregate group EMA and idle timestamp */
++	u64			group_ema;
++	u64			group_ema_sleep_start;
++
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	u64			last_update_tg_load_avg;
+ 	unsigned long		tg_load_avg_contrib;
+@@ -749,10 +753,6 @@ struct cfs_rq {
+ 	/* Locally cached copy of our task_group's idle value */
+ 	int			idle;
+ 
+-	/* Infinity: aggregate group EMA and idle timestamp */
+-	u64			group_ema;
+-	u64			group_ema_sleep_start;
+-
+ # ifdef CONFIG_CFS_BANDWIDTH
+ 	int			runtime_enabled;
+ 	s64			runtime_remaining;
+-- 
+2.55.0
+

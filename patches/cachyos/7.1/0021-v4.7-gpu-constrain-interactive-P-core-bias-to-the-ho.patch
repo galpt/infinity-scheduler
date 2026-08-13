@@ -1,0 +1,89 @@
+From 8f797d7fe0f2dfccbdc98735fdc6d69a8e6f9110 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Sat, 1 Aug 2026 06:25:32 +0700
+Subject: [PATCH 21/47] v4.7-gpu: constrain interactive P-core bias to the home
+ NUMA node
+
+The asymmetric-capacity wakeup bias returned the first allowed
+high-capacity core anywhere in the system, ignoring NUMA locality.
+On multi-node machines with asymmetric capacity this could place an
+interactive task on a remote socket's P-core on every wakeup,
+destroying cache warmth and forcing remote memory access.
+
+Prefer a P-core on the task's home node (the node of prev_cpu) while
+walking the capacity groups, and fall back to any allowed P-core when
+no same-node P-core exists.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/fair.c | 41 ++++++++++++++++++++++++++++++++---------
+ 1 file changed, 32 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index b5a13ab3d..1a862143c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -9028,10 +9028,14 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 			return cpu;
+ 
+ 		/*
+-		 * Infinity: on asymmetric topologies (Intel hybrid, ARM
+-		 * big.LITTLE), bias interactive tasks (EMA == 0) toward the
+-		 * highest-capacity P-cores.  This avoids placing latency-
+-		 * sensitive tasks on E-cores during wakeup.
++		 * Infinity: on asymmetric topologies (hybrid P/E cores),
++		 * bias interactive tasks (EMA == 0) toward the highest-
++		 * capacity P-cores.  This avoids placing latency-sensitive
++		 * tasks on E-cores during wakeup.
++		 *
++		 * Prefer a P-core on the task's home node (prev_cpu) to
++		 * preserve cache warmth and memory locality on multi-node
++		 * machines; fall back to any allowed P-core otherwise.
+ 		 *
+ 		 * Lockless read of p->infinity.ema: only p->pi_lock is held
+ 		 * here, not rq->lock.  READ_ONCE prevents compiler tearing
+@@ -9039,17 +9043,36 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 		 */
+ 		if (sched_asym_cpucap_active() && READ_ONCE(p->infinity.ema) == 0) {
+ 			struct asym_cap_data *entry;
+-			int best_cpu;
++			int best_cpu = -1;
++			int home_node = cpu_to_node(prev_cpu);
+ 
+ 			rcu_read_lock();
+ 			list_for_each_entry_rcu(entry, &asym_cap_list, link) {
+-				best_cpu = cpumask_first_and(cpu_capacity_span(entry), p->cpus_ptr);
+-				if (best_cpu < nr_cpu_ids) {
+-					rcu_read_unlock();
+-					return best_cpu;
++				int cpu;
++
++				/*
++				 * First allowed CPU of this capacity group,
++				 * kept as fallback (list is highest-capacity
++				 * first).
++				 */
++				cpu = cpumask_first_and(cpu_capacity_span(entry),
++							p->cpus_ptr);
++				if (cpu < nr_cpu_ids && best_cpu < 0)
++					best_cpu = cpu;
++
++				/* Prefer a P-core on the task's home node. */
++				for_each_cpu_and(cpu, cpu_capacity_span(entry),
++						 p->cpus_ptr) {
++					if (cpu_to_node(cpu) == home_node) {
++						rcu_read_unlock();
++						return cpu;
++					}
+ 				}
+ 			}
+ 			rcu_read_unlock();
++
++			if (best_cpu >= 0)
++				return best_cpu;
+ 		}
+ 
+ 		if (!is_rd_overutilized(this_rq()->rd)) {
+-- 
+2.55.0
+

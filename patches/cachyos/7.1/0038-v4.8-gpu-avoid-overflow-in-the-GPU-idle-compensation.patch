@@ -1,0 +1,48 @@
+From 15bc02b87f9febb36336cdd54bfe217801bce0db Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Tue, 4 Aug 2026 18:24:56 +0700
+Subject: [PATCH 38/47] v4.8-gpu: avoid overflow in the GPU idle compensation
+ blend
+
+The idle-compensation blend multiplied min_gpu_vtime (and
+gpu_time_total) by 16-bit fixed-point ratios before shifting down.
+min_gpu_vtime only grows and never resets, so the plain multiply wraps
+u64 once it reaches about 2^48 ns (roughly 3.26 days of accumulated GPU
+time).  The blend now uses mul_u64_u32_div(), which computes the products
+in 128-bit intermediates, so it stays exact for any value.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ drivers/gpu/drm/scheduler/sched_main.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+index 9806ec75d..e1a41a050 100644
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -187,10 +187,19 @@ static inline u64 drm_sched_entity_calc_vtime(struct drm_sched_entity *entity)
+ 					       idle_ns +
+ 					       INFINITY_GPU_EMA_HALFLIFE_NS);
+ 
++			/* min_gpu_vtime only grows and never resets; the
++			 * plain multiply wraps u64 once min_gpu_vtime >=
++			 * 2^48 ns (~3.26 days of accumulated GPU time).
++			 * mul_u64_u32_div computes the products in 128-bit
++			 * intermediates, so the blend is exact for any
++			 * value.
++			 */
+ 			effective_total =
+-				(rq->min_gpu_vtime *
+-				 ((1ULL << 16) - idle_ratio) +
+-				 entity->gpu_time_total * idle_ratio) >> 16;
++				mul_u64_u32_div(rq->min_gpu_vtime,
++						(u32)((1U << 16) - idle_ratio),
++						1U << 16) +
++				mul_u64_u32_div(entity->gpu_time_total,
++						(u32)idle_ratio, 1U << 16);
+ 		}
+ 
+ 		atomic64_inc(this_cpu_ptr(&infinity_gpu_idle_compensations));
+-- 
+2.55.0
+
