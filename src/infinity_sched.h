@@ -42,8 +42,6 @@
 #ifndef __INFINITY_SCHED_H
 #define __INFINITY_SCHED_H
 #include <linux/math64.h>
-#include <linux/sched/prio.h>
-#include <linux/sched/topology.h>
 #include <linux/sched.h>
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
