@@ -1,7 +1,7 @@
 From 0961056cd3581e31be8245e1ffdafd73a7243b34 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 13 Aug 2026 21:31:36 +0700
-Subject: [PATCH 38/38] v4.8-gpu: move the infinity_stats rows to a heap
+Subject: [PATCH 38/39] v4.8-gpu: move the infinity_stats rows to a heap
  allocation
 
 infinity_stats_proc_handler() declared the 16 stats rows (10 CPU + 1 RT +

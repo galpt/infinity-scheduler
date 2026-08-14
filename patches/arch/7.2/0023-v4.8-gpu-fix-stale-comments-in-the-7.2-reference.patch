@@ -1,7 +1,7 @@
 From 823cc45b36f5846688b0efe5a2f3f50e06341047 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 15:38:08 +0700
-Subject: [PATCH 23/38] v4.8-gpu: fix stale comments in the 7.2 reference
+Subject: [PATCH 23/39] v4.8-gpu: fix stale comments in the 7.2 reference
 
 Same comment corrections as the other arches: version headers bumped to
 v4.8-gpu, the architecture diagram mentions the ipc_waiting wakeup

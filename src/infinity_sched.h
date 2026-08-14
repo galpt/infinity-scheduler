@@ -131,6 +131,7 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
 		return scale_load(WEIGHT_IDLEPRIO);
 
 	int idx = p->static_prio - MAX_RT_PRIO;
+
 	if (idx < 0 || idx >= ARRAY_SIZE(sched_prio_to_weight))
 		return scale_load(WEIGHT_IDLEPRIO);
 

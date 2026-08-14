@@ -1,7 +1,7 @@
 From 8db19d4eaab14effb39db036d1b46098c9086904 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:57:42 +0700
-Subject: [PATCH 18/49] v4.7-gpu: add observability counters, fix SMT race,
+Subject: [PATCH 18/50] v4.7-gpu: add observability counters, fix SMT race,
  clean up exports
 
 Add infinity_cpufreq_interactive_count and infinity_smt_interactive_count

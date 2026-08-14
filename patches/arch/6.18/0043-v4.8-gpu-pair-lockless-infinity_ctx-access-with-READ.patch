@@ -1,7 +1,7 @@
 From 12935bf87f13bcbc3bdc5978b42a6182642e7a4f Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:29:15 +0700
-Subject: [PATCH 43/49] v4.8-gpu: pair lockless infinity_ctx access with
+Subject: [PATCH 43/50] v4.8-gpu: pair lockless infinity_ctx access with
  READ_ONCE/WRITE_ONCE
 
 The audit flagged the lockless cross-CPU accesses to struct infinity_ctx

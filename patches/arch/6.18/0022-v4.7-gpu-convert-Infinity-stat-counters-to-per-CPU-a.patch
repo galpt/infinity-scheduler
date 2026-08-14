@@ -1,7 +1,7 @@
 From e8ce6711bf50cdd129a58365df4e1cd29bc029ec Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 07:59:19 +0700
-Subject: [PATCH 22/49] v4.7-gpu: convert Infinity stat counters to per-CPU
+Subject: [PATCH 22/50] v4.7-gpu: convert Infinity stat counters to per-CPU
  atomics
 
 The global atomic stat counters are incremented from every CPU (the

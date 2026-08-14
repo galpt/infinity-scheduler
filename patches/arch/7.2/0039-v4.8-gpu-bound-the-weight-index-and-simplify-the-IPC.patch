@@ -1,0 +1,61 @@
+From 975db4bbe1fb41fed4c880ae12772d9d9bcdda03 Mon Sep 17 00:00:00 2001
+From: Galih Tama <galpt@v.recipes>
+Date: Fri, 14 Aug 2026 23:16:43 +0700
+Subject: [PATCH 39/39] v4.8-gpu: bound the weight index and simplify the IPC
+ gradient math
+
+Adds a bounds check for the sched_prio_to_weight index in
+infinity_calc_weight() and rewrites infinity_ipc_gradient() with
+mul_u64_u32_div.  The gradient result is bit-identical to the previous
+math, and the bounds check falls back to WEIGHT_IDLEPRIO on an
+out-of-range index.
+
+Adapted from the contribution by Salman Wahib (sxlmnwb) via PR #22.
+
+Signed-off-by: Galih Tama <galpt@v.recipes>
+---
+ kernel/sched/infinity_sched.h | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/sched/infinity_sched.h b/kernel/sched/infinity_sched.h
+index 8a4ef9e14..24e6f3dde 100644
+--- a/kernel/sched/infinity_sched.h
++++ b/kernel/sched/infinity_sched.h
+@@ -107,14 +107,18 @@ static inline u32 infinity_calc_weight(struct task_struct *p, u64 ema)
+ 	if (task_has_idle_policy(p))
+ 		return scale_load(WEIGHT_IDLEPRIO);
+ 
++	int idx = p->static_prio - MAX_RT_PRIO;
++
++	if (idx < 0 || idx >= ARRAY_SIZE(sched_prio_to_weight))
++		return scale_load(WEIGHT_IDLEPRIO);
++
++	u32 base = scale_load(sched_prio_to_weight[idx]);
++
+ #ifdef CONFIG_UCLAMP_TASK
+ 	if (p->uclamp_req[UCLAMP_MIN].value > 0)
+-		return scale_load(sched_prio_to_weight[p->static_prio - MAX_RT_PRIO]);
++		return base;
+ #endif
+ 
+-	int idx = p->static_prio - MAX_RT_PRIO;
+-	u32 base = scale_load(sched_prio_to_weight[idx]);
+-
+ 	if (ema > INFINITY_BUDGET_MAX_NS)
+ 		ema = INFINITY_BUDGET_MAX_NS;
+ 
+@@ -147,8 +151,9 @@ static inline u64 infinity_ipc_gradient(u64 sleep_ns)
+ 		return INFINITY_FP_ONE / 2;
+ 	if (sleep_ns >= INFINITY_IPC_GRADIENT_MAX_NS)
+ 		return 0;
+-	return div64_u64((span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS)) *
+-			 INFINITY_FP_ONE / 2, span);
++	u64 diff = span - (sleep_ns - INFINITY_IPC_GRADIENT_FULL_NS);
++	/* Use mul_u64_u32_div for better precision and efficiency */
++	return mul_u64_u32_div(diff, INFINITY_FP_ONE / 2, span);
+ }
+ /* ------------------------------------------------------------------ */
+ /* Cgroup EMA constants                                                */
+-- 
+2.55.0
+

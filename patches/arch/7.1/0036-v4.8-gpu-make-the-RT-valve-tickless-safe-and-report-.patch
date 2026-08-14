@@ -1,7 +1,7 @@
 From 40f8dda9989e0c8ed6c3b44e6384ae4ecbb174ea Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:24:01 +0700
-Subject: [PATCH 36/48] v4.8-gpu: make the RT valve tickless-safe and report
+Subject: [PATCH 36/49] v4.8-gpu: make the RT valve tickless-safe and report
  the adaptive RR slice
 
 infinity_rt_consume() clamped the elapsed delta at the 10ms budget, so

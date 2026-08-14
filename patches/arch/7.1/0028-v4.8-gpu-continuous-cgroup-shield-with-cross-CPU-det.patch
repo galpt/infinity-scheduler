@@ -1,7 +1,7 @@
 From 478d1f3171cbaf4a01a3130b99873f965bd54916 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 14:34:53 +0700
-Subject: [PATCH 28/48] v4.8-gpu: continuous cgroup shield with cross-CPU
+Subject: [PATCH 28/49] v4.8-gpu: continuous cgroup shield with cross-CPU
  detection
 
 Replace the per-cfs_rq 50% cliff in update_cfs_group() with a quantized

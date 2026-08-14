@@ -1,7 +1,7 @@
 From a4695ebace0c556d85f603cbf8ac2f3222e6d81d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 14:31:04 +0700
-Subject: [PATCH 13/38] v4.7-gpu: fix infinity_stats sysctl read returning
+Subject: [PATCH 13/39] v4.7-gpu: fix infinity_stats sysctl read returning
  EFAULT
 
 The infinity_stats handler copied its formatted table to userspace with

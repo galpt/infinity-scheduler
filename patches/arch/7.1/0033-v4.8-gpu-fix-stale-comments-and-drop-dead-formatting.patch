@@ -1,7 +1,7 @@
 From e5432f954f6462e69c3b6f89e26c00293699a0c3 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 15:34:25 +0700
-Subject: [PATCH 33/48] v4.8-gpu: fix stale comments and drop dead formatting
+Subject: [PATCH 33/49] v4.8-gpu: fix stale comments and drop dead formatting
  helpers
 
 The reference implementation still carried v4.7-gpu version headers,
