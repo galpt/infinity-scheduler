@@ -32,7 +32,7 @@ RC_TARGET=0
 # The RC the patches/arch/7.2 series was generated from.  The latest RC
 # is tried first; if the series no longer applies, the installer falls
 # back to this base.
-SERIES_RC_BASE="7.2-rc6"
+SERIES_RC_BASE="7.2-rc7"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFINITY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -216,10 +216,16 @@ if [ "$RC_TARGET" = "1" ]; then
     PATCH_DIR="$INFINITY_DIR/patches/arch/7.2"
     PATCH_VER="7.2"
     KERNEL_VER="$(resolve_latest_72)"
-    if [[ "$KERNEL_VER" == *-rc* ]]; then
-        info "Using kernel source v$KERNEL_VER (latest 7.2 RC; series applies with fuzz)."
+    # The series is generated from $SERIES_RC_BASE.  If the latest 7.2
+    # kernel is ahead of the series base (a newer RC, or a stable
+    # release the series was not built for), resolve straight to the
+    # series base instead of cloning a kernel the series cannot apply
+    # to and then re-cloning after the drift check fails.
+    if [[ "$KERNEL_VER" != "$SERIES_RC_BASE" ]]; then
+        info "Latest 7.2 is v$KERNEL_VER, but the series is generated for $SERIES_RC_BASE; using the series base."
+        KERNEL_VER="$SERIES_RC_BASE"
     else
-        info "Using kernel source v$KERNEL_VER (latest 7.2 stable; series applies with fuzz)."
+        info "Using kernel source v$KERNEL_VER (latest 7.2; series base)."
     fi
 else
     # Resolve the latest stable patch version for the supported major.minor.
