@@ -14,7 +14,7 @@ A fair-share CPU + GPU scheduler based on the limit concept in mathematics — e
 │   ├── arch/6.18/            50 patches — Vanilla kernel.org 6.18
 │   ├── arch/7.0/             49 patches — Vanilla kernel.org 7.0
 │   ├── arch/7.1/             49 patches — Vanilla kernel.org 7.1
-│   ├── arch/7.2/             39 patches — Vanilla kernel.org 7.2 (7.2-rc6 base)
+│   ├── arch/7.2/             39 patches — Vanilla kernel.org 7.2 (7.2-rc7 base)
 │   ├── fedora/7.0/           50 patches — Fedora kernel-ark archived-7.0
 │   └── cachyos/7.1/          49 patches — CachyOS kernel fork (cachyos-7.1.5-1)
 ├── tools/                     Install script, build helpers, patch fixers
