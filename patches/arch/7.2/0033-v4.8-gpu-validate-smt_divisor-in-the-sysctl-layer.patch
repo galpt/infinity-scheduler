@@ -1,4 +1,4 @@
-From dee01e89d0f67f709bdb78bbc5e0e8f6d02be2c4 Mon Sep 17 00:00:00 2001
+From 675572e3fc63414c94773449cd6841cb35be55eb Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:31:14 +0700
 Subject: [PATCH 33/39] v4.8-gpu: validate smt_divisor in the sysctl layer

@@ -1,4 +1,4 @@
-From d78620109927ee26d2ecc484696aac8feb9fc2ec Mon Sep 17 00:00:00 2001
+From fcc9fe27d682cafba7bbdbeafc4ee07ef0d49c10 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Wed, 5 Aug 2026 00:16:48 +0700
 Subject: [PATCH 37/39] v4.8-gpu: correct the stats note and GPU comments

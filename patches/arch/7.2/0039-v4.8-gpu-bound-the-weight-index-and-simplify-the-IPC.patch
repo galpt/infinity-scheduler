@@ -1,4 +1,4 @@
-From 975db4bbe1fb41fed4c880ae12772d9d9bcdda03 Mon Sep 17 00:00:00 2001
+From ee61887f2b1159ce2bf5ab1cb50a6be78a6d02c0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Fri, 14 Aug 2026 23:16:43 +0700
 Subject: [PATCH 39/39] v4.8-gpu: bound the weight index and simplify the IPC

@@ -1,4 +1,4 @@
-From a3fac60af456e8745b5f95f5278aa2f0cac9d2a5 Mon Sep 17 00:00:00 2001
+From 7db02e3325878dd18738c25a40c865bf70239fb6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:22:50 +0700
 Subject: [PATCH 25/39] v4.8-gpu: flag only sustained EMA/PELT divergence

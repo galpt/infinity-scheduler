@@ -1,4 +1,4 @@
-From 87ce5ed3539b8d850e064bf3ff5910569688b49e Mon Sep 17 00:00:00 2001
+From e15b43da27013293dc9887a39db4ff85cc1ff9bc Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 15:04:55 +0700
 Subject: [PATCH 18/39] v4.8-gpu: add hysteresis and rate limit to the RT

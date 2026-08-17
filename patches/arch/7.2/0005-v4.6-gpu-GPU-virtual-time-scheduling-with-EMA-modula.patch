@@ -1,4 +1,4 @@
-From 0431aa6a645c72242255f72e4adbb66bf5a6358f Mon Sep 17 00:00:00 2001
+From 21b6e2b06f75e901543af7d9bda47a0be4814aa6 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Sat, 1 Aug 2026 11:39:36 +0700
 Subject: [PATCH 05/39] v4.6-gpu: GPU virtual time scheduling with EMA

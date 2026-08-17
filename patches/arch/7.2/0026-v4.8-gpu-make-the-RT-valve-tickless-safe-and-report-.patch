@@ -1,4 +1,4 @@
-From cc4b2bedd627801c50f4c439197affe4e017b43b Mon Sep 17 00:00:00 2001
+From de6b5e274b60713972036e7b07cdb88ef80344ac Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:24:01 +0700
 Subject: [PATCH 26/39] v4.8-gpu: make the RT valve tickless-safe and report

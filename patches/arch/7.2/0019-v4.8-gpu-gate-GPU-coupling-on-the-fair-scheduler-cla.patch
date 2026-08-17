@@ -1,4 +1,4 @@
-From ff897000602f434244b09690e95115fa41529bf4 Mon Sep 17 00:00:00 2001
+From 5a5fbf7398bb6bb37684d1eda3c5d13c33e9f08e Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 15:05:10 +0700
 Subject: [PATCH 19/39] v4.8-gpu: gate GPU coupling on the fair scheduler class

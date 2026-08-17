@@ -1,4 +1,4 @@
-From a0ba7c19419438993b0ac080f45a47d4d0124d42 Mon Sep 17 00:00:00 2001
+From 549978c11347fb4ca535e5e645c27738fbd54e8d Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Thu, 9 Jul 2026 02:13:30 +0700
 Subject: [PATCH 01/39] v4.5: core Infinity scheduler infrastructure
@@ -24,10 +24,10 @@ Signed-off-by: Galih Tama <galpt@v.recipes>
  create mode 100644 kernel/sched/infinity_sched.h
 
 diff --git a/MAINTAINERS b/MAINTAINERS
-index 5114e6db7..cdd362a8f 100644
+index 8014b9f82..e1b59a49c 100644
 --- a/MAINTAINERS
 +++ b/MAINTAINERS
-@@ -29842,3 +29842,10 @@ S:	Buried alive in reporters
+@@ -29845,3 +29845,10 @@ S:	Buried alive in reporters
  T:	git git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
  F:	*
  F:	*/

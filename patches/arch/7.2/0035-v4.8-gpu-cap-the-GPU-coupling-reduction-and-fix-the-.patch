@@ -1,4 +1,4 @@
-From 00372d6530913e82b794f802d3711db850c5436e Mon Sep 17 00:00:00 2001
+From 7371635cf1282bfb81e04ae1d0d6f67c0fd12fbe Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 23:51:46 +0700
 Subject: [PATCH 35/39] v4.8-gpu: cap the GPU coupling reduction and fix the

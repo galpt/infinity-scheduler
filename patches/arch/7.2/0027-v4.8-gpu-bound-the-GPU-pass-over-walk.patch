@@ -1,4 +1,4 @@
-From 4821d5b0aaa8fc0e2d23f45a4ff383d11a58efab Mon Sep 17 00:00:00 2001
+From eeb6d09adb4b3968ce16fe2fb1d0d372ce9041b0 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:24:34 +0700
 Subject: [PATCH 27/39] v4.8-gpu: bound the GPU pass-over walk

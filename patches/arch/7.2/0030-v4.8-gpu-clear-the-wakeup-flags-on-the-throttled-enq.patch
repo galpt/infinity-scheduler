@@ -1,4 +1,4 @@
-From b0992705260f6104bbf871e660744fd535109796 Mon Sep 17 00:00:00 2001
+From fc0b26fb65bca43514cb37ac94afff83beaf1545 Mon Sep 17 00:00:00 2001
 From: Galih Tama <galpt@v.recipes>
 Date: Tue, 4 Aug 2026 18:26:14 +0700
 Subject: [PATCH 30/39] v4.8-gpu: clear the wakeup flags on the throttled
