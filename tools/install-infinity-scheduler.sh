@@ -290,6 +290,8 @@ cmd_status() {
 }
 
 setup_kernel_config() {
+    local _old_cwd
+    _old_cwd=$(pwd)
     cd "$KERNEL_SRC"
 
     # Generate .config from the running kernel
@@ -308,6 +310,12 @@ setup_kernel_config() {
         ./scripts/config --disable CONFIG_LOCALVERSION_AUTO 2>/dev/null || true
         make olddefconfig >/dev/null 2>&1 || true
     fi
+
+    # Restore the caller's working directory.  The RC fallback in
+    # prepare_source() removes $KERNEL_SRC, which must never be the
+    # script's own CWD, or the re-clone fails with "Unable to read
+    # current working directory".
+    cd "$_old_cwd" || true
 }
 
 prepare_source() {
@@ -355,6 +363,8 @@ prepare_source() {
 }
 
 apply_patches() {
+    local _old_cwd
+    _old_cwd=$(pwd)
     cd "$KERNEL_SRC"
     [ ${#PATCH_FILES[@]} -gt 0 ] || die "No patches for kernel $KERNEL_VER in $PATCH_DIR"
 
@@ -400,6 +410,8 @@ apply_patches() {
     # 7.0.12-infinity.  This keeps module paths, mkinitcpio -k, and boot files
     # all consistent.  Same principle as infinity-scheduler's tarball extraction.
     rm -rf ".git"
+
+    cd "$_old_cwd" || true
 }
 
 check_deps() {
@@ -639,6 +651,8 @@ check_nvidia() {
 }
 
 build_kernel() {
+    local _old_cwd
+    _old_cwd=$(pwd)
     cd "$KERNEL_SRC"
 
     # Try build once.  If it fails with a common config issue, regenerate
@@ -661,9 +675,13 @@ build_kernel() {
         make -j"$(nproc)" 2>&1 || die "Build failed after config refresh. Try running 'make mrproper' manually in $KERNEL_SRC, then re-run this script."
     fi
     ok "Built successfully"
+
+    cd "$_old_cwd" || true
 }
 
 install_infinity_kernel() {
+    local _old_cwd
+    _old_cwd=$(pwd)
     cd "$KERNEL_SRC"
 
     # Install modules — does NOT affect other kernels
@@ -781,6 +799,8 @@ install_infinity_kernel() {
     echo "  The default $DISTRO kernel is unchanged."
     echo ""
     echo "  To remove: sudo bash $0 --remove"
+
+    cd "$_old_cwd" || true
 }
 
 setup_limine_entry() {
