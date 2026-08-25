@@ -73,6 +73,12 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 
 A `gpu-switcher.sh` script is included in the `tools/` directory so you can easily switch from NVIDIA to nouveau and vice versa. It has been tested on CachyOS and requires btrfs if you want the automatic pre-switch snapshot. The nouveau driver is needed to get the benefits of the GPU scheduling included in Infinity. This might be beneficial if you want fairness between apps that are competing for GPU time.
 
+> [!TIP]
+> Use this command to check whether you are using nouveau or nvidia:
+> ```
+> lsmod | grep -qE '^nvidia ' && echo "NVIDIA driver" || lsmod | grep -qE '^nouveau ' && echo "nouveau driver" || echo "neither"
+> ```
+
 ## Tunables
 
 | Parameter | Default | Range | Description |
