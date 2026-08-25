@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 #
 # safe-clean-infinity-kernel-source.sh
-# Cleans build artifacts from /usr/src/linux-infinity after a kernel rebuild.
-# Safe between reboots — only removes compiled .o files, vmlinux binaries, etc.
-# Keeps source code, .config, and headers intact (DKMS still works).
-# Also removes DKMS module builds for old Infinity kernels — never the
-# running kernel, the newest Infinity kernel, or the default distro kernel.
+# Cleans build artifacts, stale DKMS modules, and superseded boot files.
+# Keeps the running kernel, the newest Infinity kernel, and the default distro kernel.
 #
 # Usage:
 #   ./safe-clean-infinity-kernel-source.sh          # normal (prompts for sudo)
@@ -16,68 +13,59 @@ set -euo pipefail
 KERNEL_SRC="/usr/src/linux-infinity"
 LOG_FILE="/tmp/safe-clean-infinity-kernel-source-$(date +%Y%m%d-%H%M%S).log"
 
-if [ ! -d "$KERNEL_SRC" ]; then
-    echo "Error: $KERNEL_SRC does not exist. Nothing to clean."
-    exit 1
-fi
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. Source Tree Artifact Cleanup
+# ──────────────────────────────────────────────────────────────────────────────
+clean_source_tree() {
+    local yes="${1:-}"
+    if [ ! -d "$KERNEL_SRC" ] || [ ! -f "$KERNEL_SRC/Makefile" ]; then
+        echo "Skipping source cleanup: $KERNEL_SRC is not a valid kernel tree."
+        return 0
+    fi
 
-if [ ! -f "$KERNEL_SRC/Makefile" ]; then
-    echo "Error: $KERNEL_SRC/Makefile not found. This doesn't look like a kernel source tree."
-    exit 1
-fi
+    if [ "$yes" != "--yes" ]; then
+        local current_size
+        current_size=$(du -sh "$KERNEL_SRC" 2>/dev/null | awk '{print $1}')
+        echo "Kernel source tree: $KERNEL_SRC ($current_size)"
+        echo "This will remove compiled build artifacts (.o files, vmlinux, etc.)"
+        echo "Source code, .config, and headers will be preserved."
+        echo ""
+        read -rp "Proceed with source cleanup? [y/N] " reply
+        case "$reply" in
+            [yY]|[yY][eE][sS]) ;;
+            *) echo "Aborted source cleanup."; return 0 ;;
+        esac
+    fi
 
-if [ "${1:-}" != "--yes" ]; then
-    CURRENT_SIZE=$(du -sh "$KERNEL_SRC" 2>/dev/null | awk '{print $1}')
-    echo "Kernel source tree: $KERNEL_SRC"
-    echo "Current size: $CURRENT_SIZE"
-    echo "This will remove compiled build artifacts (.o files, vmlinux, etc.)"
-    echo "Source code, .config, and headers will be preserved."
-    echo ""
-    read -rp "Proceed? [y/N] " reply
-    case "$reply" in
-        [yY]|[yY][eE][sS]) ;;
-        *) echo "Aborted."; exit 0 ;;
-    esac
-fi
-
-echo "Cleaning kernel source tree..."
-sudo make -C "$KERNEL_SRC" clean 2>&1 | tee "$LOG_FILE"
-
-echo ""
-echo "Done. Log written to: $LOG_FILE"
-
-# Show what's left
-REMAINING=$(du -sh "$KERNEL_SRC" 2>/dev/null | awk '{print $1}')
-echo "Remaining size: $REMAINING"
+    echo "Cleaning kernel source tree..."
+    sudo make -C "$KERNEL_SRC" clean 2>&1 | tee "$LOG_FILE"
+    echo "Source clean complete. Log written to: $LOG_FILE"
+    echo "Remaining size: $(du -sh "$KERNEL_SRC" 2>/dev/null | awk '{print $1}')"
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
-# DKMS cleanup for superseded Infinity kernels
+# 2. DKMS Cleanup for Superseded Kernels
 # ──────────────────────────────────────────────────────────────────────────────
-# clean_stale_dkms — remove DKMS module builds for Infinity kernels older
-# than the newest installed one.  The running kernel, the newest Infinity
-# kernel, and non-Infinity kernels (e.g. the default distro kernel) are
-# never touched.
 clean_stale_dkms() {
     local yes="${1:-}"
     command -v dkms &>/dev/null || { echo "dkms not installed — nothing to clean."; return 0; }
 
     local newest
     newest=$(ls -d /lib/modules/*-infinity 2>/dev/null | sed 's|^/lib/modules/||' | sort -V | tail -1) || true
-    [ -n "$newest" ] || { echo "No Infinity kernels installed — nothing to clean."; return 0; }
+    [ -n "$newest" ] || return 0
 
-    local running stale=() line mod kern
-    running=$(uname -r)
+    local running=$(uname -r)
+    local stale=() line mod kern
+
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         mod=${line%%,*}
         kern=$(printf '%s' "$line" | cut -d, -f2 | tr -d ' ')
-        case "$kern" in
-            *-infinity) ;;
-            *) continue ;;   # never touch non-Infinity kernels
-        esac
+
+        case "$kern" in *-infinity) ;; *) continue ;; esac
         [ "$kern" = "$running" ] && continue
         [ "$kern" = "$newest" ] && continue
-        # Only kernels older than the newest Infinity kernel (version-sorted).
+
         if [ "$(printf '%s\n%s\n' "$kern" "$newest" | sort -V | head -1)" = "$kern" ]; then
             stale+=("${mod}|${kern}")
         fi
@@ -90,10 +78,8 @@ clean_stale_dkms() {
 
     echo ""
     echo "Stale DKMS builds for old Infinity kernels:"
-    local s
-    for s in "${stale[@]}"; do
-        echo "  - ${s%%|*} for kernel ${s##*|}"
-    done
+    for s in "${stale[@]}"; do echo "  - ${s%%|*} for kernel ${s##*|}"; done
+
     if [ "$yes" != "--yes" ]; then
         read -rp "Remove these DKMS builds? [y/N] " reply
         case "$reply" in
@@ -102,17 +88,77 @@ clean_stale_dkms() {
         esac
     fi
 
-    local entry mod_name mod_ver
     for entry in "${stale[@]}"; do
-        mod_name=${entry%%|*}
+        local mod_name=${entry%%|*}
+        local mod_ver=${mod_name#*/}
         kern=${entry##*|}
-        mod_ver=${mod_name#*/}
         echo "Removing ${mod_name} for kernel ${kern}..."
         sudo dkms remove "$mod_name" -k "$kern" 2>&1 || true
-        # Remove any leftover build directory dkms left behind.
         sudo rm -rf "/var/lib/dkms/${mod_name%/*}/${mod_ver}/${kern}" 2>/dev/null || true
     done
     echo "Stale DKMS builds removed."
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. Boot File & Limine Entry Cleanup
+# ──────────────────────────────────────────────────────────────────────────────
+clean_stale_boot_files() {
+    local yes="${1:-}"
+    local newest
+    newest=$(ls -d /lib/modules/*-infinity 2>/dev/null | sed 's|^/lib/modules/||' | sort -V | tail -1) || true
+    [ -z "$newest" ] && return 0
+
+    local running=$(uname -r)
+    local stale=()
+
+    for kdir in /lib/modules/*-infinity; do
+        [ -d "$kdir" ] || continue
+        local kern=$(basename "$kdir")
+        [ "$kern" = "$running" ] && continue
+        [ "$kern" = "$newest" ] && continue
+        stale+=("$kern")
+    done
+
+    if [ ${#stale[@]} -eq 0 ]; then
+        echo "No stale boot files to clean."
+        return 0
+    fi
+
+    echo ""
+    echo "Stale Infinity kernels found in /boot and /lib/modules:"
+    for kern in "${stale[@]}"; do echo "  - $kern"; done
+
+    if [ "$yes" != "--yes" ]; then
+        read -rp "Remove these kernels and their bootloader entries? [y/N] " reply
+        case "$reply" in
+            [yY]|[yY][eE][sS]) ;;
+            *) echo "Aborted boot file cleanup."; return 0 ;;
+        esac
+    fi
+
+    for kern in "${stale[@]}"; do
+        echo "Removing boot files and modules for $kern..."
+        sudo rm -rf "/lib/modules/$kern" 2>/dev/null || true
+        sudo rm -f "/boot/vmlinuz-$kern" "/boot/initramfs-$kern.img" "/boot/System.map-$kern" 2>/dev/null || true
+
+        # Strip exact entries out of Limine
+        for lconf in /boot/limine/limine.conf /boot/limine.conf /limine/limine.conf /limine.conf /boot/efi/limine.conf /efi/limine.conf; do
+            if [ -f "$lconf" ]; then
+                sudo awk -v ver="($kern)" '
+                    /^\// { if (index($0, ver) > 0) skip = 1; else skip = 0 }
+                    !skip { print }
+                ' "$lconf" > "${lconf}.tmp" && sudo mv "${lconf}.tmp" "$lconf"
+            fi
+        done
+    done
+
+    if command -v limine-update &>/dev/null; then
+        sudo limine-update >/dev/null 2>&1 || true
+    fi
+    echo "Stale boot files and Limine entries removed."
+}
+
+# ── Execute Sequence ──────────────────────────────────────────────────────────
+clean_source_tree "${1:-}"
 clean_stale_dkms "${1:-}"
+clean_stale_boot_files "${1:-}"
