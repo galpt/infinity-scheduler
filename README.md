@@ -64,8 +64,14 @@ cat /proc/sys/kernel/infinity_stats   # → CPU + GPU accounting table
 ```
 
 > [!NOTE]
-> 1. Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and drain counters.
-> 2. The GPU rows only track DRM-scheduler-based GPUs (e.g., AMD, Intel Xe/Arc, and the open-source nouveau/NVK stack). NVIDIA's drivers never submit jobs through the DRM GPU scheduler, so on NVIDIA-only machines the GPU section reads zero ("No GPU jobs recorded yet") even while the CPU features work normally. This is by design. Switching to nouveau/NVK would restore the counters, but it could cost roughly half the frame rate and would lose ray tracing, CUDA, and NVENC. It's not a trade worth making just for a stats table.
+> Use `cat` instead of `sysctl` for `infinity_stats` — it outputs a multi-line table that `sysctl` cannot display properly. The stats include idle compensation, cross-scheduler coupling, and drain counters.
+
+## Using nouveau
+
+> [!NOTE]
+> The GPU rows only track DRM-scheduler-based GPUs (e.g., AMD, Intel Xe/Arc, and the open-source nouveau/NVK stack). NVIDIA's drivers never submit jobs through the DRM GPU scheduler, so on NVIDIA-only machines the GPU section reads zero ("No GPU jobs recorded yet") even while the CPU features work normally. This is by design. Switching to nouveau/NVK would restore the counters, but it could cost roughly half the frame rate and would lose ray tracing, CUDA, and NVENC. It's not a trade worth making just for a stats table.
+
+A `gpu-switcher.sh` script is included in the `tools/` directory so you can easily switch from NVIDIA to nouveau and vice versa. It has been tested on CachyOS and requires btrfs if you want the automatic pre-switch snapshot. The nouveau driver is needed to get the benefits of the GPU scheduling included in Infinity. This might be beneficial if you want fairness between apps that are competing for GPU time.
 
 ## Tunables
 
