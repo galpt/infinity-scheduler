@@ -76,7 +76,7 @@ A `gpu-switcher.sh` script is included in the `tools/` directory so you can easi
 > [!TIP]
 > Use this command to check whether you are using nouveau or nvidia:
 > ```
-> lsmod | grep -qE '^nvidia ' && echo "NVIDIA driver" || lsmod | grep -qE '^nouveau ' && echo "nouveau driver" || echo "neither"
+> lsmod | grep -E '^(nvidia|nouveau) ' || echo "neither"
 > ```
 
 ## Tunables
