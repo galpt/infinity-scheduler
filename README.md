@@ -3,7 +3,7 @@
 A fair-share CPU + GPU scheduler based on the limit concept in mathematics — every scheduling parameter approaches its bound asymptotically without discrete thresholds.
 
 > [!TIP]
-> A v5 of the Infinity scheduler can be found [here](https://github.com/galpt/infinity-sched-new). It's encouraged to use v5 whenever possible. CachyOS users can try v5 using the CachyOS Kernel Manager. Support for more kernel versions or distros will come gradually.
+> Version 5 of the Infinity scheduler can be found [here](https://github.com/galpt/infinity-sched-new). You are encouraged to use v5 whenever possible. CachyOS users can install v5 through the CachyOS Kernel Manager. Support for more kernel versions or distros will come gradually.
 
 ## Project structure
 
